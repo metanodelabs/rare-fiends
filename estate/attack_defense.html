@@ -1,0 +1,628 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Rare Fiends — attack and defense</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Silkscreen:wght@400;700&family=Sometype+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --ink: #FFFFFF; --paper: #000000; --signal: #CCFF00;
+  --dim: rgba(255,255,255,.62); --faint: rgba(255,255,255,.28);
+  --display: Silkscreen, monospace; --mono: "Sometype Mono", ui-monospace, monospace;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; background: #090B09; color: var(--ink); }
+body { font-family: var(--mono); font-size: 21px; line-height: 1.55; }
+a { color: var(--signal); }
+header { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid rgba(204,255,0,.4); background: #000;
+  position: sticky; top: 0; z-index: 5; padding-top: max(10px, env(safe-area-inset-top)); flex-wrap: wrap; }
+.brand { display: flex; align-items: center; gap: 9px; font-family: var(--display); font-size: 19px; letter-spacing: .12em; }
+.brand i { width: 8px; height: 8px; background: var(--signal); border-radius: 50%; }
+.brand span { color: var(--dim); }
+header nav { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; }
+header nav a { font-family: var(--display); font-size: 14px; letter-spacing: .1em; color: #fff; text-decoration: none; border: 1px solid var(--faint); padding: 5px 7px; }
+header nav a:hover { border-color: var(--signal); color: var(--signal); }
+main { max-width: 1040px; margin: 0 auto; padding: 24px 16px 60px; }
+h1 { font-family: var(--display); font-weight: 400; font-size: clamp(35px, 5vw, 60px); line-height: 1; margin: 6px 0 12px; letter-spacing: .02em; }
+.lede { color: rgba(255,255,255,.78); max-width: 760px; margin: 0 0 14px; }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; font-size: 21px; color: var(--dim); margin: 0 0 8px; }
+.tag { display: inline-block; font-family: var(--display); font-size: 13px; letter-spacing: .1em; padding: 2px 5px; vertical-align: middle; white-space: nowrap; }
+.tag.game { background: var(--signal); color: #000; }
+.tag.ph { border: 1px dashed rgba(255,255,255,.7); color: #fff; }
+.tag.prop { border: 1px solid rgba(255,255,255,.7); color: #fff; }
+.tag.open { border: 1px dashed var(--faint); color: var(--dim); }
+.tag.try { border: 1px solid var(--signal); color: var(--signal); }
+section { border-top: 1px solid var(--faint); padding: 26px 0 6px; scroll-margin-top: 60px; }
+h2 { font-family: var(--display); font-weight: 400; font-size: 22px; letter-spacing: .08em; margin: 0 0 4px; display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+h2 .n { color: var(--signal); }
+.q { color: var(--dim); font-size: 19px; margin: 0 0 14px; max-width: 780px; }
+h3 { font-family: var(--display); font-weight: 400; font-size: 18px; letter-spacing: .1em; color: var(--dim); margin: 18px 0 8px; }
+p { margin: 0 0 10px; max-width: 780px; }
+p b, li b, td b { color: #fff; font-weight: 500; }
+.formula { font-family: var(--mono); background: #000; border: 1px solid var(--faint); border-left: 3px solid var(--signal); padding: 10px 12px; margin: 0 0 12px;
+  overflow-x: auto; white-space: pre; font-size: 19px; color: #fff; }
+.tw { overflow-x: auto; margin: 0 0 12px; border: 1px solid var(--faint); }
+table { border-collapse: collapse; width: 100%; font-size: 19px; font-variant-numeric: tabular-nums; }
+th, td { padding: 7px 10px; border-bottom: 1px solid rgba(255,255,255,.12); text-align: right; white-space: nowrap; }
+th { font-family: var(--display); font-weight: 400; font-size: 14px; letter-spacing: .1em; color: var(--dim); background: rgba(255,255,255,.03); }
+th:first-child, td:first-child { text-align: left; }
+tr:last-child td { border-bottom: 0; }
+td input { width: 64px; background: #000; color: #fff; border: 1px solid var(--faint); font: 19px var(--mono); padding: 3px 5px; text-align: right; }
+td input.changed { border-color: var(--signal); color: var(--signal); }
+.note { border: 1px dashed var(--faint); padding: 10px 12px; margin: 0 0 12px; font-size: 19px; color: rgba(255,255,255,.8); max-width: 900px; }
+.note b { color: #fff; }
+.note.warn { border-color: rgba(204,255,0,.55); }
+.src { font-size: 18px; color: var(--dim); }
+.src code { color: rgba(255,255,255,.8); }
+.toc { display: flex; flex-wrap: wrap; gap: 6px; margin: 14px 0 6px; }
+.toc a { font-family: var(--display); font-size: 14px; letter-spacing: .08em; color: #fff; text-decoration: none; border: 1px solid var(--faint); padding: 5px 7px; }
+.toc a:hover { border-color: var(--signal); color: var(--signal); }
+#status { font-family: var(--display); font-size: 16px; letter-spacing: .1em; color: var(--dim); }
+iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -10px; border: 0; visibility: hidden; }
+
+/* controls */
+.row { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin: 0 0 10px; }
+.row .k { font-family: var(--display); font-size: 14px; letter-spacing: .1em; color: var(--dim); min-width: 88px; }
+.btn { font-family: var(--display); font-size: 15px; letter-spacing: .08em; background: none; color: #fff; border: 1px solid rgba(255,255,255,.5); padding: 6px 9px; cursor: pointer; }
+.btn:hover { border-color: #fff; }
+.btn[aria-pressed="true"] { background: var(--signal); color: #000; border-color: var(--signal); }
+.btn.go { background: var(--signal); color: #000; border-color: var(--signal); padding: 9px 14px; font-size: 18px; }
+.btn[disabled] { opacity: .4; cursor: default; }
+.seg { display: inline-flex; flex-wrap: wrap; }
+.seg .btn + .btn { border-left: 0; }
+.squad { display: inline-flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.chip { font-family: var(--display); font-size: 16px; border: 1px solid #fff; padding: 5px 7px; background: none; color: #fff; cursor: pointer; }
+.chip:hover { border-color: var(--signal); color: var(--signal); text-decoration: line-through; }
+.add { display: inline-flex; gap: 2px; margin-left: 6px; }
+.add .btn { padding: 5px 6px; }
+input.word { flex: 1; min-width: 220px; background: #000; color: #fff; border: 1px solid var(--faint); font: 20px var(--mono); padding: 6px 7px; }
+.field { width: 100%; height: 190px; display: block; background: #000; border: 1px solid var(--faint); margin: 0 0 8px; }
+.verdict { font-family: var(--display); font-size: 24px; letter-spacing: .06em; margin: 0 0 6px; }
+.verdict b { color: var(--signal); font-weight: 400; }
+.log { max-height: 280px; overflow: auto; border: 1px solid var(--faint); margin: 0 0 12px; }
+.log table td, .log table th { padding: 4px 8px; font-size: 20px; }
+.log tr.hit td { color: #fff; }
+.log tr.miss td { color: var(--dim); }
+.log td.k { color: var(--signal); }
+
+/* the generation matrices */
+.mats { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 12px; margin: 0 0 12px; }
+.mat h3 { margin-top: 0; }
+.mat table td, .mat table th { text-align: center; padding: 5px 2px; }
+.mat table td:first-child, .mat table th:first-child { padding-left: 6px; }
+.mat td { font-family: var(--display); font-size: 16px; color: #000; }
+.mat td.lab, .mat th { color: var(--dim); background: none; font-size: 14px; }
+.checks { list-style: none; padding: 0; margin: 0 0 12px; max-width: 900px; }
+.checks li { display: grid; grid-template-columns: 82px 1fr; gap: 10px; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,.1); font-size: 19px; }
+.checks .res { font-family: var(--display); font-size: 14px; letter-spacing: .1em; padding: 3px 5px; height: fit-content; text-align: center; }
+.checks .res.pass { background: var(--signal); color: #000; }
+.checks .res.fail { border: 1px solid #fff; color: #fff; }
+.checks .res.wait { border: 1px dashed var(--faint); color: var(--dim); }
+.checks .why { color: var(--dim); font-size: 20px; display: block; }
+.bar { height: 4px; background: rgba(255,255,255,.12); margin: 6px 0 12px; }
+.bar i { display: block; height: 100%; width: 0; background: var(--signal); }
+/* where a Friend stands */
+.twocol { display: grid; grid-template-columns: minmax(0, 300px) minmax(0, 1fr); gap: 16px; align-items: start; margin: 0 0 12px; }
+@media (max-width: 760px) { .twocol { grid-template-columns: minmax(0, 1fr); } }
+.twocol > * { min-width: 0; }
+canvas.tile { width: 100%; max-width: 300px; aspect-ratio: 1; display: block; background: #000; border: 1px solid var(--faint); }
+canvas.reach { width: 100%; display: block; background: #000; border: 1px solid var(--faint); }
+canvas.base { width: 100%; display: block; background: #000; border: 1px solid var(--faint); cursor: pointer; touch-action: manipulation; }
+.hint { font-size: 20px; color: var(--dim); margin: 0 0 8px; }
+.hint b { color: var(--signal); font-weight: 400; }
+.dlist { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 10px; }
+.dchip { font-family: var(--display); font-size: 14px; letter-spacing: .06em; border: 1px solid var(--faint); padding: 4px 6px; background: none; color: #fff; cursor: pointer; }
+.dchip[aria-pressed="true"] { border-color: var(--signal); color: var(--signal); }
+.dchip.moved { border-style: dashed; }
+.dorders { display: inline-flex; flex-wrap: wrap; gap: 4px; align-items: center; font-family: var(--display); font-size: 14px; letter-spacing: .06em; color: var(--signal); margin-left: 6px; }
+.dchip.picked { outline: 2px solid var(--signal); outline-offset: -2px; }
+.dchip[data-everyone][aria-pressed="true"] { background: var(--signal); color: #000; }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><i></i>RARE FIENDS<span>· ATTACK AND DEFENSE</span></div>
+  <nav><a href="base.html">BASE</a><a href="economy.html">ECONOMY</a><a href="challenge.html">CHALLENGE</a></nav>
+</header>
+<main>
+  <h1>ATTACK &amp; DEFENSE</h1>
+  <p class="lede">The fight algorithm the game will run on chain, here to test. One Entropy word from the FriendSDK decides a whole fight: every shot
+    takes the next roll off it. The same word, numbers and line-up always give the same fight, here and in <code>RareCombat.sol</code>.</p>
+  <div class="legend">
+    <span><span class="tag game">IN THE GAME</span> read live from the base's code</span>
+    <span><span class="tag ph">PLACEHOLDER</span> in the code, a starting plan, not balanced</span>
+    <span><span class="tag prop">PROPOSED</span> needed by the algorithm, not decided</span>
+    <span><span class="tag try">TRYING</span> changed on this page only</span>
+  </div>
+  <div id="status">READING THE GAME…</div>
+  <nav class="toc" id="toc"></nav>
+  <div id="out"></div>
+</main>
+<iframe class="probe" id="pEstate" src="base.html?econ=1" tabindex="-1" aria-hidden="true" title=""></iframe>
+<script src="chance.js"></script>
+<script src="combat.js"></script>
+<script src="chainlive.js"></script>
+<script>
+(() => {
+  'use strict';
+  const $ = (id) => document.getElementById(id);
+  const T = { game: '<span class="tag game">IN THE GAME</span>', ph: '<span class="tag ph">PLACEHOLDER</span>',
+              prop: '<span class="tag prop">PROPOSED</span>', try: '<span class="tag try">TRYING</span>', open: '<span class="tag open">NOT DECIDED</span>' };
+  const GENS = [1, 2, 3, 4, 5, 6];
+  const QUAD = (sx, sy) => ((sy % 2 + 2) % 2 ? 'S' : 'N') + ((sx % 2 + 2) % 2 ? 'E' : 'W');
+  const pct = (v) => Math.round(v * 100) + '%';
+  const secs = (ms) => (ms / 1000).toLocaleString('en-US', { maximumFractionDigits: 1 }) + ' s';
+  const sec = (id, n, title, q, body) => '<section id="' + id + '"><h2><span class="n">' + n + '</span>' + title + '</h2><p class="q">' + q + '</p>' + body + '</section>';
+  const PROPOSED = { speed: 1, maxMs: 120000, coverDiv: 2, defendTiles: 5 };
+  const ORDER_LABEL = ['HOLD', 'ENGAGE', 'ENGAGE + DEFEND', 'FALL BACK'];
+  const PROPOSED0 = JSON.stringify(PROPOSED);
+  const SIG = '#CCFF00';
+
+  let GAME, E, R, BASE, HOME;                      // the game's numbers, the numbers in use, the fight's tables, the base, the base as the estate had it
+  const trying = () => JSON.stringify(E) !== JSON.stringify(GAME) || JSON.stringify(PROPOSED) !== PROPOSED0;
+  const rebuild = () => { R = Combat.rulesFrom(E, PROPOSED); };
+
+  function read() {
+    try { const es = $('pEstate').contentWindow.base; if (es && es.ECON && es.ECON.combat && es.defense) return es; } catch (e) { /* opened from a file */ }
+    return null;
+  }
+  let tries = 0;
+  (function wait() {
+    const es = read();
+    if (es) {
+      const got = es.ECON;
+      GAME = JSON.parse(JSON.stringify({ hp: got.hp, weapons: got.weapons, wallHp: got.wallHp, combat: got.combat }));
+      E = JSON.parse(JSON.stringify(GAME));
+      BASE = JSON.parse(JSON.stringify(es.defense())); HOME = JSON.parse(JSON.stringify(BASE));
+      $('pEstate').remove(); rebuild(); build(); return;
+    }
+    if (++tries > 150) { $('status').textContent = 'COULD NOT READ THE GAME. OPEN THIS PAGE FROM THE SITE, NOT FROM A FILE.'; return; }
+    setTimeout(wait, 100);
+  })();
+
+  // ---------- the page ----------
+  function build() {
+    const out = [];
+    const d0 = BASE.defenders[0];
+    out.push(sec('spots', '01', 'WHERE A FRIEND STANDS', 'Every tile of the map is split into four spots, one per quadrant. A Friend always stands on one spot, and that spot is where it is in a fight: what it can reach, what can reach it, and whether a stone landing next to it hurts.',
+      '<div class="twocol"><canvas class="tile" id="tileCv" width="600" height="600"></canvas><div>' +
+      '<div class="formula">on the base        a Friend stands at (x, y)\n' +
+      'its tile           (⌊x⌋, ⌊y⌋)\n' +
+      'its spot           (⌊2x⌋, ⌊2y⌋)          one spot is half a tile\n' +
+      'its quadrant       north or south: ⌊2y⌋ even or odd\n' +
+      '                   west or east:   ⌊2x⌋ even or odd\n' +
+      'distance           max(|Δx|, |Δy|) spots  how a king moves in chess:\n' +
+      '                                          the 8 spots around you are all 1 away</div>' +
+      '<p>On the base, tapping the ground sends a Friend to the <b>middle of the quadrant</b> you tapped, and the selected Friend\'s quadrant is outlined in green. ' +
+      'So where you leave a Friend is exactly one spot, and it is two small whole numbers: easy for a contract to store.</p>' +
+      (d0 ? '<p class="src">On your base now: <b>' + d0.name + '</b> is on spot (' + d0.x + ', ' + d0.y + '): tile (' + Math.floor(d0.x / 2) + ', ' + Math.floor(d0.y / 2) + '), the ' + QUAD(d0.x, d0.y) + ' quadrant.</p>' : '') +
+      '</div></div>' +
+      '<h3>WHAT EACH WEAPON REACHES, IN SPOTS</h3><p class="hint">The Friend in the middle; everything shaded is in reach. <b>Green</b> is the extra a watchtower gives. The catapult\'s stone splashes: full damage on the spot it lands, half a spot away, a quarter two away.</p>' +
+      '<canvas class="reach" id="reachCv"></canvas>'));
+
+    out.push(sec('numbers', '02', 'THE NUMBERS', 'What each generation fights with. Read from the base (the armoury uses the same numbers). Change any to try it: the fights, the tables and the checks below all rerun; the game itself doesn\'t change.',
+      '<div id="numtab"></div>' +
+      '<h3>WHAT THE ALGORITHM NEEDS THAT ISN\'T DECIDED ' + T.prop + '</h3>' +
+      '<div class="tw"><table><thead><tr><th>Number</th><th>Using</th><th style="text-align:left">Why it matters</th></tr></thead><tbody>' +
+      '<tr><td>Walking pace in a fight</td><td><input id="pspeed" type="number" step="0.1" min="0.1" value="' + PROPOSED.speed + '"> tiles/s</td><td style="text-align:left;white-space:normal">Friends on the base ease toward each step; there is no set speed. It decides how many free shots a longer weapon gets while the other closes in.</td></tr>' +
+      '<tr><td>The fight\'s clock</td><td><input id="pmax" type="number" step="10" min="10" value="' + PROPOSED.maxMs / 1000 + '"> s</td><td style="text-align:left;white-space:normal">If the attack hasn\'t won by then, the defense holds. It also caps the gas.</td></tr>' +
+      '<tr><td>Cover behind a wall</td><td>÷ <input id="pcover" type="number" step="1" min="1" value="' + PROPOSED.coverDiv + '"></td><td style="text-align:left;white-space:normal">A Friend right behind a standing wall is harder to hit from the far side: its chance of being hit is divided by this.</td></tr>' +
+      '<tr><td>How far ENGAGE + DEFEND strays</td><td><input id="pengage" type="number" step="0.5" min="0.5" value="' + PROPOSED.defendTiles + '"> tiles</td><td style="text-align:left;white-space:normal">A Friend on ENGAGE + DEFEND never goes further than this from its post; on ENGAGE there is no limit. FALL BACK starts at half HP.</td></tr>' +
+      '<tr><td>Splash falls off</td><td>½ a spot</td><td style="text-align:left;white-space:normal">Full on the spot the stone lands, halved for every spot away. Why spreading out matters.</td></tr>' +
+      '</tbody></table></div>' +
+      '<div class="row"><button class="btn" type="button" id="reset" disabled>BACK TO THE GAME\'S NUMBERS</button><span class="src" id="trynote"></span></div>'));
+
+    out.push(sec('rules', '03', 'THE RULES', 'The algorithm in words. <code>combat.js</code> and <code>RareCombat.sol</code> are the same thing, line for line.',
+      '<div class="formula">THE BASE     your own plot as it stands: its walls, its watchtowers, and every Friend on the spot you left it,\n' +
+      '             with its standing order. Where you leave a Friend, and what you told it, is how it fights.\n' +
+      'THE ATTACK   comes in from one side, in a line off the base, and walks in a spot at a time.\n' +
+      'TURNS        a Friend acts when it is ready: at the start, then after each action. Several at once:\n' +
+      '             attackers first, then defenders, in line-up order.\n' +
+      '  attacker   aims at the nearest defender. In reach: shoots. Out of reach: steps one spot toward it\n' +
+      '             (of the 8 around it, the nearest; ties to the straighter line, then N NE E SE S SW W NW).\n' +
+      '             If that spot is a standing wall, it breaks the wall, and keeps at it until it falls.\n' +
+      '  defender   follows its STANDING ORDER, set beforehand (its player needn\'t be online):\n' +
+      '               HOLD       stays on its spot: shoots the nearest attacker in reach, or waits\n' +
+      '               ENGAGE     goes after the nearest attacker wherever it is, however far off: nothing can\n' +
+      '                          shell the base from beyond everyone\'s reach unanswered\n' +
+      '               ENGAGE +   the same, but never further than ' + PROPOSED.defendTiles + ' tiles from its post: it meets what comes near\n' +
+      '               DEFEND     and walks back once nothing is, so the base is never left open\n' +
+      '               FALL BACK  holds; at half its HP or less, retreats to the keep without stopping to shoot\n' +
+      '             A defender never steps onto a standing wall (bar back onto its own post). A tower\'s reach counts\n' +
+      '             only while it is up there.\n' +
+      '             Ready again after the weapon\'s shot time; after a step or a wait, half a second.\n' +
+      'A SHOT       one roll, 0–9999, off the Entropy word (the FriendSDK\'s settle() formula):\n' +
+      '               roll = keccak256(abi.encode(word, contract, chain id, fight id, shot number)) % 10000\n' +
+      '             it lands if roll &lt; chance, in basis points:\n' +
+      '               at a Friend   attacker HP × 10000 ÷ (attacker HP + defender HP)\n' +
+      '                             ÷ cover, if a standing wall spot right next to it is between it and the shooter\n' +
+      '               at a wall     ' + GAME.combat.landVsBuildingBps + ' (it doesn\'t dodge)\n' +
+      'DAMAGE       the weapon\'s (× its building bonus at a wall). A crossbow bolt carries on into the enemy right\n' +
+      '             behind the target. A catapult stone that lands on a Friend: full damage on that spot, half one\n' +
+      '             spot away, a quarter two away. One that hits a wall stops there.\n' +
+      'REACH        the weapon\'s range × 2 spots. Up a watchtower: +' + Combat.spots(GAME.combat.towerRange) + ' spots, except melee, which only reaches\n' +
+      '             the foot of the tower (' + Combat.spots(GAME.combat.dropRange) + ' spot). A catapult can\'t go up a tower.\n' +
+      'THE END      every defender down: the attack wins. Every attacker down, or the clock out: the defense holds.\n' +
+      '             The Genesis never fights.</div>'));
+
+    out.push(sec('fight', '04', 'YOUR BASE, ATTACKED', 'Your base as the game has it, from above, north up. Pick an attack and fight. Then move your Friends and fight again with the same word: see what moving them does.',
+      '<p class="hint"><b>To move a Friend:</b> tap it (or its name below), then tap the spot it should stand on. Several can share a spot. ' +
+      '<b>Its standing order</b> (what it does if attacked while you are away) is set on the base, or here once it is picked: HOLD stays put, ENGAGE goes after whatever is attacking, however far off; ENGAGE + DEFEND does the same but never strays more than ' + PROPOSED.defendTiles + ' tiles from its post; FALL BACK retreats to the keep once down to half its HP. ' +
+      '<b>PICK MANY</b> to give one order to several at once.</p>' +
+      '<div class="dlist" id="dlist"></div>' +
+      '<canvas class="base" id="baseCv"></canvas>' +
+      '<div class="row" style="margin-top:10px"><span class="k">ATTACKERS</span><span class="squad" id="sqA"></span></div>' +
+      '<div class="row"><span class="k">COMES FROM</span><span class="seg">' + Combat.SIDES.map(v => '<button class="btn" type="button" data-side="' + v + '">' + { N: 'NORTH', E: 'EAST', S: 'SOUTH', W: 'WEST' }[v] + '</button>').join('') + '</span>' +
+        '<span class="k">STARTS</span><span class="seg">' + [2, 4, 6].map(n => '<button class="btn" type="button" data-gap="' + n + '">' + n + ' TILES OUT</button>').join('') + '</span>' +
+        '<button class="btn" type="button" id="homeBtn">BACK TO WHERE THEY STAND ON THE BASE</button></div>' +
+      '<div class="row"><span class="k">ENTROPY WORD</span><input class="word" id="word" spellcheck="false"><button class="btn" type="button" id="newword">NEW WORD</button><button class="btn go" type="button" id="fightBtn">FIGHT</button></div>' +
+      '<div class="verdict" id="verdict"></div>' +
+      '<div class="row"><span class="k">OVER 200 WORDS</span><span id="odds" class="src">—</span></div>' +
+      '<div class="log" id="log"></div>'));
+
+    out.push(sec('gens', '05', 'GENERATION 1 TO 6', 'Does it pan out? Every generation against every generation, one on one, on a bare proving ground: the defender on its spot, the attack from the north. The cell is how often the attack wins.',
+      '<div class="bar"><i id="prog"></i></div>' +
+      '<h3>WHAT "PANS OUT" SHOULD MEAN ' + T.prop + '</h3><p class="src">My reading of the aim. Tell me which of these are right, and what else a generation should be able to do.</p>' +
+      '<ul class="checks" id="checks"></ul>' +
+      '<div class="mats" id="mats"></div>' +
+      '<h3>HOW MANY IT TAKES</h3><p class="src">The fewest of a generation (up to 6) that beat one of another behind a log wall at least half the time. — means 6 aren\'t enough.</p>' +
+      '<div id="takes"></div>'));
+
+    out.push(sec('chain', '06', 'ON CHAIN', 'Can this go straight into a contract on Robinhood Chain?',
+      '<p><b>Yes.</b> Robinhood Chain (id ' + Chance.CHAIN_ID + ') is an Arbitrum chain that runs the EVM, so Solidity works as it does anywhere else. The FriendSDK\'s own contract ' +
+      '(<code>ChanceGame.sol</code>) is Solidity 0.8.36 for the Cancun EVM on this chain; these use the same compiler, settings, OpenZeppelin release and Entropy interface. ' +
+      'A spot is two small whole numbers, so a Friend\'s position is cheap to store and to check.</p>' +
+      '<div class="tw"><table><thead><tr><th>File</th><th style="text-align:left">What it is</th></tr></thead><tbody>' +
+      '<tr><td><code>contracts/RareChance.sol</code></td><td style="text-align:left;white-space:normal">The FriendSDK\'s roll, one line, and its Entropy V2 interface.</td></tr>' +
+      '<tr><td><code>contracts/RareCombat.sol</code></td><td style="text-align:left;white-space:normal">This fight on spots, as a library, plus a view contract that replays any fight from its word.</td></tr>' +
+      '<tr><td><code>contracts/RareDuel.sol</code></td><td style="text-align:left;white-space:normal">The challenge: sealed picks, reveal, one Entropy request, settle, forfeit.</td></tr>' +
+      '<tr><td><code>contracts/paritycheck.js</code></td><td style="text-align:left;white-space:normal">Compiles them and runs the bytecode on an EVM set to chain ' + Chance.CHAIN_ID + ', checking every result against these pages on the same words.</td></tr>' +
+      '</tbody></table></div>' +
+      '<h3>WHAT THE CHAIN CHANGES</h3><ul>' +
+      '<li><b>Randomness comes from Entropy, never the block.</b> On an Arbitrum chain <code>prevrandao</code> isn\'t random. Every roll derives from the Pyth Entropy word the FriendSDK uses.</li>' +
+      '<li><b>A fight costs gas, and a long one a lot.</b> <span id="gasLine">…</span> ' +
+      'The cheaper way: the contract stores the word, the line-ups and the spots, and the fight is replayed off chain by anyone, with <code>RareCombatLab</code> to settle a dispute. ' + T.open + '</li>' +
+      '<li><b>The Entropy fee</b> (<span id="feeLine">reading the chain…</span>) is paid out of the game\'s pool, and disclosed. See 07.</li>' +
+      '</ul>'));
+
+    out.push(sec('dice', '07', 'PAYING FOR THE DICE', 'Every fight and challenge needs a fair random number, and Pyth Entropy charges for each one it sends. Two ways to buy them, for one era, at today\'s prices read from the chain.',
+      '<div id="diceStatus" class="src">READING THE CHAIN…</div><div id="dice"></div>'));
+
+    $('out').innerHTML = out.join('');
+    $('toc').innerHTML = [['spots', 'WHERE A FRIEND STANDS'], ['numbers', 'THE NUMBERS'], ['rules', 'THE RULES'], ['fight', 'YOUR BASE, ATTACKED'], ['gens', 'GEN 1 TO 6'], ['chain', 'ON CHAIN'], ['dice', 'PAYING FOR THE DICE']]
+      .map(([id, t]) => '<a href="#' + id + '">' + t + '</a>').join('');
+    $('status').textContent = 'READ FROM THE GAME · ' + new Date().toLocaleString();
+    drawTile(); numbers(); wire(); setup(); fight(); runGens();
+    ChainLive.read().then(dice);
+    addEventListener('resize', () => { drawReach(); drawBase(LAST); });
+  }
+
+  // ---------- 01: one tile, and every weapon's reach ----------
+  function drawTile() {
+    const c = $('tileCv').getContext('2d'), S = 600, pad = 60, cell = (S - 2 * pad) / 2;
+    c.fillStyle = '#000'; c.fillRect(0, 0, S, S);
+    c.strokeStyle = '#fff'; c.lineWidth = 3; c.strokeRect(pad, pad, 2 * cell, 2 * cell);
+    c.setLineDash([8, 8]); c.lineWidth = 2; c.strokeStyle = 'rgba(255,255,255,.55)';
+    c.beginPath(); c.moveTo(pad + cell, pad); c.lineTo(pad + cell, pad + 2 * cell); c.moveTo(pad, pad + cell); c.lineTo(pad + 2 * cell, pad + cell); c.stroke(); c.setLineDash([]);
+    c.font = '22px Silkscreen, monospace'; c.textAlign = 'center'; c.textBaseline = 'middle';
+    [['NW', 0, 0], ['NE', 1, 0], ['SW', 0, 1], ['SE', 1, 1]].forEach(([q, i, j]) => {
+      const cx = pad + cell * (i + 0.5), cy = pad + cell * (j + 0.5);
+      c.fillStyle = q === 'NE' ? 'rgba(204,255,0,.18)' : 'rgba(0,0,0,0)'; c.fillRect(pad + cell * i + 2, pad + cell * j + 2, cell - 4, cell - 4);
+      c.fillStyle = q === 'NE' ? SIG : '#fff'; c.fillText(q, cx, cy - 22);
+      c.font = '15px "Sometype Mono", monospace'; c.fillStyle = 'rgba(255,255,255,.7)';
+      c.fillText('spot (2tx' + (i ? '+1' : '') + ', 2ty' + (j ? '+1' : '') + ')', cx, cy + 14);
+      c.font = '22px Silkscreen, monospace';
+    });
+    // a Friend on the NE spot, at its middle
+    const fx = pad + cell * 1.5, fy = pad + cell * 0.5 + 40;
+    c.fillStyle = SIG; c.fillRect(fx - 9, fy - 9, 18, 18);
+    c.font = '15px Silkscreen, monospace'; c.fillStyle = 'rgba(255,255,255,.7)'; c.fillText('TILE (tx, ty)', S / 2, S - 28);
+    c.fillText('N ↑', S / 2, 28);
+  }
+  function drawReach() {
+    const cv = $('reachCv'); if (!cv) return;
+    const dpr = devicePixelRatio || 1, W = cv.clientWidth, cols = W < 620 ? 2 : 4, per = W / cols;
+    const n = 12 * 2 + 1, cell = Math.max(3, Math.min(7, Math.floor((per - 24) / n))), grid = cell * n, rows = Math.ceil(7 / cols);
+    const H = rows * (grid + 40) + 10; cv.style.height = H + 'px'; cv.width = W * dpr; cv.height = H * dpr;
+    const c = cv.getContext('2d'); c.setTransform(dpr, 0, 0, dpr, 0, 0); c.clearRect(0, 0, W, H);
+    const panel = (k, title, fn) => {
+      const ox = (k % cols) * per + (per - grid) / 2, oy = Math.floor(k / cols) * (grid + 40) + 26;
+      c.fillStyle = 'rgba(255,255,255,.7)'; c.font = '9px Silkscreen, monospace'; c.textAlign = 'center'; c.fillText(title, ox + grid / 2, oy - 9);
+      for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
+        const dx = i - 12, dy = j - 12, f = fn(Math.max(Math.abs(dx), Math.abs(dy)), dx, dy);
+        c.fillStyle = f || 'rgba(255,255,255,.05)'; c.fillRect(ox + i * cell, oy + j * cell, cell - (cell > 4 ? 1 : 0), cell - (cell > 4 ? 1 : 0));
+      }
+      if (k < 6) { c.fillStyle = '#fff'; c.fillRect(ox + 12 * cell, oy + 12 * cell, cell - 1, cell - 1); }
+    };
+    GENS.forEach((g, k) => {
+      const w = E.weapons[g], r = R.reach[g], up = R.siege[g] ? 0 : (R.melee[g] ? R.dropReach : r + R.towerReach);
+      panel(k, 'GEN ' + g + ' · ' + w.n + ' · ' + r + ' SPOT' + (r === 1 ? '' : 'S'), (d) =>
+        d === 0 ? null : d <= r ? 'rgba(255,255,255,.45)' : (up && d <= up) ? 'rgba(204,255,0,.4)' : null);
+    });
+    const cat = GENS.find(g => R.area[g] > 0);
+    if (cat) panel(6, 'A STONE LANDING · SPLASH', (d) => d === 0 ? SIG : d <= R.area[cat] ? 'rgba(204,255,0,' + (0.7 / (1 << d)) + ')' : null);
+  }
+
+  // ---------- 02: the numbers, editable ----------
+  const get = (o, p) => p.split('.').reduce((a, k) => a[k], o);
+  const set = (o, p, v) => { const ks = p.split('.'), last = ks.pop(); ks.reduce((a, k) => a[k], o)[last] = v; };
+  function numbers() {
+    const cell = (path, v) => '<input data-path="' + path + '" type="number" min="' + (path.endsWith('rng') ? '0.5' : '1') + '" step="' + (path.endsWith('rng') ? '0.5' : '1') + '" value="' + v + '"' + (JSON.stringify(v) !== JSON.stringify(get(GAME, path)) ? ' class="changed"' : '') + '>';
+    const rows = GENS.map(g => { const w = E.weapons[g], m = E.combat.melee.includes(w.k);
+      return '<tr><td>Gen ' + g + '</td><td>' + cell('hp.' + g, E.hp[g]) + '</td><td>' + w.n + '</td><td>' + cell('weapons.' + g + '.dmg', w.dmg) + '</td><td>' + cell('weapons.' + g + '.rng', w.rng) + '</td><td>' + R.reach[g] + '</td>' +
+        '<td>' + secs(m ? E.combat.periodMs.melee : w.siege ? E.combat.periodMs.siege : E.combat.periodMs.ranged) + '</td><td>' + (w.vsBuilding ? '×' + w.vsBuilding : '—') + '</td><td style="text-align:left">' +
+        [w.pierce ? 'the bolt carries on into the next' : '', w.area ? 'splash ' + R.area[g] + ' spots' : '', w.siege ? 'can\'t go up a tower' : '', m ? 'melee' : ''].filter(Boolean).join(' · ') + '</td></tr>'; }).join('');
+    $('numtab').innerHTML = '<div class="tw"><table><thead><tr><th>Generation</th><th>HP ' + T.ph + '</th><th>Weapon ' + T.game + '</th><th>Damage ' + T.ph + '</th><th>Range, tiles ' + T.ph + '</th><th>Reach, spots</th><th>Shot every ' + T.game + '</th><th>At buildings</th><th>Special</th></tr></thead><tbody>' + rows +
+      '<tr><td>Log wall</td><td>' + cell('wallHp', E.wallHp) + '</td><td colspan="7" style="text-align:left">a level-1 wall section, two spots wide along its tile\'s back edge; shots at it land ' + E.combat.landVsBuildingBps / 100 + '% of the time</td></tr></tbody></table></div>';
+    $('numtab').querySelectorAll('input').forEach(inp => inp.onchange = () => {
+      const v = parseFloat(inp.value); if (!(v > 0)) { inp.value = get(E, inp.dataset.path); return; }
+      set(E, inp.dataset.path, v); after();
+    });
+    drawReach();
+  }
+  function after() {
+    rebuild(); numbers();
+    $('reset').disabled = !trying();
+    $('trynote').innerHTML = trying() ? T.try + ' these numbers are only on this page' : '';
+    fight(); runGens();
+  }
+
+  // ---------- 04: your base ----------
+  const SET = { attackers: [1, 3, 3, 5, 6, 6], side: 'N', gap: 4, word: Chance.randomWord(), pick: -1, picks: [], picking: false };
+  const setupOf = () => ({ attackers: SET.attackers.slice(), entry: Combat.entry(BASE, SET.side, SET.gap * 2),
+    defenders: BASE.defenders.map(d => ({ gen: d.gen, x: d.x, y: d.y, tower: d.tower, order: d.order || 0, fx: d.fx, fy: d.fy })), walls: BASE.walls.map(w => ({ x: w.x, y: w.y })) });
+  function setup() {
+    $('sqA').innerHTML = SET.attackers.map((g, i) => '<button class="chip" type="button" title="take out" data-rm="' + i + '">G' + g + '</button>').join('') +
+      (SET.attackers.length < Combat.MAX_SIDE ? '<span class="add">' + GENS.map(g => '<button class="btn" type="button" data-add="' + g + '">+' + g + '</button>').join('') + '</span>' : '');
+    document.querySelectorAll('[data-side]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.side === SET.side)));
+    document.querySelectorAll('[data-gap]').forEach(b => b.setAttribute('aria-pressed', String(+b.dataset.gap === SET.gap)));
+    $('word').value = SET.word;
+    $('dlist').innerHTML = BASE.defenders.map((d, i) => { const h = HOME.defenders[i], moved = h.x !== d.x || h.y !== d.y;
+      return '<button class="dchip' + (moved ? ' moved' : '') + (SET.picks.includes(i) ? ' picked' : '') + '" type="button" data-pick="' + i + '"' + (SET.pick === i ? ' aria-pressed="true"' : '') + '>D' + (i + 1) + ' · G' + d.gen +
+        ' · (' + d.x + ', ' + d.y + ') ' + QUAD(d.x, d.y) + (d.post ? ' · ' + d.post.toUpperCase() : '') + ' · ' + ORDER_LABEL[d.order || 0] + (moved ? ' · MOVED' : '') + '</button>'; }).join('') +
+      '<span class="dorders">' + (SET.picks.length ? SET.picks.length + ' PICKED · ' : SET.pick >= 0 ? 'D' + (SET.pick + 1) + ' IF ATTACKED: ' : 'IF ATTACKED: ') +
+        ORDER_LABEL.map((o, k) => '<button class="dchip" type="button" data-dorder="' + k + '"' +
+          (!SET.picks.length && SET.pick >= 0 && (BASE.defenders[SET.pick].order || 0) === k ? ' aria-pressed="true"' : '') + '>' + o + '</button>').join('') +
+        '<button class="dchip" type="button" id="pickMany"' + (SET.picking ? ' aria-pressed="true"' : '') + '>' + (SET.picking ? 'DONE PICKING' : 'PICK MANY') + '</button>' +
+        '<button class="dchip" type="button" data-everyone="1">EVERYONE</button></span>';
+    document.querySelectorAll('[data-rm]').forEach(b => b.onclick = () => { if (SET.attackers.length > 1) { SET.attackers.splice(+b.dataset.rm, 1); setup(); fight(); } });
+    document.querySelectorAll('[data-add]').forEach(b => b.onclick = () => { SET.attackers.push(+b.dataset.add); setup(); fight(); });
+    document.querySelectorAll('[data-pick]').forEach(b => b.onclick = () => {
+      const i = +b.dataset.pick;
+      if (SET.picking) { SET.picks = SET.picks.includes(i) ? SET.picks.filter(k => k !== i) : SET.picks.concat(i); }
+      else { SET.pick = SET.pick === i ? -1 : i; }
+      setup(); drawBase(LAST);
+    });
+    const pm = $('pickMany'); if (pm) pm.onclick = () => { SET.picking = !SET.picking; if (!SET.picking) SET.picks = []; setup(); drawBase(LAST); };
+    // an order goes to everyone picked, or to the one picked up, or (EVERYONE) to the whole base
+    document.querySelectorAll('[data-dorder]').forEach(b => b.onclick = () => {
+      const o = +b.dataset.dorder;
+      const who = SET.everyone ? BASE.defenders.map((_, i) => i) : SET.picks.length ? SET.picks : SET.pick >= 0 ? [SET.pick] : [];
+      who.forEach(i => { BASE.defenders[i].order = o; });
+      SET.everyone = false; setup(); fight();
+    });
+    document.querySelectorAll('[data-everyone]').forEach(b => b.onclick = () => { SET.everyone = !SET.everyone; b.setAttribute('aria-pressed', String(SET.everyone)); });
+  }
+  function wire() {
+    $('out').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-side],[data-gap]'); if (!b) return;
+      if (b.dataset.side) SET.side = b.dataset.side;
+      if (b.dataset.gap) SET.gap = +b.dataset.gap;
+      setup(); fight();
+    });
+    $('newword').onclick = () => { SET.word = Chance.randomWord(); setup(); fight(); };
+    $('word').onchange = () => { SET.word = $('word').value.trim(); fight(); };
+    $('fightBtn').onclick = () => fight();
+    $('homeBtn').onclick = () => { BASE = JSON.parse(JSON.stringify(HOME)); SET.pick = -1; setup(); fight(); };
+    $('pspeed').onchange = () => { const v = parseFloat($('pspeed').value); if (v > 0) PROPOSED.speed = v; after(); };
+    $('pmax').onchange = () => { const v = parseFloat($('pmax').value); if (v >= 10) PROPOSED.maxMs = Math.round(v) * 1000; after(); };
+    $('pengage').onchange = () => { const v = parseFloat($('pengage').value); if (v > 0) PROPOSED.defendTiles = v; after(); };
+    $('pcover').onchange = () => { const v = parseInt($('pcover').value, 10); if (v >= 1) PROPOSED.coverDiv = v; after(); };
+    $('reset').onclick = () => { E = JSON.parse(JSON.stringify(GAME)); Object.assign(PROPOSED, JSON.parse(PROPOSED0));
+      $('pspeed').value = PROPOSED.speed; $('pmax').value = PROPOSED.maxMs / 1000; $('pcover').value = PROPOSED.coverDiv; $('pengage').value = PROPOSED.defendTiles; after(); };
+    // tap a defender to pick it up, then a spot on the estate to put it down
+    $('baseCv').addEventListener('click', (e) => {
+      const g = GEO; if (!g) return;
+      const r = $('baseCv').getBoundingClientRect(), sx = Math.floor((e.clientX - r.left - g.ox) / g.cell) + g.x0, sy = Math.floor((e.clientY - r.top - 18) / g.cell) + g.y0;
+      const hit = BASE.defenders.findIndex(d => d.x === sx && d.y === sy);
+      if (SET.pick < 0) { if (hit >= 0) { SET.pick = hit; setup(); drawBase(LAST); } return; }
+      if (hit === SET.pick) { SET.pick = -1; setup(); drawBase(LAST); return; }
+      if (!BASE.tiles.some(t => t[0] === Math.floor(sx / 2) && t[1] === Math.floor(sy / 2))) return;   // on the estate only
+      const d = BASE.defenders[SET.pick]; d.x = sx; d.y = sy; d.tower = false; d.post = '';
+      SET.pick = -1; setup(); fight();
+    });
+  }
+  let anim = 0, LAST = null, GEO = null;
+  const who = (k) => k[0] === 'W' ? 'WALL ' + (+k.slice(1) + 1) : k[0] === 'A' ? 'A' + (+k.slice(1) + 1) + ' (G' + SET.attackers[+k.slice(1)] + ')' : 'D' + (+k.slice(1) + 1) + ' (G' + BASE.defenders[+k.slice(1)].gen + ')';
+  function fight() {
+    let res;
+    try { res = Combat.fight(R, setupOf(), { word: SET.word, contract: Chance.PREVIEW_CONTRACT, chainId: Chance.CHAIN_ID, fightId: 1 }, { log: true, trace: true }); }
+    catch (e) { $('verdict').textContent = 'That word isn\'t a 32-byte hex number.'; return; }
+    LAST = res;
+    const down = res.defenders.filter(h => h === 0).length;
+    $('verdict').innerHTML = (res.winner === 'attack' ? '<b>THE ATTACK WINS</b>' : '<b>THE DEFENSE HOLDS</b>') + ' · ' +
+      { wiped: 'every defender down', repelled: 'every attacker down', held: 'the clock ran out' }[res.reason] + ' · ' + secs(res.t) + ' · ' + down + ' of ' + res.defenders.length + ' defenders down · ' + res.shots + ' shots';
+    $('log').innerHTML = '<table><thead><tr><th>Time</th><th>Who</th><th>At</th><th>Roll</th><th>Needs under</th><th>Result</th></tr></thead><tbody>' +
+      res.log.map(s => '<tr class="' + (s.landed ? 'hit' : 'miss') + '"><td>' + secs(s.t) + '</td><td>' + who(s.who) + '</td><td>' + who(s.at) + (s.cover ? ' · IN COVER' : '') + '</td><td>' +
+        String(s.roll).padStart(4, '0') + '</td><td>' + s.bps + '</td><td' + (s.killed.length ? ' class="k"' : '') + '>' + (s.landed ? '−' + s.dmg + (s.also.length ? ' · splash ' + s.also.map(([k, n]) => who(k) + ' −' + n).join(', ') : '') +
+        (s.killed.length ? ' · DOWN: ' + s.killed.map(who).join(', ') : '') + (s.wall != null ? ' · wall ' + s.wall : '') : 'miss') + '</td></tr>').join('') + '</tbody></table>';
+    const m = Combat.sample(R, setupOf(), 200, 424242);
+    $('odds').innerHTML = 'this attack on this base wins <b>' + pct(m.attackWins) + '</b> · a fight lasts ' + secs(m.avgMs) + ' on average';
+    play(res);
+  }
+  // the base from above: tiles and their four spots, walls, towers, defenders; the attack comes in and fights
+  function drawBase(res, frame) {
+    const cv = $('baseCv'); if (!cv || !res) return;
+    const S = setupOf(), ent = S.entry;
+    const xs = BASE.tiles.map(t => t[0] * 2).concat(res.trace[0].U.map(u => u[0])), ys = BASE.tiles.map(t => t[1] * 2).concat(res.trace[0].U.map(u => u[1]));
+    const x0 = Math.min(...xs) - 1, x1 = Math.max(...xs) + 2, y0 = Math.min(...ys) - 1, y1 = Math.max(...ys) + 2;
+    const dpr = devicePixelRatio || 1, W = cv.clientWidth, cell = Math.max(8, Math.min(26, Math.floor(W / (x1 - x0)))), H = cell * (y1 - y0) + 18, ox = Math.floor((W - cell * (x1 - x0)) / 2);
+    cv.style.height = H + 'px'; cv.width = W * dpr; cv.height = H * dpr;
+    GEO = { x0, y0, cell, ox };
+    const c = cv.getContext('2d'); c.setTransform(dpr, 0, 0, dpr, 0, 0); c.clearRect(0, 0, W, H);
+    const X = (sx) => ox + (sx - x0) * cell, Y = (sy) => 18 + (sy - y0) * cell;
+    const f = frame || res.trace[res.trace.length - 1], start = res.trace[0];
+    BASE.tiles.forEach(([tx, ty]) => {                   // tiles, and their quadrants
+      c.fillStyle = '#151815'; c.fillRect(X(tx * 2), Y(ty * 2), cell * 2, cell * 2);
+      c.strokeStyle = 'rgba(255,255,255,.08)'; c.strokeRect(X(tx * 2) + cell + 0.5, Y(ty * 2) + 0.5, 0, cell * 2); c.strokeRect(X(tx * 2) + 0.5, Y(ty * 2) + cell + 0.5, cell * 2, 0);
+      c.strokeStyle = 'rgba(255,255,255,.28)'; c.strokeRect(X(tx * 2) + 0.5, Y(ty * 2) + 0.5, cell * 2, cell * 2);
+    });
+    BASE.towers.forEach(t => { c.strokeStyle = '#fff'; c.lineWidth = 2; c.strokeRect(X(t.x) + 2, Y(t.y) + 2, cell - 4, cell - 4); c.lineWidth = 1;
+      c.fillStyle = 'rgba(255,255,255,.6)'; c.font = Math.max(7, cell * 0.28) + 'px Silkscreen, monospace'; c.textAlign = 'center'; c.fillText('TOWER', X(t.x) + cell / 2, Y(t.y) - 3); });
+    BASE.walls.forEach((w, k) => { const hp = f.W[k]; c.fillStyle = hp > 0 ? '#e8e8e8' : 'rgba(255,255,255,.12)'; c.fillRect(X(w.x) + 1, Y(w.y) + cell * 0.25, cell * 2 - 2, cell * 0.5);
+      if (hp > 0) { c.fillStyle = SIG; c.fillRect(X(w.x) + 1, Y(w.y) + cell * 0.25 - 4, (cell * 2 - 2) * hp / R.wallHp, 2); } });
+    if (SET.pick >= 0) { c.fillStyle = 'rgba(204,255,0,.12)'; BASE.tiles.forEach(([tx, ty]) => c.fillRect(X(tx * 2), Y(ty * 2), cell * 2, cell * 2)); }
+    const na = SET.attackers.length;
+    const units = f.U.map((u, i) => ({ x: u[0], y: u[1], hp: u[2], att: i < na, i: i < na ? i : i - na }));
+    const stack = {};
+    units.forEach(u => { const k = u.x + ',' + u.y; u.n = stack[k] = (stack[k] || 0) + 1; });
+    units.forEach(u => {
+      const gen = u.att ? SET.attackers[u.i] : BASE.defenders[u.i].gen, full = R.hp[gen], o = (u.n - 1) * Math.max(2, cell * 0.16);
+      const x = X(u.x) + cell * 0.14 + o, y = Y(u.y) + cell * 0.14 + o, s = cell * 0.72;
+      c.globalAlpha = u.hp > 0 ? 1 : 0.22;
+      c.fillStyle = u.att ? '#fff' : '#000'; c.fillRect(x, y, s, s);
+      c.strokeStyle = !u.att && SET.pick === u.i ? SIG : '#fff'; c.lineWidth = !u.att && SET.pick === u.i ? 2.5 : 1.2; c.strokeRect(x, y, s, s);
+      c.fillStyle = u.att ? '#000' : '#fff'; c.font = Math.max(7, cell * 0.36) + 'px Silkscreen, monospace'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText(gen, x + s / 2, y + s / 2 + 1);
+      c.fillStyle = SIG; c.fillRect(x, y - 3, s * u.hp / full, 2);
+      c.globalAlpha = 1; c.textBaseline = 'alphabetic';
+    });
+    if (frame) {                                        // shots in this moment
+      const at = (k) => { if (k[0] === 'W') { const w = BASE.walls[+k.slice(1)]; return [X(w.x) + cell, Y(w.y) + cell / 2]; }
+        const u = units[k[0] === 'A' ? +k.slice(1) : na + +k.slice(1)]; return [X(u.x) + cell / 2, Y(u.y) + cell / 2]; };
+      res.log.filter(s => s.t > frame.t - 400 && s.t <= frame.t).forEach(s => {
+        const a = at(s.who), b = at(s.at); c.strokeStyle = s.landed ? SIG : 'rgba(255,255,255,.5)'; c.setLineDash(s.landed ? [] : [3, 3]);
+        c.beginPath(); c.moveTo(a[0], a[1]); c.lineTo(b[0], b[1]); c.stroke(); c.setLineDash([]);
+        if (s.landed && s.also.length && R.area[s.gen]) { c.strokeStyle = 'rgba(204,255,0,.6)'; const r2 = (R.area[s.gen] + 0.5) * cell; c.strokeRect(b[0] - r2, b[1] - r2, r2 * 2, r2 * 2); }
+      });
+    }
+    c.fillStyle = 'rgba(255,255,255,.6)'; c.font = '9px Silkscreen, monospace'; c.textAlign = 'left'; c.fillText('N ↑   ' + secs(f.t), 6, 12);
+    c.textAlign = 'right'; c.fillText('WHITE: ATTACKERS · BLACK: YOUR FRIENDS', W - 6, 12);
+    void start; void ent;
+  }
+  function play(res) {
+    cancelAnimationFrame(anim);
+    const t0 = performance.now(), SPEED = 8;
+    const step = (now) => {
+      const vt = Math.min(res.t, (now - t0) * SPEED);
+      let k = 0; while (k + 1 < res.trace.length && res.trace[k + 1].t <= vt) k++;
+      drawBase(res, res.trace[k]);
+      if (vt < res.t) anim = requestAnimationFrame(step); else drawBase(res, res.trace[res.trace.length - 1]);
+    };
+    anim = requestAnimationFrame(step);
+  }
+
+  // ---------- 06 and 07: what the chain charges, read when the page opens (nothing here is typed in) ----------
+  // the assumptions are ours, not the chain's: an era of 100 players at a $10 entry, each fighting 20 times and
+  // challenging 5 times over 7 days (see the COSTS page to change them)
+  const ERA = { players: 100, entryUsd: 10, fights: 20, challenges: 5, days: 7, every: 60 };
+  function dice(L) {
+    const usd = (v) => (v < 0 ? '−' : '') + '$' + Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: Math.abs(v) < 1 ? 3 : 2, maximumFractionDigits: Math.abs(v) < 1 ? 3 : 2 }),
+      num = (v) => Math.round(v).toLocaleString('en-US');
+    if (L.gas) {
+      // fights resolve on our server for v1; the chain holds a hash of each one. fightMax is the reference the server is
+      // checked against, not a cost anyone pays. Every figure is gas.json's (paritycheck.js writes it) - nothing typed here.
+      const fits = L.gas.fitsInOneTx ? 'fits a block' : 'does not fit a block (' + num(L.gas.gasCeiling) + ' gas ceiling, read from the chain)';
+      const when = L.gas.measuredAt ? new Date(L.gas.measuredAt) : null;
+      $('gasLine').innerHTML =
+        '<b>Replay the longest fight on chain</b> — ' + num(L.gas.fightMax) + ' gas (' + num(L.gas.fightAvg) + ' for an average fight over ' + num(L.gas.fights) + ' fights): the reference the server is checked against; <b>not a v1 cost</b>, ' + fits + ' <span class="tag game">MEASURED</span>. ' +
+        '<b>Publish a fight\'s hash</b> — ' + (L.gas.commitFight ? num(L.gas.commitFight) + ' gas' : 'measured by the chain engineer (RareFightLog, in-memory floor) and <b>not yet written into gas.json</b>, so no figure is shown here') +
+        ', one write per fight, from the 5% ' + (L.gas.commitFight ? '<span class="tag game">MEASURED</span>' : '<span class="tag ph">NOT IN GAS.JSON</span>') + '. ' +
+        '<b>The hourly sync write</b> — ' + (L.gas.commitSync ? num(L.gas.commitSync) + ' gas' : '<b>not yet written into gas.json</b>, so no figure is shown here') +
+        ', one write an hour, when brought-across Doopies are re-checked ' + (L.gas.commitSync ? '<span class="tag game">MEASURED</span>' : '<span class="tag ph">NOT IN GAS.JSON</span>') + '. ' +
+        '<span class="src">Both writes are in-memory floors, not a real node\'s figures.</span> ' +
+        '<span class="src">Measured ' + (when ? when.toLocaleString() : 'at a time gas.json does not record') + ', solc ' + (L.gas.solc || '?') + '.</span> ';
+    }
+    if (L.fee == null || L.gasPrice == null || !L.ethUsd || !L.gas) { $('feeLine').textContent = 'could not be read just now'; $('diceStatus').textContent = 'COULD NOT READ: ' + L.errors.join(', ') + '. OPEN THIS PAGE FROM THE SITE.'; return; }
+    $('feeLine').innerHTML = L.fee + ' ETH a request, ' + usd(L.fee * L.ethUsd) + ' at today\'s price, read from the Dice contract just now';
+    $('diceStatus').innerHTML = 'READ FROM ROBINHOOD CHAIN · ' + L.at.toLocaleString();
+    const E = ChainLive.era(L, ERA), a = E.perFight, b = E.batched, q = ChainLive.era(L, Object.assign({}, ERA, { every: 15 })).batched;
+    const LIVE = '<span class="tag game">LIVE</span>', MEAS = '<span class="tag game">MEASURED</span>', EST = '<span class="tag ph">ESTIMATE</span>';
+    const row = (k, x, y, tag, cls) => '<tr' + (cls ? ' class="' + cls + '"' : '') + '><td>' + k + (tag ? ' ' + tag : '') + '</td><td>' + x + '</td><td>' + y + '</td></tr>';
+    $('dice').innerHTML =
+      '<p class="src">The era: ' + ERA.players + ' players, a $' + ERA.entryUsd + ' entry each (a ' + usd(E.pool) + ' pool, so the 5% is <b>' + usd(E.cut) + '</b>), ' + ERA.fights + ' fights and ' + ERA.challenges +
+        ' challenges each (' + num(E.played) + ' in all), over ' + ERA.days + ' days ' + EST + '. Today: a random number ' + L.fee + ' ETH ' + LIVE + ', gas ' + L.gasPrice.toFixed(4) + ' gwei ' + LIVE + ', ETH ' + usd(L.ethUsd) + ' ' + LIVE + '.</p>' +
+      '<div class="tw"><table><thead><tr><th></th><th>Pay per fight<br>one random number each</th><th>One big buy per hour<br>shared by every fight in that hour</th></tr></thead><tbody>' +
+      row('Fights and challenges played', num(E.played), num(E.played)) +
+      row('Random numbers bought', '<b>' + num(a.buys) + '</b>', '<b>' + num(b.buys) + '</b> (24 an hour-slot × ' + ERA.days + ' days)') +
+      row('Pyth fee per number', usd(L.fee * L.ethUsd), usd(L.fee * L.ethUsd), LIVE) +
+      row('<b>Pyth fees</b>', '<b>' + usd(a.fees) + '</b>', '<b>' + usd(b.fees) + '</b>') +
+      row('Gas to ask for the numbers', usd(a.asking), usd(b.asking), MEAS) +
+      row('Gas to record each result (' + num(E.played) + ' either way)', usd(a.recording), usd(b.recording), MEAS) +
+      row('<b>Total chain cost</b>', '<b>' + usd(a.total) + '</b>', '<b>' + usd(b.total) + '</b>') +
+      row('The 5% budget', usd(E.cut), usd(E.cut)) +
+      row('<b>Left for servers and development</b>', '<b>' + usd(a.left) + '</b>' + (a.left < 0 ? ' (a loss)' : ''), '<b>' + usd(b.left) + '</b>' + (b.left < 0 ? ' (a loss)' : '')) +
+      row('Share of the 5% used', Math.round(a.share * 100) + '%', Math.round(b.share * 100) + '%') +
+      row('When a fight\'s result is known', 'instantly', 'at the end of the hour') +
+      '</tbody></table></div>' +
+      '<p>The only row that really changes is <b>how many random numbers are bought</b>. One number is a 78-digit word, and every fight in the hour gets its own roll off it ' +
+      '(the word mixed with that fight\'s id), each as unpredictable as its own number would be. Moves must be locked in before the hour\'s word arrives.</p>' +
+      '<p class="src">Every 15 minutes instead: ' + num(q.buys) + ' numbers, ' + usd(q.fees) + ' in fees, ' + usd(q.total) + ' in all (' + Math.round(q.share * 100) + '% of the 5%), results within 15 minutes.</p>';
+    window.combatPage.chain = { L, E, q };
+  }
+
+  // ---------- 05: generation 1 to 6 ----------
+  const N = 120;
+  const SCEN = [['open', 'ON OPEN GROUND', {}], ['wall', 'DEFENDER RIGHT BEHIND A LOG WALL', { wall: true }], ['tower', 'DEFENDER UP A TOWER, BEHIND A WALL', { wall: true, tower: true }]];
+  const onGround = (atts, gen, opt) => { const b = Combat.proving(gen, opt); return { attackers: atts, entry: Combat.entry(b, 'N', 6), defenders: b.defenders, walls: b.walls }; };
+  let run = 0;
+  function runGens() {
+    const my = ++run, jobs = [], M = {}, TK = {};
+    SCEN.forEach(([k, , opt]) => { M[k] = {}; GENS.forEach(a => GENS.forEach(d => jobs.push(() => {
+      M[k][a + ',' + d] = Combat.sample(R, onGround([a], d, opt), N, 1000 + a * 10 + d).attackWins; }))); });
+    GENS.forEach(a => GENS.forEach(d => jobs.push(() => {
+      let n = 0; for (let k = 1; k <= 6; k++) { if (Combat.sample(R, onGround(Array(k).fill(a), d, { wall: true }), 60, 7000 + a * 10 + d).attackWins >= 0.5) { n = k; break; } }
+      TK[a + ',' + d] = n; })));
+    const total = jobs.length; let done = 0;
+    $('checks').innerHTML = CHECKS.map(ch => '<li><span class="res wait">RUNNING</span><span>' + ch.name + '</span></li>').join('');
+    $('mats').innerHTML = ''; $('takes').innerHTML = '';
+    const step = () => {
+      if (my !== run) return;
+      const t = performance.now();
+      while (jobs.length && performance.now() - t < 40) { jobs.shift()(); done++; }
+      $('prog').style.width = (done / total * 100) + '%';
+      if (jobs.length) return setTimeout(step, 0);
+      show(M, TK);
+    };
+    setTimeout(step, 0);
+  }
+  const shade = (v) => { const g = Math.round(40 + v * 215); return 'rgb(' + Math.round(g * 0.8) + ',' + g + ',0)'; };
+  function show(M, TK) {
+    $('mats').innerHTML = SCEN.map(([k, name]) => '<div class="mat"><h3>' + name + '</h3><div class="tw"><table><thead><tr><th>ATK ↓ DEF →</th>' + GENS.map(d => '<th>G' + d + '</th>').join('') + '</tr></thead><tbody>' +
+      GENS.map(a => '<tr><td class="lab">G' + a + '</td>' + GENS.map(d => { const v = M[k][a + ',' + d]; return '<td style="background:' + shade(v) + ';color:' + (v > 0.5 ? '#000' : '#fff') + '" title="Gen ' + a + ' attacking Gen ' + d + ': the attack wins ' + pct(v) + '">' + pct(v) + '</td>'; }).join('') + '</tr>').join('') +
+      '</tbody></table></div></div>').join('');
+    $('takes').innerHTML = '<div class="tw"><table><thead><tr><th>ATTACKERS OF ↓ · TO BEAT ONE →</th>' + GENS.map(d => '<th>GEN ' + d + '</th>').join('') + '</tr></thead><tbody>' +
+      GENS.map(a => '<tr><td>Gen ' + a + '</td>' + GENS.map(d => '<td>' + (TK[a + ',' + d] || '—') + '</td>').join('') + '</tr>').join('') + '</tbody></table></div>';
+    $('checks').innerHTML = CHECKS.map(ch => { const r = ch.test(M, TK); return '<li><span class="res ' + (r.ok ? 'pass' : 'fail') + '">' + (r.ok ? 'PANS OUT' : 'NOT YET') + '</span><span>' + ch.name + '<span class="why">' + r.why + '</span></span></li>'; }).join('');
+    window.combatPage.results = { M, TK };
+  }
+  const CHECKS = [
+    { name: 'One on one, a higher generation beats a lower one.', test: (M) => {
+      const bad = []; GENS.forEach(a => GENS.forEach(d => { if (a < d && M.open[a + ',' + d] <= 0.5) bad.push('Gen ' + a + ' attacking Gen ' + d + ' wins only ' + pct(M.open[a + ',' + d])); if (a > d && M.open[a + ',' + d] >= 0.5) bad.push('Gen ' + a + ' attacking Gen ' + d + ' wins ' + pct(M.open[a + ',' + d])); }));
+      return { ok: !bad.length, why: bad.length ? bad.slice(0, 3).join('; ') + (bad.length > 3 ? ' …' : '') + '. Defenders hold their spot, so a longer weapon can stand off and shoot a shorter one that never comes out.' : 'every higher generation wins more than half its fights against every lower one, on open ground' }; } },
+    { name: 'Chance matters: the next generation down can still win sometimes (at least 1 in 10).', test: (M) => {
+      const r = GENS.slice(1).map(g => [g, M.open[g + ',' + (g - 1)]]), low = r.filter(([, v]) => v < 0.1);
+      return { ok: !low.length, why: r.map(([g, v]) => 'Gen ' + g + ' beats Gen ' + (g - 1) + ' ' + pct(v)).join(' · ') +
+        (low.length ? '. Each fight is many shots, so the luck averages out and the stronger side nearly always wins.' : '') }; } },
+    { name: 'A wall helps the defender.', test: (M) => {
+      const bad = []; GENS.forEach(a => GENS.forEach(d => { if (M.wall[a + ',' + d] > M.open[a + ',' + d] + 0.05) bad.push('Gen ' + a + ' on Gen ' + d); }));
+      const even = GENS.map(g => M.open[g + ',' + g] - M.wall[g + ',' + g]).reduce((s, v) => s + v, 0) / 6;
+      return { ok: !bad.length, why: bad.length ? 'the attack does better against a wall in ' + bad.join(', ') : 'between equals, a wall cuts the attack\'s wins by ' + Math.round(even * 100) + ' points on average' }; } },
+    { name: 'A watchtower helps the defender more.', test: (M) => {
+      const bad = []; GENS.forEach(a => GENS.forEach(d => { if (M.tower[a + ',' + d] > M.wall[a + ',' + d] + 0.05) bad.push('Gen ' + a + ' on Gen ' + d); }));
+      const gain = GENS.map(a => GENS.map(d => M.wall[a + ',' + d] - M.tower[a + ',' + d])).flat(), best = Math.max(...gain);
+      return { ok: !bad.length && best > 0.05, why: bad.length ? 'the attack does better against a tower in ' + bad.slice(0, 4).join(', ') + ': melee up a tower only reaches its foot' : best > 0.05 ? 'up to ' + Math.round(best * 100) + ' points fewer wins for the attack' : 'a tower makes no difference with these numbers' }; } },
+    { name: 'Numbers count: enough of a generation can beat one of the next generation up, behind a wall.', test: (M, TK) => {
+      const r = GENS.slice(1).map(g => [g, TK[g + ',' + (g - 1)]]), none = r.filter(([, n]) => !n);
+      return { ok: !none.length, why: r.map(([g, n]) => (n ? n + '× Gen ' + g : 'no number of Gen ' + g) + ' beat one Gen ' + (g - 1)).join(' · ') }; } },
+  ];
+
+  window.combatPage = { get E() { return E; }, get GAME() { return GAME; }, get R() { return R; }, get BASE() { return BASE; }, get HOME() { return HOME; },
+    get GEO() { return GEO; }, get last() { return LAST; }, SET, PROPOSED, results: null };
+})();
+</script>
+</body>
+</html>

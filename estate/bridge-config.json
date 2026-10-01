@@ -1,0 +1,6 @@
+{
+  "_": "Where the bridge's contracts live. Empty until they are deployed; the page reads this when it opens.",
+  "chainId": 4663,
+  "shadowFriends": null,
+  "attestor": null
+}

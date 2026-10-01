@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Rare Fiends — standings</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Silkscreen:wght@400;700&family=Archivo:wght@400;500;600&family=Sometype+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --ink: #eee; --paper: #0a0c0a; --ink-60: #9a9a9a; --ink-30: #585858; --signal: #CCFF00;
+  --display: Silkscreen, monospace; --body: Archivo, system-ui, sans-serif; --mono: "Sometype Mono", monospace;
+  --rule: 1px solid var(--ink); color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; background: var(--paper); color: var(--ink); }
+body { font-family: var(--body); font-size: 21px; }
+.wrap { max-width: 960px; margin: 0 auto; padding: 0 0 40px; }
+
+.top { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: var(--rule); flex-wrap: wrap; }
+.top b { font-family: var(--display); font-size: 20px; letter-spacing: .06em; }
+.top .pot { margin-left: auto; font-family: var(--mono); font-size: 21px; color: var(--signal); }
+.top a { font-family: var(--display); font-size: 16px; letter-spacing: .06em; color: var(--ink-60);
+  text-decoration: none; border: var(--rule); border-color: rgba(255,255,255,.35); padding: 6px 9px; }
+.top a:hover { color: var(--ink); border-color: var(--ink); }
+
+.bar { display: flex; gap: 8px; align-items: center; padding: 10px 14px; border-bottom: var(--rule); flex-wrap: wrap; }
+.tabs { display: flex; border: var(--rule); }
+.tabs button { font-family: var(--display); font-size: 17px; letter-spacing: .06em; color: var(--ink-60);
+  background: none; border: 0; border-right: var(--rule); padding: 8px 12px; cursor: pointer; }
+.tabs button:last-child { border-right: 0; }
+.tabs button[aria-pressed="true"] { background: var(--signal); color: #000; }
+.find { flex: 1; min-width: 150px; display: flex; border: var(--rule); }
+.find input { flex: 1; min-width: 0; font-family: var(--mono); font-size: 21px; color: var(--ink);
+  background: transparent; border: 0; padding: 8px 10px; }
+.find input::placeholder { color: var(--ink-30); }
+.find input:focus { outline: none; background: rgba(255,255,255,.05); }
+
+table { width: 100%; border-collapse: collapse; }
+th { font-family: var(--display); font-size: 15px; letter-spacing: .08em; color: var(--ink-60);
+  text-align: left; padding: 10px 14px 8px; border-bottom: var(--rule); white-space: nowrap; cursor: pointer; }
+th.num, td.num { text-align: right; }
+th[data-on="1"] { color: var(--signal); }
+td { padding: 11px 14px; border-bottom: 1px dashed rgba(255,255,255,.18); font-size: 20px; }
+tr.row:hover td { background: rgba(255,255,255,.04); }
+.rank { font-family: var(--mono); font-size: 22px; color: var(--ink-60); width: 44px; }
+.rank.top { color: var(--signal); }
+.tok { font-family: var(--mono); font-size: 21px; }
+.sub { display: block; font-size: 19px; color: var(--ink-60); margin-top: 2px; }
+.val { font-family: var(--mono); font-size: 22px; }
+.val.sig { color: var(--signal); }
+.pill { font-family: var(--display); font-size: 14px; letter-spacing: .06em; border: 1px solid rgba(255,255,255,.4);
+  padding: 3px 6px; white-space: nowrap; }
+.pill.on { border-color: var(--signal); color: var(--signal); }
+.pill.off { color: var(--ink-30); border-color: rgba(255,255,255,.2); }
+.note { padding: 12px 14px; font-size: 20px; color: var(--ink-30); line-height: 1.6; }
+@media (max-width: 560px) {
+  td, th { padding-left: 10px; padding-right: 10px; }
+  .hide-s { display: none; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <b>STANDINGS</b>
+    <a href="base.html">← BASE</a>
+    <span class="pot" id="pot">POT</span>
+  </div>
+
+  <div class="bar">
+    <div class="tabs" id="tabs">
+      <button type="button" data-t="players" aria-pressed="true">PLAYERS</button>
+      <button type="button" data-t="friends">FRIENDS</button>
+    </div>
+    <label class="find"><input id="find" type="search" placeholder="find a token #" aria-label="find a token"></label>
+  </div>
+
+  <table>
+    <thead id="head"></thead>
+    <tbody id="rows"></tbody>
+  </table>
+
+  <p class="note" id="note"></p>
+</div>
+
+<script>
+(async function () {
+  'use strict';
+  const D = await (await fetch('standings-data.json?v=' + Date.now())).json();
+  const $ = (id) => document.getElementById(id);
+  let tab = 'players', sort = 'banked', dir = -1, q = '';
+  // No generation title: it was invented and nothing on chain said it. The Friend row already prints
+  // the generation, and `standings-data.json` carries no family, so nothing takes its place.
+  $('pot').textContent = 'POT ' + D.pot.toLocaleString() + ' RF · closes ' + D.closes;
+
+  const COLS = {
+    players: [
+      { k: 'rank', t: '#' }, { k: 'token', t: 'GENESIS' },
+      { k: 'banked', t: 'BANKED', num: true },
+      { k: 'land', t: 'LAND', num: true, hide: true }, { k: 'hired', t: 'HIRED', num: true, hide: true },
+    ],
+    friends: [
+      { k: 'rank', t: '#' }, { k: 'token', t: 'FRIEND' },
+      { k: 'earned', t: 'EARNED', num: true },
+      { k: 'status', t: 'STATUS' }, { k: 'served', t: 'SERVED', num: true, hide: true },
+    ],
+  };
+  function rows() {
+    const list = (tab === 'players' ? D.players : D.friends).slice();
+    const key = sort === 'rank' ? (tab === 'players' ? 'banked' : 'earned') : sort;
+    list.sort((a, b) => (typeof a[key] === 'string')
+      ? String(a[key]).localeCompare(String(b[key])) * dir
+      : ((a[key] || 0) - (b[key] || 0)) * dir);
+    return q ? list.filter(r => String(r.token).includes(q)) : list;
+  }
+  function render() {
+    $('head').innerHTML = '<tr>' + COLS[tab].map(c =>
+      '<th class="' + (c.num ? 'num ' : '') + (c.hide ? 'hide-s' : '') + '" data-k="' + c.k + '"' +
+      (sort === c.k ? ' data-on="1"' : '') + '>' + c.t + '</th>').join('') + '</tr>';
+    $('head').querySelectorAll('th').forEach(th => th.addEventListener('click', () => {
+      const k = th.dataset.k;
+      if (k === 'rank') return;
+      if (sort === k) dir = -dir; else { sort = k; dir = -1; }
+      render();
+    }));
+    const body = $('rows'); body.innerHTML = '';
+    rows().forEach((r, i) => {
+      const tr = document.createElement('tr'); tr.className = 'row';
+      const place = i + 1;
+      const cells = tab === 'players' ? [
+        '<td class="rank' + (place <= 3 ? ' top' : '') + '">' + place + '</td>',
+        '<td><span class="tok">Genesis #' + r.token + '</span><span class="sub">' + r.owner +
+          ' · ' + r.n + ' genesis · ' + r.plan + '</span></td>',
+        '<td class="num"><span class="val sig">' + r.banked.toLocaleString() + '</span><span class="sub">crystals</span></td>',
+        '<td class="num hide-s"><span class="val">' + r.land + '</span><span class="sub">tiles</span></td>',
+        '<td class="num hide-s"><span class="val">' + r.hired + '</span><span class="sub">mercs</span></td>',
+      ] : [
+        '<td class="rank' + (place <= 3 ? ' top' : '') + '">' + place + '</td>',
+        '<td><span class="tok">Friend #' + r.token + '</span><span class="sub">Gen ' + r.gen +
+          ' · ' + r.wage + ' RF or ' + r.share + '%</span></td>',
+        '<td class="num"><span class="val sig">' + r.earned + '</span><span class="sub">RF earned</span></td>',
+        '<td><span class="pill ' + (r.status === 'dormant' ? 'off' : r.status === 'free' ? '' : 'on') + '">' +
+          r.status.toUpperCase() + '</span></td>',
+        '<td class="num hide-s"><span class="val">' + r.served + '</span><span class="sub">tourneys</span></td>',
+      ];
+      tr.innerHTML = cells.join('');
+      body.appendChild(tr);
+    });
+    $('note').textContent = tab === 'players'
+      ? 'Standing is crystals banked when the era closes. Land and Genesis counts are read from the chain; era figures are illustrative until an era runs.'
+      : 'Each Friend shows its generation, what it has earned, and where it is now. Dormant Friends must be woken before they can serve. Figures are illustrative until an era runs.';
+  }
+  $('tabs').addEventListener('click', (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    tab = b.dataset.t; sort = tab === 'players' ? 'banked' : 'earned'; dir = -1;
+    $('tabs').querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+    render();
+  });
+  $('find').addEventListener('input', (e) => { q = e.target.value.trim(); render(); });
+  render();
+})();
+</script>
+</body>
+</html>

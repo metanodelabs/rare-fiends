@@ -1,0 +1,20 @@
+{
+  "fightAvg": 3011646,
+  "fightMax": 63752505,
+  "fightMaxLine": "MAX_SIDE (12) a side, MAX_WALLS (16) walls, generation 6, defenders engaging - the declared maximum under the worst standing order",
+  "fights": 348,
+  "gasCeiling": 32000000,
+  "gasCeilingFrom": "ArbGasInfo.getGasAccountingParams() on chain 4663",
+  "fitsInOneTx": false,
+  "commitFight": 70448,
+  "commitSync": 26042,
+  "challenge": 164759,
+  "accept": 30554,
+  "reveal": 4385,
+  "requestRandomness": 101792,
+  "settle": 33558,
+  "shadowClaim": 1884541,
+  "measuredAt": "2026-10-01T01:15:44.700Z",
+  "solc": "0.8.36",
+  "note": "execution gas, measured by estate/contracts/paritycheck.js"
+}

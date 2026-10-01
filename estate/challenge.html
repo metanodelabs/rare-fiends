@@ -1,0 +1,1333 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Rare Fiends — challenge</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Silkscreen:wght@400;700&family=Sometype+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --ink: #FFFFFF; --paper: #000000; --signal: #CCFF00;
+  --dim: rgba(255,255,255,.6); --faint: rgba(255,255,255,.3);
+  --display: Silkscreen, monospace; --mono: "Sometype Mono", ui-monospace, monospace;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; min-height: 100%; background: #090B09; color: var(--ink); }
+body { font-family: var(--mono); display: flex; flex-direction: column; min-height: 100dvh; }
+
+/* the base carries on behind the popup, dimmed */
+.scrim { position: fixed; inset: 0; overflow: hidden; }
+.scrim iframe { width: 100%; height: 100%; border: 0; pointer-events: none; filter: grayscale(1) brightness(.35) blur(1.5px); }
+.scrim::after { content: ""; position: absolute; inset: 0;
+  background: repeating-linear-gradient(0deg, rgba(204,255,0,.04) 0 1px, transparent 1px 3px); }
+
+.wrap { position: relative; flex: 1; min-height: 0; display: grid; place-items: center;
+  padding: max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom)); }
+.pot.slim { padding: 7px 8px; } .pot.slim .n { font-size: 35px; margin: 2px 0 0; }
+.h2hline { font-family: var(--display); font-size: 14px; letter-spacing: .1em; color: var(--dim); text-align: center; }
+.h2hline b { color: #fff; font-weight: 400; }
+.modal { width: 100%; max-width: 980px; background: var(--paper); border: 2px solid var(--signal);
+  box-shadow: 0 0 0 1px #000, 0 24px 80px rgba(0,0,0,.8); }
+
+.mtop, .mfoot { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  font-family: var(--display); letter-spacing: .1em; padding: 9px 12px; }
+.mtop { font-size: 16px; color: var(--signal); border-bottom: 1px solid rgba(204,255,0,.4); background: rgba(204,255,0,.04); }
+.mtop .dot { width: 7px; height: 7px; background: var(--signal); border-radius: 50%; animation: blink 1.2s steps(2) infinite; }
+@keyframes blink { 50% { opacity: .2; } }
+.mtop .sp { flex: 1; }
+.mfoot { font-size: 14px; color: var(--dim); border-top: 1px solid var(--faint); }
+.mfoot b { color: #fff; font-weight: 400; }
+.mfoot .ghost { padding: 0 6px; font-size: 12px; line-height: 1; height: 11px; }
+
+button { font: inherit; color: inherit; }
+.ghost { font-family: var(--display); font-size: 15px; letter-spacing: .08em; background: none; color: #fff;
+  border: 1px solid rgba(255,255,255,.5); padding: 5px 8px; cursor: pointer; }
+.ghost[aria-pressed="true"] { background: var(--signal); color: #000; border-color: var(--signal); }
+.seg { display: inline-flex; }
+.seg .ghost + .ghost { border-left: 0; }
+
+.versus { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr) minmax(0, 1fr); }
+@media (max-width: 820px) { .versus { grid-template-columns: 1fr; } .versus > .centre { order: -1; } }
+/* short (the default): the two players stack down the left — challenger above, challenged below — so the
+   pot column runs the full height beside them and there is no empty half-panel under each one */
+@media (min-width: 821px) {
+  #main.short .versus { grid-template-columns: minmax(0, 350px) minmax(0, 1fr); }
+  #main.short .versus > #p1 { grid-column: 1; grid-row: 1; }
+  #main.short .versus > #p2 { grid-column: 1; grid-row: 2; border-left: 0; border-top: 1px solid var(--faint); }
+  #main.short .versus > .centre { grid-column: 2; grid-row: 1 / span 2; border-left: 1px solid var(--faint); }
+  #main.short .who canvas { width: 110px; height: 110px; }
+  #main.short .who { gap: 14px; }
+}
+
+/* ---------- a player ---------- */
+.player { padding: 14px; display: grid; gap: 12px; align-content: start; position: relative; }
+.player + .centre { border-left: 1px solid var(--faint); }
+.centre + .player { border-left: 1px solid var(--faint); }
+@media (max-width: 820px) { .player + .centre, .centre + .player { border-left: 0; } .player { border-top: 1px solid var(--faint); } }
+.player.win { box-shadow: inset 0 0 0 2px var(--signal); }
+.who { display: flex; gap: 12px; align-items: center; }
+.who canvas { width: 64px; height: 64px; image-rendering: pixelated; border: 1px solid rgba(255,255,255,.5); background: #000; flex: none; }
+.who .name { font-family: var(--display); font-size: 20px; letter-spacing: .06em; }
+.who .role { font-family: var(--display); font-size: 14px; letter-spacing: .1em; color: var(--dim); margin-top: 3px; }
+.who .purse { font-size: 21px; margin-top: 6px; color: var(--dim); }
+.who .purse b { color: #fff; font-weight: 500; }
+.tag { position: absolute; top: 12px; right: 12px; font-family: var(--display); font-size: 15px; letter-spacing: .08em;
+  padding: 3px 6px; border: 1px solid var(--signal); color: var(--signal); background: #000; }
+
+.lab { display: flex; justify-content: space-between; font-family: var(--display); font-size: 14px; letter-spacing: .1em; color: var(--dim); }
+.stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid var(--faint); }
+.stats > div { padding: 7px 6px; border-right: 1px solid rgba(255,255,255,.15); border-bottom: 1px solid rgba(255,255,255,.15); min-width: 0; }
+.stats > div:nth-child(4n) { border-right: 0; }
+.stats > div:nth-last-child(-n+4) { border-bottom: 0; }
+.stats .k { display: block; font-family: var(--display); font-size: 12px; letter-spacing: .08em; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stats .v { display: block; font-size: 22px; margin-top: 3px; font-variant-numeric: tabular-nums; }
+.stats .v small { font-size: 18px; color: var(--dim); }
+.bar { height: 5px; border: 1px solid rgba(255,255,255,.6); margin-top: 4px; position: relative; }
+.bar i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--signal); }
+.recent { display: grid; gap: 4px; }
+.recent div { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 8px; align-items: center; font-size: 20px; }
+.recent .r { font-family: var(--display); font-size: 14px; text-align: center; border: 1px solid rgba(255,255,255,.5); padding: 2px 0; }
+.recent .r.w { border-color: var(--signal); color: var(--signal); }
+.recent .g { color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.recent .p { font-variant-numeric: tabular-nums; }
+
+/* ---------- the middle: pot, stake, game ---------- */
+.centre { padding: 14px; display: grid; gap: 12px; align-content: start; }
+.pot { text-align: center; border: 1px solid var(--faint); padding: 12px 8px 10px; position: relative; overflow: hidden; }
+.pot .k { font-family: var(--display); font-size: 16px; letter-spacing: .14em; color: var(--dim); }
+.pot .n { font-family: var(--display); font-size: 50px; letter-spacing: .02em; margin: 4px 0 2px; font-variant-numeric: tabular-nums; }
+.pot .n.live { color: var(--signal); }
+.pot .sub { font-size: 20px; color: var(--dim); }
+.pot .gem { position: absolute; top: 50%; width: 10px; height: 10px; background: #fff; transform: rotate(45deg); opacity: 0; }
+.pot .gem.l { animation: inL .7s ease-out forwards; } .pot .gem.r { animation: inR .7s ease-out forwards; }
+@keyframes inL { from { left: -12px; opacity: 1; } to { left: calc(50% - 5px); opacity: 0; } }
+@keyframes inR { from { right: -12px; opacity: 1; } to { right: calc(50% - 5px); opacity: 0; } }
+.stake { display: flex; gap: 5px; flex-wrap: wrap; justify-content: center; }
+.stake .ghost { min-width: 46px; }
+.stake .ghost[disabled] { opacity: .3; cursor: default; }
+.games { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+.games.slim { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
+.games.slim .game { padding: 8px 10px; }
+#main .pcmore { justify-self: start; margin-top: 2px; }
+.who .name .pcrank { margin-left: 8px; }
+.game { border: 1px solid rgba(255,255,255,.45); background: none; padding: 10px; text-align: left; cursor: pointer; display: grid; gap: 5px; }
+.game[aria-pressed="true"] { border-color: var(--signal); }
+.game b { font-family: var(--display); font-size: 17px; letter-spacing: .07em; font-weight: 400; }
+.game[aria-pressed="true"] b { color: var(--signal); }
+.game span { font-size: 19px; color: var(--dim); line-height: 1.45; }
+.game[disabled] { opacity: .4; cursor: default; }
+.game em { font-style: normal; font-family: var(--display); font-size: 13px; letter-spacing: .1em; color: var(--dim); }
+.h2h { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 8px; border: 1px solid var(--faint); padding: 8px 10px; }
+.h2h .s { font-family: var(--display); font-size: 27px; font-variant-numeric: tabular-nums; }
+.h2h .s:last-child { text-align: right; }
+.h2h .m { font-family: var(--display); font-size: 13px; letter-spacing: .1em; color: var(--dim); text-align: center; line-height: 1.6; }
+.go { width: 100%; font-family: var(--display); font-size: 19px; letter-spacing: .1em; background: var(--signal); color: #000;
+  border: 0; padding: 12px; cursor: pointer; }
+.go[disabled] { background: none; border: 1px solid var(--faint); color: var(--dim); cursor: default; }
+.go.alt { background: none; border: 1px solid rgba(255,255,255,.5); color: #fff; }
+.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.msg { font-size: 21px; color: var(--dim); text-align: center; line-height: 1.5; min-height: 18px; }
+.msg b { color: #fff; font-weight: 500; }
+
+/* ---------- the game itself ---------- */
+.arena { border: 1px solid var(--faint); padding: 12px; display: grid; gap: 12px; }
+.hands { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 10px; }
+.hand { display: grid; justify-items: center; gap: 6px; }
+.hand canvas { width: 84px; height: 84px; image-rendering: pixelated; }
+.hand.theirs canvas { transform: scaleX(-1); }
+.hand .cap { font-family: var(--display); font-size: 14px; letter-spacing: .1em; color: var(--dim); }
+.hand .cap.locked { color: var(--signal); }
+.shake canvas { animation: shake .36s ease-in-out 3; }
+@keyframes shake { 50% { transform: translateY(-10px); } }
+.hand.theirs.shake canvas { animation-name: shakeT; }
+@keyframes shakeT { 0%, 100% { transform: scaleX(-1); } 50% { transform: scaleX(-1) translateY(-10px); } }
+.vs { font-family: var(--display); font-size: 21px; color: var(--dim); }
+.picks { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.pick { border: 1px solid rgba(255,255,255,.5); background: none; padding: 8px 4px 6px; cursor: pointer; display: grid; justify-items: center; gap: 4px; }
+.pick canvas { width: 36px; height: 36px; image-rendering: pixelated; }
+.pick span { font-family: var(--display); font-size: 14px; letter-spacing: .08em; }
+.pick[aria-pressed="true"] { border-color: var(--signal); color: var(--signal); }
+.pick[disabled] { cursor: default; }
+.pick[disabled]:not([aria-pressed="true"]) { opacity: .35; }
+.result { font-family: var(--display); font-size: 24px; letter-spacing: .08em; text-align: center; }
+.result.win { color: var(--signal); }
+.result .odds { color: var(--signal); font-weight: 400; }
+.result .need { font-size: 16px; color: var(--dim); letter-spacing: .06em; }
+/* ---------- the algorithm, to test ---------- */
+.card.algocard { max-width: 640px; max-height: calc(100vh - 80px); overflow: auto; }
+.algo { padding: 12px 14px 14px; display: grid; gap: 9px; }
+.a-lede { margin: 0; font-size: 21px; color: var(--dim); line-height: 1.45; }
+.a-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.a-row .k { font-family: var(--display); font-size: 14px; letter-spacing: .1em; color: var(--dim); width: 104px; }
+.a-row input { flex: 1; min-width: 0; background: #000; color: #fff; border: 1px solid var(--faint); font: 19px var(--mono, monospace); padding: 5px 6px; }
+.a-math { margin: 0; background: #000; border: 1px solid var(--faint); padding: 8px 10px; font: 19px/1.6 var(--mono, monospace); white-space: pre-wrap; overflow-wrap: anywhere; color: #ddd; }
+.a-math b { color: var(--signal); font-weight: 400; }
+.a-grid { width: 100%; border-collapse: collapse; font-family: var(--display); font-size: 14px; letter-spacing: .06em; }
+.a-grid th, .a-grid td { border: 1px solid var(--faint); padding: 6px; text-align: center; }
+.a-grid th { color: var(--dim); font-weight: 400; }
+.a-grid td b { display: block; font-size: 21px; color: var(--signal); font-weight: 400; }
+.a-grid td span { color: var(--dim); }
+/* ---------- a challenge arrives / a challenge was turned down: one focused card ---------- */
+.card { width: 100%; max-width: 560px; background: var(--paper); border: 2px solid var(--signal);
+  box-shadow: 0 0 0 1px #000, 0 24px 80px rgba(0,0,0,.8); }
+.card.cold { border-color: rgba(255,255,255,.55); }
+.card .mtop.cold { color: #fff; border-bottom-color: var(--faint); background: none; }
+.card .mtop.cold .dot { background: #fff; animation: none; }
+.card .body { padding: 16px; display: grid; gap: 12px; }
+.card .col { display: grid; gap: 12px; align-content: start; min-width: 0; }
+#prompt { max-width: 640px; }
+/* Every screen's answer row stays reachable. This was `#prompt .acts` only, which is why ACCEPT /
+   DECLINE stayed on a 667-tall phone and CHALLENGE AGAIN, CHALLENGE and REMATCH did not: the rule
+   was written for one card and never generalised. Any row a player must be able to press carries
+   `acts`; it pins to the bottom of the viewport when the card is taller than the screen. */
+.acts { position: sticky; bottom: 0; z-index: 4; background: var(--paper); padding-top: 4px; }
+.centre > .acts { display: grid; gap: 6px; }
+/* while it is pinned, whatever is behind it slides under a fade rather than being cut mid-glyph.
+   Off the paper this gradient is paper-to-transparent over paper, so it is invisible unstuck. */
+.acts::before { content: ""; position: absolute; left: 0; right: 0; bottom: 100%; height: 16px;
+  background: linear-gradient(to top, var(--paper), transparent); pointer-events: none; }
+/* the incoming challenge, cut short: the art, who and how much, then MORE */
+.pc { padding: 16px; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 14px 16px; align-items: start; }
+.pc .nft { grid-row: span 1; }
+.pc .nft .art { width: 150px; height: 150px; }
+.pcmain { display: grid; gap: 8px; align-content: start; min-width: 0; }
+.pcwho { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; font-family: var(--display); font-size: 22px; letter-spacing: .05em; }
+.pcrank { font-size: 16px; color: var(--signal); border: 1px solid var(--signal); padding: 2px 6px; letter-spacing: .08em; }
+.pcbig { display: flex; align-items: center; gap: 10px; }
+.pcbig .n { font-family: var(--display); font-size: clamp(60px, 11vw, 105px); line-height: .9; color: var(--signal); }
+.pcbig .u { font-family: var(--display); font-size: 14px; letter-spacing: .12em; color: var(--dim); }
+.pcline { font-size: 19px; color: var(--dim); }
+.pcline b { color: #fff; font-weight: 500; }
+.pcmore { justify-self: start; font-family: var(--display); font-size: 14px; letter-spacing: .1em; background: none; color: var(--dim);
+  border: 1px solid var(--faint); padding: 4px 8px; cursor: pointer; display: inline-flex; gap: 6px; align-items: center; }
+.pcmore:hover { color: var(--signal); border-color: var(--signal); }
+.pcmore i { font-style: normal; color: var(--signal); }
+.pcdet { grid-column: 1 / -1; display: grid; gap: 10px; }
+.pcgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; }
+.pcgrid > div { border: 1px solid var(--faint); padding: 8px 10px; display: grid; gap: 3px; min-width: 0; }
+.pcgrid .k { font-family: var(--display); font-size: 13px; letter-spacing: .1em; color: var(--dim); }
+.pcgrid .v { font-size: 19px; overflow-wrap: anywhere; }
+.pc .acts { grid-column: 1 / -1; }
+@media (max-width: 559px) {
+  .pc { grid-template-columns: minmax(0, 1fr); }
+  .pc .nft, .pc .sprungart { justify-self: center; }
+}
+.from { display: flex; gap: 14px; align-items: center; }
+.from canvas { width: 88px; height: 88px; image-rendering: pixelated; border: 1px solid rgba(255,255,255,.5); background: #000; flex: none; }
+.from .name { font-family: var(--display); font-size: 26px; letter-spacing: .05em; line-height: 1.25; }
+.from .line { font-size: 21px; color: var(--dim); margin-top: 6px; }
+.from .line b { color: #fff; font-weight: 500; }
+.nft { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 14px; align-items: center; }
+.nft .art { position: relative; width: 208px; height: 208px; border: 1px solid rgba(255,255,255,.6); background: #000; }
+.nft .art canvas { width: 100%; height: 100%; image-rendering: pixelated; display: block; }
+.nft .art::after { content: "NFT"; position: absolute; left: -1px; bottom: -1px; font-family: var(--display); font-size: 12px;
+  letter-spacing: .12em; background: #fff; color: #000; padding: 2px 4px; }
+.nft .name { font-family: var(--display); font-size: 26px; letter-spacing: .05em; line-height: 1.25; }
+.nft .line { font-size: 21px; color: var(--dim); margin-top: 6px; overflow-wrap: anywhere; }
+.nft .line b { color: #fff; font-weight: 500; }
+.traits { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+.traits span { font-family: var(--display); font-size: 12px; letter-spacing: .08em; border: 1px solid rgba(255,255,255,.35); padding: 2px 4px; color: rgba(255,255,255,.75); }
+@media (max-width: 480px) { .nft .art { width: 136px; height: 136px; } .nft .name { font-size: 21px; } }
+.cmp { border: 1px solid var(--faint); padding: 10px 12px; display: grid; gap: 8px; }
+.cmp .head { display: flex; justify-content: space-between; gap: 8px; font-family: var(--display); font-size: 13px; letter-spacing: .1em; color: var(--dim); }
+.cmp .say { font-family: var(--display); font-size: 19px; letter-spacing: .06em; line-height: 1.5; }
+.cmp .say b { color: var(--signal); font-weight: 400; }
+.hist { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 2px; align-items: end; height: 42px; }
+.hist i { display: block; background: rgba(255,255,255,.35); min-height: 2px; position: relative; }
+.hist i.here { background: var(--signal); }
+.hist i.here::after { content: "▼"; position: absolute; left: 50%; top: -13px; transform: translateX(-50%); font-size: 16px; color: var(--signal); font-style: normal; }
+.axis { display: flex; justify-content: space-between; font-size: 18px; color: var(--dim); font-variant-numeric: tabular-nums; }
+.cmp .facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.cmp .facts div { min-width: 0; }
+.cmp .facts .k { display: block; font-family: var(--display); font-size: 12px; letter-spacing: .1em; color: var(--dim); }
+.cmp .facts .v { display: block; font-size: 20px; margin-top: 2px; font-variant-numeric: tabular-nums; }
+.big { text-align: center; border: 1px solid var(--faint); padding: 14px 8px 12px; }
+.big .k { font-family: var(--display); font-size: 18px; letter-spacing: .16em; color: var(--dim); }
+.big .n { font-family: var(--display); font-size: clamp(80px, min(22vw, 16vh), 175px); line-height: 1; margin: 8px 0 2px; color: var(--signal);
+  font-variant-numeric: tabular-nums; letter-spacing: .01em; }
+.big .u { font-family: var(--display); font-size: 21px; letter-spacing: .22em; }
+.big.gone .n { color: rgba(255,255,255,.35); text-decoration: line-through; text-decoration-thickness: 4px; }
+.terms2 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border: 1px solid var(--faint); }
+.terms2 > div { padding: 9px 10px; border-right: 1px solid rgba(255,255,255,.15); min-width: 0; }
+.terms2 > div:last-child { border-right: 0; }
+.terms2 .k { display: block; font-family: var(--display); font-size: 13px; letter-spacing: .1em; color: var(--dim); }
+.terms2 .v { display: block; font-size: 22px; margin-top: 4px; }
+.gamebox { border: 1px solid var(--signal); padding: 10px 12px; display: grid; gap: 5px; }
+.gamebox b { font-family: var(--display); font-size: 21px; letter-spacing: .07em; font-weight: 400; color: var(--signal); }
+.gamebox span { font-size: 21px; color: var(--dim); line-height: 1.5; }
+.card .note2 { font-size: 21px; color: var(--dim); text-align: center; line-height: 1.55; }
+.card .note2 b { color: #fff; font-weight: 500; }
+.demo { position: relative; z-index: 50; width: fit-content; margin: max(6px, env(safe-area-inset-top)) auto 0;
+  display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: center; max-width: calc(100% - 16px);
+  font-family: var(--display); font-size: 13px; letter-spacing: .1em; color: var(--dim);
+  background: rgba(0,0,0,.85); border: 1px dashed var(--faint); padding: 5px 8px; }
+/* the words a phone drops sit in an <i>; on a wide screen they are just part of the label */
+.demo .ghost i { font-style: normal; }
+.wrap > * { min-width: 0; }
+.from > div { min-width: 0; }
+.from .line { overflow-wrap: anywhere; }
+.sample { font-family: var(--display); font-size: 12px; letter-spacing: .1em; color: var(--dim); border: 1px dashed var(--faint); padding: 2px 5px; }
+
+/* ---------- cards: blackjack and hold'em ----------
+   One card tile, used by both games. White on black with the suit under the rank, because the palette
+   is ink, paper and signal — a red heart would be a fourth colour nothing else on the page has. */
+.cards { display: flex; gap: 4px; flex-wrap: wrap; justify-content: center; }
+.card2 { width: 38px; height: 52px; flex: none; border: 1px solid rgba(255,255,255,.7); background: #000;
+  display: grid; place-content: center; font-family: var(--display); font-size: 15px; line-height: 1.15; text-align: center; }
+.card2 i { font-style: normal; display: block; font-size: 15px; color: var(--dim); }
+.card2.down { border-style: dashed; border-color: var(--faint); color: var(--faint); }
+.card2.down i { color: var(--faint); }
+.card2.best { border-color: var(--signal); color: var(--signal); }
+.card2.best i { color: var(--signal); }
+/* The two hands sit SIDE BY SIDE, not stacked. Stacked they cost 110px, which is what pushed HIT and
+   STAND off a 667-tall phone and made hold'em 103px too tall for a 1024x640 laptop. Two hole cards are
+   80px wide, so both seats fit across even at 375 and there is nothing to shrink. */
+.seats { display: grid; gap: 9px; }
+.pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 9px; align-items: start; }
+.seat { display: grid; gap: 5px; justify-items: center; }
+.seat .cap { font-family: var(--display); font-size: 14px; letter-spacing: .1em; color: var(--dim); text-align: center; }
+.seat .cap.locked { color: var(--signal); }
+.tot { font-family: var(--display); font-size: 22px; font-variant-numeric: tabular-nums; }
+.tot.bust { color: var(--dim); text-decoration: line-through; }
+.tot.best { color: var(--signal); }
+.street { display: grid; gap: 5px; justify-items: center; border: 1px solid var(--faint); padding: 7px; }
+.street .cap { font-family: var(--display); font-size: 13px; letter-spacing: .1em; color: var(--dim); }
+.acts2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(92px, 1fr)); gap: 6px; }
+.acts2 .go { font-size: 17px; padding: 10px 6px; }
+
+/* ---------- Friend or Fiend: the hidden-things grid ---------- */
+.fof { display: grid; gap: 7px; justify-items: center; }
+.fof .lbl { font-family: var(--display); font-size: 13px; letter-spacing: .1em; color: var(--dim); text-align: center; }
+.gridn { display: grid; gap: 4px; width: min(100%, 272px); }
+.cell { aspect-ratio: 1; min-width: 0; padding: 0; background: none; cursor: pointer;
+  border: 1px solid rgba(255,255,255,.4); font-family: var(--display); font-size: 16px; color: var(--dim);
+  display: grid; place-items: center; }
+.cell:disabled { cursor: default; }
+.cell.friend { border-color: var(--signal); color: var(--signal); }
+.cell.fiend { border-color: #fff; color: #fff; background: rgba(255,255,255,.16); }
+.cell.empty { border-color: rgba(255,255,255,.13); color: var(--faint); }
+.tally { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; width: min(100%, 272px); }
+.tally > div { border: 1px solid var(--faint); padding: 5px 7px; min-width: 0; }
+.tally .k { display: block; font-family: var(--display); font-size: 12px; letter-spacing: .1em; color: var(--dim);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tally .v { display: block; font-family: var(--display); font-size: 19px; margin-top: 2px; }
+.tally .v b { color: var(--signal); font-weight: 400; }
+
+/* ---------- the glitching terminal that opens Friend or Fiend ----------
+   The idle is a PORT of `mapgen.html`'s ruins layer, not a second commission: the same signal-coloured
+   ghost knocked sideways in whole art-pixels and the same five bands, in the same bursts. It is
+   deliberately a different glitch from the title's and from the NFT card's `glitchArt` above. */
+.term { display: grid; justify-items: center; gap: 7px; }
+.term canvas { width: 92px; height: 92px; image-rendering: pixelated; }
+.term .cap { font-family: var(--display); font-size: 14px; letter-spacing: .09em; color: var(--dim);
+  text-align: center; line-height: 1.55; max-width: 34em; }
+.term .cap b { color: var(--signal); font-weight: 400; }
+
+/* ---------- a duel sprung by a terminal: one button, because an ambush is not an invitation ---------- */
+.card.sprung { border-color: #fff; }
+.sprungart { position: relative; width: 200px; height: 200px; border: 1px solid rgba(255,255,255,.6); background: #000; }
+.sprungart img { width: 100%; height: 100%; object-fit: cover; display: block; image-rendering: pixelated; }
+.sprungart::after { content: "WHAT YOU USED"; position: absolute; left: -1px; bottom: -1px; font-family: var(--display);
+  font-size: 12px; letter-spacing: .12em; background: #fff; color: #000; padding: 2px 4px; }
+@media (max-width: 480px) { .sprungart { width: 132px; height: 132px; } }
+
+/* --- short screens -------------------------------------------------------
+   These three blocks live at the END deliberately. They used to sit at the top, above the rules
+   they mean to override - and a media query adds NO specificity, so every later rule of equal
+   weight simply won and the whole compaction system was dead code. It was dead while the type
+   sizes inside it were being carefully re-tuned. Anything added here must stay after the base
+   rules it overrides.                                                                      */
+/* 800, not 760: the commonest laptop on earth is 1366x768 and it sat 8px above the old edge, so a
+   768-tall screen got none of the compaction written for it and scrolled. 900-tall screens are
+   still left alone. */
+@media (max-height: 800px) {
+  .player, .centre { padding: 10px 12px; gap: 9px; } .who canvas { width: 52px; height: 52px; }
+  .stats .v { font-size: 20px; } .stats > div { padding: 5px 6px; }
+  .recent div:nth-child(n+4) { display: none; }          /* last 3 when the screen is short */
+  .pot { padding: 8px 8px 7px; } .pot .n { font-size: 40px; } .mfoot { display: none; }
+  .hand canvas { width: 68px; height: 68px; } .arena { padding: 10px; gap: 9px; }
+}
+@media (max-height: 740px) {
+  .wrap { padding-top: 6px; padding-bottom: 6px; }
+  .centre, .player { gap: 7px; } .game { padding: 7px 9px; gap: 3px; } .game span { font-size: 18px; line-height: 1.35; }
+  .h2h { padding: 5px 8px; } .h2h .s { font-size: 22px; } .go { padding: 10px; } .stake .ghost { padding: 4px 7px; }
+  .mtop { padding: 7px 12px; } .result { font-size: 21px; }
+  /* the crossed-out pot is the tallest thing on the declined card: 16vh of a 640-tall screen is
+     102px of numeral for a number nobody won */
+  .big .n { font-size: clamp(60px, min(18vw, 13vh), 140px); margin: 4px 0 2px; }
+}
+@media (max-height: 800px) {
+  .card .body { padding: 12px; gap: 10px; } .card .col { gap: 10px; }
+  .nft .art { width: 168px; height: 168px; } .big { padding: 8px 8px 8px; } .cmp { padding: 8px 10px; gap: 6px; }
+  .hist { height: 32px; } .gamebox { padding: 8px 10px; }
+}
+/* --- the demo bar on a phone ---------------------------------------------
+   Left to wrap, it took FIVE rows and 164px at 375 wide - a quarter of the screen, and the reason
+   the RESULT line fell off a 667-tall phone. The fix is not to hide it: it is wanted, so it is
+   built. Two fixed rows on a three-column grid - label, switch, switch - instead of five rows of
+   flex wrap. The label column is capped at 7em so "DEMO . YOU ARE" breaks over two short lines
+   rather than reserving its full width, which is what leaves the switches wide enough to hit.
+   Every switch fills its cell and is 44px tall - Apple's guideline, not the WCAG floor of 24px.
+   The deployer chose 44 over 32 having seen both, knowing the cost: the bar goes from ~78px to
+   ~102px, and on a 667-tall phone the two hand captions go behind the pinned answer row. The
+   verdict, the pot and the hands all stay, because `order: -1` below lifts the verdict clear.
+   The word each button drops on a phone sits in an <i> - "THE CHALLENGER" becomes "CHALLENGER" -
+   so nothing is renamed, only shortened, and the wide screen is untouched.                   */
+@media (max-width: 600px) {
+  .demo { display: grid; grid-template-columns: minmax(0, auto) minmax(0, 1fr) auto;
+    gap: 4px 6px; align-items: center; width: calc(100% - 12px); max-width: none;
+    padding: 4px 5px; font-size: 10px; letter-spacing: .06em; }
+  .demo .dlab { max-width: 7em; line-height: 1.3; }
+  .demo > :nth-child(1) { grid-row: 1; grid-column: 1; }
+  .demo > :nth-child(2) { grid-row: 1; grid-column: 2 / -1; }
+  .demo > :nth-child(3) { grid-row: 2; grid-column: 1; }
+  .demo > :nth-child(4) { grid-row: 2; grid-column: 2; }
+  .demo > :nth-child(5) { grid-row: 2; grid-column: 3; }
+  .demo .seg { display: flex; }
+  .demo .seg .ghost { flex: 1; }
+  .demo .ghost { display: inline-flex; align-items: center; justify-content: center;
+    font-size: 12px; letter-spacing: .04em; padding: 0 6px; min-height: 44px; }
+  .demo .ghost i { display: none; }
+  /* The pinned answer row has to cover something - the screen is 1078px of content in 667px of
+     phone - and what it was covering was the one line the whole screen exists to deliver: the
+     verdict, which sits at the foot of the arena and landed exactly behind REMATCH. `fitcheck`
+     called that in view, because a rect inside the viewport is all it can see. So on a phone the
+     verdict is read first, above the hands that produced it, where nothing can pin over it:
+     POT, then WHO WON, then the hands, then the buttons. */
+  .arena .result { order: -1; }
+}
+/* --- short and WIDE: 1024x640 and the like ------------------------------
+   The declined card is a 560px column stacking five blocks down the middle of a 1024px screen,
+   with 460px of room sitting unused on either side and none at all underneath. The demo bar is
+   49px of that screen and it is wanted, so the 35px it costs comes from the axis that has room:
+   the card goes two columns wide and loses ~220px of height. Nothing is shrunk and nothing is
+   hidden - the same blocks are laid out across instead of down. The answer row stays full width,
+   because it is what you press.                                                              */
+@media (max-height: 700px) and (min-width: 820px) {
+  #nope { max-width: 820px; }
+  #nope .body { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+  #nope .body > .acts { grid-column: 1 / -1; }
+}
+/* --- the four games on short and narrow screens ---------------------------
+   Measured, not guessed. At 375x667 the arena's top lands at 404 and the viewport ends at 667, so
+   there are 263px for whatever the game puts there. A 272px board plus a two-box tally is 356 of
+   them, which is why the board comes down to 184px — 33px a cell, above the 24px floor — and the
+   tally becomes one line instead of two stacked boxes. A 640-tall laptop had the same board as its
+   only thing over the edge and loses 56px of it. Nothing else in the arena is shrunk on a phone: the
+   side-by-side seats further up already paid for the cards.
+   These live at the END for the reason the block above says: a media query adds no specificity, so a
+   rule written before the one it means to override is dead code. */
+@media (max-height: 800px) {
+  .gridn { width: min(100%, 216px); }
+  .seats { gap: 7px; } .pair { gap: 7px; } .street { padding: 6px; }
+}
+@media (max-height: 740px) {
+  .gridn { width: min(100%, 190px); }
+  .card2 { width: 34px; height: 46px; font-size: 14px; } .card2 i { font-size: 14px; }
+  .tot { font-size: 20px; } .term canvas { width: 78px; height: 78px; }
+}
+/* The tally keeps its label ABOVE its number when the screen is short, and only the type comes down.
+   Laid out side by side to save 28px it saved them by ellipsis instead — THEIR FR… 0 / 3, which is not
+   a score anybody can read. Label over number at 10px is 40px instead of 54, so it gives up half the
+   saving and none of the words. */
+@media (max-height: 740px), (max-width: 600px) {
+  .tally > div { padding: 3px 6px; }
+  .tally .k { font-size: 10px; letter-spacing: .06em; }
+  .tally .v { margin-top: 1px; font-size: 16px; }
+}
+@media (max-width: 600px) { .gridn { width: min(100%, 184px); } }
+/* --- four games in the picker, on a phone ---------------------------------
+   Two games fitted in ONE row 84px tall, ending at 551 with the pinned CHALLENGE row starting at 557:
+   it cleared by six pixels. Four games make a second row, and that row landed at 559-621 — entirely
+   behind the pinned row, so two of the four games could not be pressed at all at the top of the page.
+   A rectangle inside the viewport was all the old measure could see; `fitcheck`'s new hit test is what
+   caught it. There are 90px between the grid's top and the pinned row, so each row has to be about 41:
+   the name comes down to 12px, the size this file already uses for SAMPLE and for a stat's label, and
+   the name comes down to 12px — the size this file already uses for SAMPLE and for a stat's label.
+   MEASURED, and the first two tries were wrong for the same reason: Silkscreen is a WIDE face, near
+   0.8em an advance, so ROCK PAPER SCISSORS is ~182px and still wraps to two lines in a 133px column at
+   12px. It cannot be made to fit one line at any size a person would read, so the two lines are
+   accepted and paid for instead — a tighter line-height and the real padding (which needed
+   `.games.slim .game` to beat the slim rule's own 8px, not the `.games .game` I first wrote), plus the
+   pot's caption on one line rather than two. Measured after: the grid's foot moves from 621 to 509 and
+   the pinned row's top from 557 to 541 — 32px of clearance where there were −64, and the terms column
+   as a whole now ends at 661 inside a 667 viewport, so nothing there is pinned over anything.
+   And the reason the first version LOOKED fine: `b` is a grid item, so `display: block`, so
+   `getClientRects()` returns one rectangle whatever the line count. Counting rectangles to count lines
+   is not a measurement of lines. */
+@media (max-width: 600px) {
+  .games.slim .game { padding: 5px 7px; gap: 2px; }
+  .games .game b { font-size: 12px; letter-spacing: 0; line-height: 1.1; }
+  .games .game em { font-size: 11px; }
+  .pot .sub { font-size: 15px; }                       /* "each stakes 50 · winner takes 100" on one line */
+}
+/* Short and WIDE — 1024x640 — is the one size the board was still 24px too tall for, and the answer is
+   the same one the declined card above uses rather than a fifth round of shrinking: the tally moves
+   BESIDE the board instead of under it, so the 33px it costs comes off the axis that has room. Cells
+   stay 36px; nothing is hidden. */
+@media (max-height: 700px) and (min-width: 820px) {
+  .fof { grid-template-columns: auto auto; align-items: start; justify-content: center; gap: 6px 10px; }
+  .fof .lbl { grid-column: 1 / -1; }
+  .tally { width: auto; grid-template-columns: minmax(0, 1fr); }
+}
+
+</style>
+</head>
+<body>
+<div class="scrim" aria-hidden="true" id="scrim"></div>
+<div class="demo" role="group" aria-label="demo controls">
+  <span class="dlab">DEMO · YOU ARE</span>
+  <span class="seg"><button class="ghost" type="button" data-view="challenger" aria-pressed="true"><i>THE </i>CHALLENGER</button><button class="ghost" type="button" data-view="defender"><i>THE ONE </i>CHALLENGED</button></span>
+  <span class="dlab">· THEY WILL</span>
+  <span class="seg"><button class="ghost" type="button" data-answer="accept" aria-pressed="true">ACCEPT</button><button class="ghost" type="button" data-answer="decline">DECLINE</button></span>
+  <button class="ghost" type="button" id="reset">RESET</button>
+</div>
+<div class="wrap">
+  <div class="card" id="prompt" role="dialog" aria-modal="true" aria-labelledby="ptitle" hidden></div>
+  <div class="card cold" id="nope" role="dialog" aria-modal="true" aria-labelledby="ntitle" hidden></div>
+  <div class="card algocard" id="algo" role="dialog" aria-modal="true" aria-labelledby="atitle" hidden></div>
+  <div class="modal" id="main" role="dialog" aria-modal="true" aria-labelledby="phase">
+    <div class="mtop">
+      <i class="dot"></i><span>CHALLENGE</span><span>·</span><span id="phase">SET THE TERMS</span>
+      <span class="sp"></span>
+      <span class="sample">SAMPLE RECORDS</span>
+      <button class="ghost" type="button" id="xclose">CLOSE</button>
+    </div>
+    <div class="versus">
+      <section class="player" id="p1"></section>
+      <section class="centre" id="centre"></section>
+      <section class="player" id="p2"></section>
+    </div>
+    <div class="mfoot">
+      <span><b>THE POT</b> · both stake the same · the winner takes the pot</span>
+      <span class="sp" style="flex:1"></span>
+      <span>DEMO: THE OTHER SIDE IS PLAYED BY THE PAGE</span>
+      <button class="ghost" type="button" id="algoBtn">THE ALGORITHM</button>
+    </div>
+  </div>
+</div>
+<script src="chance.js"></script>
+<script src="duel.js"></script>
+<script>
+(() => {
+  'use strict';
+  const EMBED = new URLSearchParams(location.search).get('embed') === '1';
+  if (EMBED) { document.body.style.background = 'transparent'; document.documentElement.style.background = 'transparent'; $scrimHide(); }
+  else document.getElementById('scrim').innerHTML = '<iframe src="base.html" tabindex="-1" title=""></iframe>';
+  function $scrimHide() { document.getElementById('scrim').hidden = true; }
+  const leave = () => { if (EMBED && window.parent !== window) window.parent.postMessage({ type: 'challenge:close' }, location.origin); };
+  /* ---------- pixel art ---------- */
+  // Genesis art is the on-chain 8x8 bitmap: bit (y*8+x) set = white
+  const rows8 = (hex) => { const v = BigInt(hex);
+    return Array.from({ length: 8 }, (_, y) => Array.from({ length: 8 }, (_, x) => (v >> BigInt(y * 8 + x)) & 1n ? '#' : '.').join('')); };
+  function paint(cv, rows, col) {
+    const n = rows.length, pad = 1, c = cv.getContext('2d');
+    cv.width = n + pad * 2; cv.height = n + pad * 2;
+    c.fillStyle = '#000'; c.fillRect(0, 0, cv.width, cv.height);
+    c.fillStyle = col || '#fff';
+    rows.forEach((r, y) => [...r].forEach((ch, x) => { if (ch === '#') c.fillRect(x + pad, y + pad, 1, 1); }));
+  }
+  const HANDS = {
+    rock: ['............', '............', '...######...', '..#.#.#.###.', '.##########.', '.##########.',
+           '.##########.', '..#########.', '...#######..', '....#####...', '....#####...', '............'],
+    paper: ['..#.#.#.#...', '..#.#.#.#...', '..#.#.#.#...', '..#.#.#.#...', '..#######...', '..#######.#.',
+            '..#######.#.', '..########..', '..#######...', '...#####....', '...#####....', '............'],
+    scissors: ['..#...#.....', '..#...#.....', '..##..#.....', '...#.##.....', '...###......', '..#####.....',
+               '..######....', '..######....', '..#####.....', '...####.....', '...####.....', '............'],
+    hidden: ['............', '....####....', '...##..##...', '.......##...', '......##....', '.....##.....',
+             '.....##.....', '............', '.....##.....', '.....##.....', '............', '............'],
+  };
+
+  // Glitch: the art is drawn big, and every so often for a moment slices of it jump sideways, a green
+  // ghost splits off and a scanline flickers. Off for anyone who asks for reduced motion.
+  const CALM = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let glitchRaf = 0;
+  function glitchArt(cv, rows) {
+    cancelAnimationFrame(glitchRaf);
+    const n = rows.length, cell = 12, pad = 2, W = (n + pad * 2) * cell;
+    cv.width = W; cv.height = W;
+    const c = cv.getContext('2d'), src = document.createElement('canvas'); src.width = W; src.height = W;
+    const sc = src.getContext('2d');
+    sc.fillStyle = '#fff';                               // white pixels on nothing, so the ghost shows between slices
+    rows.forEach((r, y) => [...r].forEach((ch, x) => { if (ch === '#') sc.fillRect((x + pad) * cell, (y + pad) * cell, cell, cell); }));
+    const ghost = document.createElement('canvas'); ghost.width = W; ghost.height = W;
+    const gc = ghost.getContext('2d'); gc.drawImage(src, 0, 0); gc.globalCompositeOperation = 'source-in'; gc.fillStyle = '#CCFF00'; gc.fillRect(0, 0, W, W);
+    const rnd = (a, b) => a + Math.random() * (b - a);
+    let next = performance.now() + 700, until = 0;
+    const draw = (t) => {
+      if (!cv.isConnected) return;
+      c.fillStyle = '#000'; c.fillRect(0, 0, W, W);
+      if (!CALM && t > next) { until = t + rnd(160, 320); next = t + rnd(1200, 2600); }
+      const on = !CALM && t < until;
+      if (!on) c.drawImage(src, 0, 0);
+      else {
+        c.globalAlpha = 0.85; c.drawImage(ghost, Math.round(rnd(-6, 6)), 0); c.globalAlpha = 1;   // the green ghost
+        for (let y = 0; y < W;) {                                                                 // slices, knocked sideways
+          const h = Math.round(rnd(4, 18)), dx = Math.random() < 0.45 ? Math.round(rnd(-14, 14)) : 0;
+          c.drawImage(src, 0, y, W, h, dx, y, W, h); y += h;
+        }
+        c.fillStyle = 'rgba(255,255,255,.12)';
+        for (let i = 0; i < 3; i++) c.fillRect(0, Math.round(rnd(0, W)), W, 2);                     // scanline flicker
+      }
+      glitchRaf = requestAnimationFrame(draw);
+    };
+    glitchRaf = requestAnimationFrame(draw);
+  }
+
+  /* ---------- the players ---------- */
+  // Genesis #4 and #1: their real on-chain art. Purses and records are SAMPLE numbers, since no one
+  // has played yet; the page keeps them honest from here on as you play.
+  const P = {
+    p1: { id: 4, px: '0x003c3c5a5a5a7e00', purse: 240,
+          rec: { wins: 7, losses: 4, draws: 2, highest: 180, lowest: 20, net: 95, streak: 2 },
+          recent: [['ROCK PAPER SCISSORS', 60, 'W'], ['ROCK PAPER SCISSORS', 40, 'W'], ['ROCK PAPER SCISSORS', 180, 'L'], ['ROCK PAPER SCISSORS', 20, 'D'], ['ROCK PAPER SCISSORS', 100, 'W']] },
+    p2: { id: 1, px: '0x007e663c5a5a7e00', purse: 610,
+          rec: { wins: 12, losses: 9, draws: 1, highest: 400, lowest: 10, net: 140, streak: -1 },
+          recent: [['ROCK PAPER SCISSORS', 120, 'L'], ['ROCK PAPER SCISSORS', 400, 'W'], ['ROCK PAPER SCISSORS', 60, 'W'], ['ROCK PAPER SCISSORS', 10, 'L'], ['ROCK PAPER SCISSORS', 80, 'W']] },
+  };
+  // traits as the Genesis contract's tokenURI gives them (values of None / 0 left out)
+  P.p1.traits = { Eyes: 'Long', 'Eye spacing': 'Close', Frame: 'Narrow', Brow: 'Shallow', Cheeks: 'Medium', Crown: 'Flat', Chin: 'Soft', Jaw: 'Trim' };
+  P.p2.traits = { Lineage: 'Layered', Stature: 'Tall', Crown: 'Flat', Jaw: 'Square', Eyes: '1x2', 'Eye placement': 'High', Mouth: 'Small' };
+  const H2H = { p1: 3, p2: 2, draws: 1 };
+  // RANK comes from the record the card already keeps, nothing else: a player's score is their net crystals,
+  // then their win rate, then how many games they have played, so a long good run beats a lucky one. The field
+  // it is ranked against is SAMPLE, like the records: 120 players' nets from a fixed seed.
+  const PLAYERS = 120;
+  const score = (p) => { const r = p.rec, n = r.wins + r.losses + r.draws; return [r.net, n ? r.wins / n : 0, n]; };
+  const FIELD = (() => { let a = 1234567; const rnd = () => { a = (a * 1103515245 + 12345) & 0x7fffffff; return a / 0x7fffffff; };
+    return Array.from({ length: PLAYERS - 2 }, () => Math.round((rnd() - 0.45) * 600)); })();
+  const ahead = (x, y) => x[0] !== y[0] ? x[0] > y[0] : x[1] !== y[1] ? x[1] > y[1] : x[2] > y[2];
+  const rankOf = (p) => { const mine = score(p), other = p === P.p1 ? P.p2 : P.p1;
+    return 1 + FIELD.filter(v => v > mine[0]).length + (ahead(score(other), mine) ? 1 : 0); };
+  // every pot played at each game, across all players: SAMPLE numbers until games are played for real
+  const POTS = { rps: [10, 20, 20, 20, 20, 40, 40, 40, 40, 50, 50, 50, 60, 60, 60, 60, 80, 80, 100, 100, 100, 100, 120, 120, 150, 180, 200, 200, 240, 400],
+                 blackjack: [], holdem: [], fof: [] };
+  const START = JSON.stringify({ P, H2H, POTS });
+
+  /* ---------- games: the pot is the same for all of them; each game only decides who won ---------- */
+  // To add a game: push { id, name, blurb, ready: true, play(arena, done) } where done('p1' | 'p2' | 'draw').
+  const GAMES = [
+    { id: 'rps', name: 'ROCK PAPER SCISSORS', ready: true,
+      blurb: 'Pick in secret. The picks set the odds (' + Duel.TERMS.counterBps / 100 + ' / ' + Duel.TERMS.sameBps / 100 + ' / ' +
+        (100 - Duel.TERMS.counterBps / 100) + '%), the chance roll decides.',
+      play: playRPS },
+    { id: 'blackjack', name: 'BLACKJACK', ready: true,
+      blurb: 'Closest to 21 without going over. Aces count 11 until the hand would bust. Dealt from the duel’s word, so the same word deals the same cards.',
+      play: playBJ },
+    { id: 'holdem', name: 'TEXAS HOLD’EM', ready: true,
+      blurb: 'Two cards each, five in the middle, best five of seven. The stake is the ante — play on or fold at every street.',
+      play: playHoldem },
+    { id: 'fof', name: 'FRIEND OR FIEND', ready: true, terminal: true,
+      blurb: 'Reached through a glitching terminal. Each side hides things; you probe theirs. What you turn up is a Friend or a fiend.',
+      play: playFoF },
+  ];
+  const STAKES = [10, 25, 50, 100, 200];
+
+  // screen: 'main' (terms, play, result) · 'prompt' (a challenge has arrived) · 'nope' (it was not accepted)
+  const S = { view: 'challenger', screen: 'main', answer: 'accept', phase: 'terms', stake: 50, game: 'rps', pot: 0, winner: null, duels: 0, last: null, det: false, sprung: false };
+  const me = () => S.view === 'challenger' ? 'p1' : 'p2';           // whose seat you are in
+  const them = () => me() === 'p1' ? 'p2' : 'p1';
+  const $ = (id) => document.getElementById(id);
+  const maxStake = () => Math.min(P.p1.purse, P.p2.purse);
+  const PHASES = { terms: 'SET THE TERMS', sent: 'WAITING FOR AN ANSWER', staking: 'STAKES IN', play: 'PLAY', done: 'RESULT' };
+
+  function renderPlayer(k) {
+    const p = P[k], r = p.rec, played = r.wins + r.losses + r.draws, rate = played ? r.wins / played : 0;
+    const el = $(k);
+    el.classList.toggle('win', S.winner === k);
+    const head =
+      (S.winner === k ? '<span class="tag">WINS ' + S.pot + '</span>' : '') +
+      '<div class="who"><canvas></canvas><div>' +
+        '<div class="name">GENESIS #' + p.id + '<span class="pcrank">RANK ' + rankOf(p) + '</span></div>' +
+        '<div class="role">' + (k === 'p1' ? 'CHALLENGER' : 'CHALLENGED') + (k === me() ? ' · YOU' : '') + '</div>' +
+        '<div class="purse">PURSE <b data-purse="' + k + '">' + p.purse + '</b> crystals</div>' +
+      '</div></div>';
+    if (!S.det) {                                       // short: who they are, their rank and their purse
+      el.innerHTML = head + '<div class="pcline">' + recLine(p) + '</div>';
+      paint(el.querySelector('canvas'), rows8(p.px), '#fff');
+      return;
+    }
+    el.innerHTML = head +
+      '<div class="lab"><span>RECORD</span><span>' + played + ' PLAYED</span></div>' +
+      '<div class="stats">' +
+        '<div><span class="k">WINS</span><span class="v" data-s="wins">' + r.wins + '</span></div>' +
+        '<div><span class="k">LOSSES</span><span class="v" data-s="losses">' + r.losses + '</span></div>' +
+        '<div><span class="k">DRAWS</span><span class="v" data-s="draws">' + r.draws + '</span></div>' +
+        '<div><span class="k">WIN RATE</span><span class="v">' + Math.round(rate * 100) + '<small>%</small></span><div class="bar"><i style="width:' + (rate * 100).toFixed(0) + '%"></i></div></div>' +
+        '<div><span class="k">HIGH POT</span><span class="v" data-s="highest">' + r.highest + '</span></div>' +
+        '<div><span class="k">LOW POT</span><span class="v" data-s="lowest">' + r.lowest + '</span></div>' +
+        '<div><span class="k">NET</span><span class="v">' + (r.net > 0 ? '+' : '') + r.net + '</span></div>' +
+        '<div><span class="k">STREAK</span><span class="v">' + (r.streak > 0 ? 'W' + r.streak : r.streak < 0 ? 'L' + -r.streak : '—') + '</span></div>' +
+      '</div>' +
+      '<div class="lab"><span>LAST 5</span><span>POT</span></div>' +
+      '<div class="recent">' + p.recent.slice(0, 5).map(([g, pot, res]) =>
+        '<div><span class="r' + (res === 'W' ? ' w' : '') + '">' + res + '</span><span class="g">' + g + '</span><span class="p">' + pot + '</span></div>').join('') + '</div>';
+    paint(el.querySelector('canvas'), rows8(p.px), '#fff');
+  }
+
+  function renderCentre() {
+    const c = $('centre'), g = GAMES.find(x => x.id === S.game);
+    const terms = S.phase === 'terms';
+    let html =
+      '<div class="pot' + (terms ? '' : ' slim') + '"><div class="k">POT</div><div class="n' + (S.pot ? ' live' : '') + '" id="potn">' + (S.pot || S.stake * 2) + '</div>' +
+      '<div class="sub" id="potsub">' + (S.pot ? 'in the pot' : 'each stakes ' + S.stake + ' · winner takes ' + S.stake * 2) + '</div></div>';
+    if (terms) {
+      html += '<div class="lab"><span>STAKE EACH</span><span>MAX ' + maxStake() + '</span></div><div class="stake">' +
+        STAKES.map(v => '<button class="ghost" type="button" data-stake="' + v + '"' + (S.stake === v ? ' aria-pressed="true"' : '') + (v > maxStake() ? ' disabled' : '') + '>' + v + '</button>').join('') + '</div>';
+      html += '<div class="lab"><span>GAME</span><span>' + GAMES.filter(x => x.ready).length + ' OF ' + GAMES.length + ' READY</span></div><div class="games' + (S.det ? '' : ' slim') + '">' +
+        GAMES.map(x => '<button class="game" type="button" data-game="' + x.id + '"' + (S.game === x.id ? ' aria-pressed="true"' : '') + (x.ready ? '' : ' disabled') + '>' +
+          '<b>' + x.name + '</b>' + (S.det ? '<span>' + x.blurb + '</span>' : '') + (x.ready ? '' : '<em>COMING LATER</em>') + '</button>').join('') + '</div>';
+    } else {
+      html += '<div class="lab"><span style="color:var(--signal)">' + g.name + '</span><span>STAKE ' + S.stake + ' EACH</span></div>';
+    }
+    if (terms && S.det) html += '<div class="lab"><span>HEAD TO HEAD</span><span>' + (H2H.p1 + H2H.p2 + H2H.draws) + ' GAMES</span></div>' +
+      '<div class="h2h"><span class="s">' + H2H.p1 + '</span><span class="m">#' + P.p1.id + ' · WINS · #' + P.p2.id + '<br>' + H2H.draws + ' DRAW' + (H2H.draws === 1 ? '' : 'S') + '</span><span class="s">' + H2H.p2 + '</span></div>';
+    else if (!terms) html += '<div class="h2hline">HEAD TO HEAD · #' + P.p1.id + ' <b>' + H2H.p1 + '</b> – <b>' + H2H.p2 + '</b> #' + P.p2.id + ' · ' + H2H.draws + ' DRAW' + (H2H.draws === 1 ? '' : 'S') + '</div>';
+    html += '<div class="arena" id="arena"' + (S.phase === 'play' || S.phase === 'done' ? '' : ' hidden') + '></div>';
+    html += '<div class="msg" id="msg"></div>';
+    if (terms) html += '<div class="acts">' +
+      '<button class="go" type="button" id="send"' + (S.stake > maxStake() ? ' disabled' : '') + '>' +
+        (g.terminal ? 'FIND A TERMINAL · ' + S.stake : 'CHALLENGE GENESIS #' + P[them()].id + ' · ' + S.stake) + '</button>' +
+      '<button class="pcmore" type="button" id="cmore" aria-expanded="' + S.det + '">' + (S.det ? 'LESS' : 'MORE') + ' <i>' + (S.det ? 'v' : '^') + '</i></button></div>';
+    if (S.phase === 'done') html += '<div class="row2 acts"><button class="go alt" type="button" id="close">BACK TO THE BASE</button><button class="go" type="button" id="again">REMATCH</button></div>';
+    c.innerHTML = html;
+    c.querySelectorAll('[data-stake]').forEach(b => b.onclick = () => { if (!b.disabled) { S.stake = +b.dataset.stake; render(); } });
+    c.querySelectorAll('[data-game]').forEach(b => b.onclick = () => { if (!b.disabled) { S.game = b.dataset.game; render(); } });
+    if ($('cmore')) $('cmore').onclick = () => { S.det = !S.det; render(); };
+    if ($('send')) $('send').onclick = send;
+    if ($('again')) $('again').onclick = () => restart();
+    if ($('close')) $('close').onclick = () => { restart();
+      if (EMBED) leave(); else say('Closed. (Opened from the base, this returns you to the map.)'); };
+  }
+  const gameOf = () => GAMES.find(x => x.id === S.game);
+  const recLine = (p) => { const r = p.rec, n = r.wins + r.losses + r.draws; return '<b>' + r.wins + '</b> W · <b>' + r.losses + '</b> L · ' + (n ? Math.round(r.wins / n * 100) : 0) + '% won'; };
+  // the challenge arrives: who, which game, and how much there is to win, in the biggest type on the page
+  // The incoming challenge, cut to what you need to answer it: how much, from whom, and how good they are.
+  // Everything else — their record, the head-to-head, their traits, how this pot compares — is behind ^ MORE.
+  function renderPrompt() {
+    const from = P.p1, you = P.p2, g = gameOf(), afford = you.purse >= S.stake, pot = S.stake * 2;
+    const traits = Object.entries(from.traits || {}).map(([k, v]) => '<span>' + k.toUpperCase() + ' ' + String(v).toUpperCase() + '</span>').join('');
+    $('prompt').className = 'card';                   // an ambush leaves `sprung` on it; an invitation takes it off
+    $('prompt').innerHTML =
+      '<div class="mtop"><i class="dot"></i><span id="ptitle">INCOMING CHALLENGE</span><span class="sp"></span><span class="sample">SAMPLE RECORDS</span></div>' +
+      '<div class="pc">' +
+        '<div class="nft"><div class="art"><canvas aria-label="Genesis #' + from.id + '"></canvas></div></div>' +
+        '<div class="pcmain">' +
+          '<div class="pcwho"><b>GENESIS #' + from.id + '</b><span class="pcrank">RANK ' + rankOf(from) + '</span></div>' +
+          '<div class="pcbig"><span class="n" id="bign">' + pot + '</span><span class="u">CRYSTALS<br>TO WIN</span></div>' +
+          '<div class="pcline">' + g.name.toLowerCase() + ' · you stake <b>' + S.stake + '</b> of your <b>' + you.purse + '</b></div>' +
+          '<button class="pcmore" type="button" id="pmore" aria-expanded="false" aria-controls="pdet">MORE <i>^</i></button>' +
+        '</div>' +
+        '<div class="pcdet" id="pdet" hidden>' +
+          '<div class="pcgrid">' +
+            '<div><span class="k">THEIR RECORD</span><span class="v">' + recLine(from) + '</span></div>' +
+            '<div><span class="k">HEAD TO HEAD</span><span class="v">#' + from.id + ' <b>' + H2H.p1 + '</b> – <b>' + H2H.p2 + '</b> #' + you.id + ' · ' + H2H.draws + ' drawn</span></div>' +
+            '<div><span class="k">RANK · BY NET CRYSTALS</span><span class="v"><b>' + rankOf(from) + '</b> of ' + PLAYERS + ' (net ' + (from.rec.net >= 0 ? '+' : '') + from.rec.net + ') · you are <b>' + rankOf(you) + '</b></span></div>' +
+          '</div>' +
+          '<div class="gamebox"><b>' + g.name + '</b><span>' + g.blurb + '</span></div>' +
+          compareHTML(S.game, pot) +
+          '<div class="traits">' + traits + '</div>' +
+        '</div>' +
+        '<div class="row2 acts"><button class="go alt" type="button" id="pdecline">NOT WORTH MY TIME</button>' +
+          '<button class="go" type="button" id="paccept"' + (afford ? '' : ' disabled') + '>' + (afford ? "LET'S GET IT ON · " + S.stake : 'NOT ENOUGH CRYSTALS') + '</button></div>' +
+      '</div>';
+    glitchArt($('prompt').querySelector('.art canvas'), rows8(from.px));
+    $('pmore').onclick = () => { const d = $('pdet'), open = d.hidden; d.hidden = !open;
+      $('pmore').setAttribute('aria-expanded', String(open)); $('pmore').innerHTML = (open ? 'LESS' : 'MORE') + ' <i>' + (open ? 'v' : '^') + '</i>'; };
+    $('paccept').onclick = () => { if ($('paccept').disabled) return; S.screen = 'main'; render(); startStakes(); };
+    $('pdecline').onclick = () => { S.screen = 'nope'; S.nopeSeen = 'challenger'; render(); };
+  }
+
+  // how this pot sits among every pot played at the same game
+  function potStats(game, pot) {
+    const all = (POTS[game] || []).slice().sort((a, b) => a - b), n = all.length;
+    if (!n) return null;
+    const below = all.filter(v => v < pot).length, avg = all.reduce((a, b) => a + b, 0) / n;
+    return { n, pct: Math.round(below / n * 100), avg: Math.round(avg), median: all[Math.floor(n / 2)], max: all[n - 1], min: all[0], all };
+  }
+  function compareHTML(game, pot) {
+    const st = potStats(game, pot), name = GAMES.find(x => x.id === game).name;
+    if (!st) return '<div class="cmp"><div class="head"><span>AGAINST OTHER ' + name + ' POTS</span></div><div class="say">The first ' + name + ' pot.</div></div>';
+    // bins on a log scale, so small and big pots both show; this pot's bin is marked
+    const lo = Math.log(Math.min(st.min, pot)), hi = Math.log(Math.max(st.max, pot) + 1), B = 12;
+    const bin = (v) => Math.min(B - 1, Math.floor((Math.log(v) - lo) / (hi - lo) * B));
+    const counts = Array(B).fill(0); st.all.forEach(v => counts[bin(v)]++);
+    const top = Math.max(...counts), mine = bin(pot);
+    const rel = pot > st.max ? 'the <b>biggest</b> ' + name + ' pot yet'
+      : 'bigger than <b>' + st.pct + '%</b> of ' + name + ' pots · <b>' + (pot / st.avg).toFixed(1) + '×</b> the average';
+    return '<div class="cmp"><div class="head"><span>AGAINST OTHER ' + name + ' POTS</span><span class="sample">SAMPLE · ' + st.n + ' GAMES</span></div>' +
+      '<div class="say">This pot is ' + rel + '.</div>' +
+      '<div class="hist" aria-hidden="true">' + counts.map((c, i) => '<i' + (i === mine ? ' class="here"' : '') + ' style="height:' + Math.max(4, c / top * 100) + '%"></i>').join('') + '</div>' +
+      '<div class="axis"><span>' + Math.min(st.min, pot) + '</span><span>' + Math.max(st.max, pot) + '</span></div>' +
+      '<div class="facts"><div><span class="k">AVERAGE</span><span class="v">' + st.avg + '</span></div>' +
+        '<div><span class="k">MEDIAN</span><span class="v">' + st.median + '</span></div>' +
+        '<div><span class="k">BIGGEST</span><span class="v">' + st.max + '</span></div>' +
+        '<div><span class="k">SMALLEST</span><span class="v">' + st.min + '</span></div></div></div>';
+  }
+  // the challenger's side of a no: what was offered, crossed out, and that nothing was taken
+  function renderNope() {
+    const to = P.p2, you = P.p1, g = gameOf();
+    $('nope').innerHTML =
+      '<div class="mtop cold"><i class="dot"></i><span id="ntitle">CHALLENGE NOT ACCEPTED</span><span class="sp"></span>' +
+        (S.view === 'defender' ? '<span class="sample">WHAT GENESIS #' + you.id + ' SEES</span>' : '') + '</div>' +
+      '<div class="body">' +
+        '<div class="from"><canvas style="opacity:.5"></canvas><div><div class="name">GENESIS #' + to.id + '<br>DECLINED</div>' +
+          '<div class="line">your challenge to <b>' + g.name + '</b></div></div></div>' +
+        '<div class="big gone"><div class="k">THE POT WOULD HAVE BEEN</div><div class="n">' + S.stake * 2 + '</div><div class="u">CRYSTALS</div></div>' +
+        '<div class="terms2"><div><span class="k">GAME</span><span class="v" style="font-size:21px">' + g.name + '</span></div>' +
+          '<div><span class="k">STAKE EACH</span><span class="v">' + S.stake + '</span></div>' +
+          '<div><span class="k">YOUR PURSE</span><span class="v">' + you.purse + '</span></div></div>' +
+        '<div class="note2">Nothing was staked: your <b>' + you.purse + '</b> crystals are all still in your purse.</div>' +
+        '<div class="row2 acts"><button class="go alt" type="button" id="nback">BACK TO THE BASE</button><button class="go" type="button" id="nagain">CHALLENGE AGAIN</button></div>' +
+      '</div>';
+    paint($('nope').querySelector('canvas'), rows8(to.px), '#fff');
+    $('nback').onclick = () => { if (EMBED) { restart(); leave(); } else restart(); };
+    $('nagain').onclick = () => { S.view = 'challenger'; restart(); };
+  }
+  function render() {
+    $('prompt').hidden = S.screen !== 'prompt'; $('nope').hidden = S.screen !== 'nope'; $('main').hidden = S.screen !== 'main';
+    $('main').classList.toggle('short', !S.det);       // players stacked down the left until MORE opens them
+    if (S.screen === 'prompt') S.sprung ? renderSprung() : renderPrompt();
+    if (S.screen === 'nope') renderNope();
+    if (S.screen === 'main') { $('phase').textContent = PHASES[S.phase]; renderPlayer('p1'); renderPlayer('p2'); renderCentre(); }
+    document.querySelectorAll('[data-view]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.view === S.view)));
+    document.querySelectorAll('[data-answer]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.answer === S.answer)));
+  }
+  // back to the start of whichever side you are on
+  function restart() {
+    S.winner = null; S.pot = 0; S.phase = 'terms';
+    S.screen = S.view === 'challenger' ? 'main' : 'prompt';
+    render();
+  }
+  function say(html) { const m = $('msg'); if (m) m.innerHTML = html; }
+  const wait = (ms) => new Promise(r => setTimeout(r, ms));
+
+  async function send() {
+    S.phase = 'sent'; render();
+    say('Challenge sent to <b>GENESIS #' + P[them()].id + '</b>…');
+    await wait(1100);
+    if (S.answer === 'decline') { S.screen = 'nope'; render(); return; }
+    say('<b>GENESIS #' + P[them()].id + '</b> accepted.');
+    await wait(500);
+    startStakes();
+  }
+  // both stakes leave the purses and land in the pot; this part is the same for every game
+  async function startStakes() {
+    S.phase = 'staking'; S.pot = 0; render();
+    P.p1.purse -= S.stake; P.p2.purse -= S.stake;
+    renderPlayer('p1'); renderPlayer('p2');
+    const pot = document.querySelector('.pot');
+    ['l', 'r'].forEach((side, i) => { for (let j = 0; j < 4; j++) setTimeout(() => {
+      const gm = document.createElement('i'); gm.className = 'gem ' + side; pot.appendChild(gm); setTimeout(() => gm.remove(), 800); }, i * 120 + j * 90); });
+    await tick('potn', 0, S.stake * 2, 700);
+    S.pot = S.stake * 2;
+    S.phase = 'play'; render();
+    GAMES.find(x => x.id === S.game).play($('arena'), settle);
+  }
+  function tick(id, from, to, ms) {
+    return new Promise(res => { const t0 = performance.now(); const step = (t) => {
+      const q = Math.min(1, (t - t0) / ms), el = $(id); if (el) el.textContent = Math.round(from + (to - from) * q);
+      if (q < 1) requestAnimationFrame(step); else res(); }; requestAnimationFrame(step); });
+  }
+  // the pot goes to the winner, or back to both on a draw; every game ends here
+  async function settle(result) {
+    const pot = S.pot, game = GAMES.find(x => x.id === S.game).name;
+    if (result === 'draw') { P.p1.purse += S.stake; P.p2.purse += S.stake; }
+    else P[result].purse += pot;
+    ['p1', 'p2'].forEach(k => {
+      const r = P[k].rec, won = result === k, lost = result !== 'draw' && !won;
+      if (result === 'draw') r.draws++; else if (won) r.wins++; else r.losses++;
+      r.highest = Math.max(r.highest, pot); r.lowest = Math.min(r.lowest, pot);
+      r.net += won ? pot / 2 : lost ? -pot / 2 : 0;
+      r.streak = result === 'draw' ? 0 : won ? Math.max(1, r.streak + 1) : Math.min(-1, r.streak - 1);
+      P[k].recent.unshift([game, pot, result === 'draw' ? 'D' : won ? 'W' : 'L']);
+    });
+    if (result === 'draw') H2H.draws++; else H2H[result]++;
+    (POTS[S.game] = POTS[S.game] || []).push(pot);
+    S.winner = result === 'draw' ? null : result;
+    S.phase = 'done';
+    const arena = $('arena');
+    render();
+    $('arena').replaceWith(arena);                      // keep the final hands (canvases and all) on screen
+    say(result === 'draw' ? 'A draw. Both stakes go back: <b>' + S.stake + '</b> each.'
+      : '<b>GENESIS #' + P[result].id + '</b> takes the pot of <b>' + pot + '</b>.');
+  }
+
+  /* ---------- rock paper scissors ---------- */
+  function playRPS(arena, done) {
+    const names = ['rock', 'paper', 'scissors'];
+    const beats = { rock: 'scissors', scissors: 'paper', paper: 'rock' };
+    arena.innerHTML =
+      '<div class="hands">' +
+        '<div class="hand mine"><canvas id="hm"></canvas><span class="cap" id="cm">GENESIS #' + P[me()].id + ' · PICK ONE</span></div>' +
+        '<span class="vs">VS</span>' +
+        '<div class="hand theirs"><canvas id="ht"></canvas><span class="cap" id="ct">GENESIS #' + P[them()].id + ' · THINKING</span></div>' +
+      '</div>' +
+      '<div class="picks">' + names.map(n => '<button class="pick" type="button" data-pick="' + n + '"><canvas></canvas><span>' + n.toUpperCase() + '</span></button>').join('') + '</div>' +
+      '<div class="result" id="rres"></div>';
+    paint($('hm'), HANDS.rock); paint($('ht'), HANDS.hidden);
+    arena.querySelectorAll('.pick canvas').forEach((cv, i) => paint(cv, HANDS[names[i]]));
+    say('Pick in secret. Nobody sees a pick until both are locked in.');
+    // their pick is sealed first (on chain: a commitment, revealed after both have picked)
+    const r = new Uint32Array(1); crypto.getRandomValues(r);
+    const theirs = names[r[0] % 3];
+    // the duel's inputs, as RareDuel has them on chain: this contract, this chain, this duel's id
+    const duelId = ++S.duels, ctx = { contract: Chance.PREVIEW_CONTRACT, chainId: Chance.CHAIN_ID };
+    const salt = () => Chance.randomWord();
+    const addr = (k) => '0x' + String(P[k].id).padStart(40, '0');      // a stand-in wallet for each Genesis
+    setTimeout(() => { const c = $('ct'); if (c && !c.dataset.done) { c.textContent = 'GENESIS #' + P[them()].id + ' · SEALED'; c.classList.add('locked'); } }, 900);
+    arena.querySelectorAll('[data-pick]').forEach(b => b.onclick = async () => {
+      const mine = b.dataset.pick;
+      arena.querySelectorAll('[data-pick]').forEach(x => { x.disabled = true; x.setAttribute('aria-pressed', String(x === b)); });
+      $('cm').textContent = 'GENESIS #' + P[me()].id + ' · SEALED'; $('cm').classList.add('locked');
+      $('ct').dataset.done = '1'; $('ct').textContent = 'GENESIS #' + P[them()].id + ' · SEALED'; $('ct').classList.add('locked');
+      const pick = { [me()]: mine, [them()]: theirs };
+      const seal = (k) => Duel.commitment(ctx, duelId, addr(k), pick[k], salt()).slice(0, 10) + '…';
+      say('Both sealed: #' + P.p1.id + ' <b>' + seal('p1') + '</b> · #' + P.p2.id + ' <b>' + seal('p2') + '</b>. Reveal…');
+      // rock… paper… scissors…: both fists pump three times, then open
+      paint($('hm'), HANDS.rock); paint($('ht'), HANDS.rock);
+      arena.querySelectorAll('.hand').forEach(h => h.classList.add('shake'));
+      for (const w of ['ROCK…', 'PAPER…', 'SCISSORS…']) { $('rres').textContent = w; $('rres').className = 'result'; await wait(360); }
+      arena.querySelectorAll('.hand').forEach(h => h.classList.remove('shake'));
+      paint($('hm'), HANDS[mine]); paint($('ht'), HANDS[theirs]);
+      $('cm').textContent = 'GENESIS #' + P[me()].id + ' · ' + mine.toUpperCase();
+      $('ct').textContent = 'GENESIS #' + P[them()].id + ' · ' + theirs.toUpperCase();
+      // the picks set the odds; one roll off the Entropy word decides (the FriendSDK's roll, as RareDuel settles it)
+      const word = Chance.randomWord(), out = Duel.settle(Object.assign({ word }, ctx), duelId, pick.p1, pick.p2, S.stake);
+      const myOdds = me() === 'p1' ? out.odds : 10000 - out.odds;
+      $('rres').className = 'result';
+      $('rres').innerHTML = 'YOUR ODDS <b class="odds">' + myOdds / 100 + '%</b>';
+      say(mine === theirs ? 'The same pick: even odds.' : Duel.beats(mine, theirs) ? 'Your ' + mine + ' beats their ' + theirs + ': the odds are with you.'
+        : 'Their ' + theirs + ' beats your ' + mine + ': the odds are against you, but it isn\'t over.');
+      await wait(900);
+      const need = me() === 'p1' ? 'UNDER ' + out.odds : out.odds + ' OR OVER';
+      const t0 = performance.now();                  // the roll: digits spin, then land
+      await new Promise(res => { const spin = (t) => { const el = $('rres'); if (!el) return res();
+        const done = t - t0 > 1100, v = done ? out.roll : Math.floor(Math.random() * 10000);
+        el.innerHTML = 'ROLL <b class="odds">' + String(v).padStart(4, '0') + '</b> <span class="need">· YOU NEED ' + need + '</span>';
+        if (done) res(); else requestAnimationFrame(spin); }; requestAnimationFrame(spin); });
+      await wait(500);
+      const res = out.winner;
+      $('rres').innerHTML = (res === me() ? 'YOU WIN' : 'YOU LOSE') + ' <span class="need">· ROLL ' + String(out.roll).padStart(4, '0') + ' · ODDS ' + myOdds / 100 + '%</span>';
+      $('rres').className = 'result' + (res === me() ? ' win' : '');
+      S.last = { duelId, word, pick, out };
+      await wait(700);
+      done(res);
+    });
+  }
+
+  /* ---------- a deck, dealt from the duel's own Entropy word ----------
+     Cards are NOT Math.random(). Every one comes off the same roll the chain runs —
+     roll = keccak256(abi.encode(word, contract, chain id, duel id, play id)) % 10000 — so one word
+     always deals the same cards, and a game can be replayed anywhere that word is known. What is
+     shared with the chain here is the ROLL, not a settlement: there is no Solidity for these two card
+     games yet, and there is nothing for `paritycheck` to hold together until there is.
+     The shuffle throws away the tail of the range rather than taking `% n` straight: a 0..9999 roll
+     modulo anything that does not divide 10000 leans on the low numbers, and a deck that leans is not
+     a deck. Same reason `abi.encode` is not optional. */
+  const SUITS = ['♠', '♥', '♦', '♣'];           // spade, heart, diamond, club
+  const RANKS = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
+  const rankIx = (c) => c % 13, suitIx = (c) => (c / 13) | 0;
+  const cardHTML = (c, cls) => c == null ? '<span class="card2 down">?<i>·</i></span>'
+    : '<span class="card2' + (cls ? ' ' + cls : '') + '">' + RANKS[rankIx(c)] + '<i>' + SUITS[suitIx(c)] + '</i></span>';
+  const handHTML = (cs, hi) => cs.map(c => cardHTML(c, hi && c != null && hi.indexOf(c) >= 0 ? 'best' : '')).join('');
+  function rolls(word, duelId) {                                    // a uniform 0..n-1 off this duel's word
+    const s = Chance.stream(word, Chance.PREVIEW_CONTRACT, Chance.CHAIN_ID, duelId);
+    return (n) => { const lim = Math.floor(10000 / n) * n; let r; do { r = s(); } while (r >= lim); return r % n; };
+  }
+  const shuffled = (n, below) => { const a = Array.from({ length: n }, (_, i) => i);
+    for (let i = n - 1; i > 0; i--) { const j = below(i + 1), t = a[i]; a[i] = a[j]; a[j] = t; } return a; };
+  const deckFor = (word, duelId) => { const d = shuffled(52, rolls(word, duelId)); return () => d.pop(); };
+
+  /* ---------- blackjack: closest to 21 without going over ----------
+     Aces are 11 until the hand would bust and then 1 — counted, not chosen. STAND_ON is the ordinary
+     rule, and it is the PAGE's rule: it is what stands in for a person until M7 makes the other side
+     real, so it is one constant here rather than a number spread through the play. */
+  const STAND_ON = 17;
+  function bjTotal(cs) { let t = 0, a = 0;
+    cs.forEach(c => { const r = rankIx(c); if (r === 0) { a++; t += 11; } else t += Math.min(10, r + 1); });
+    while (t > 21 && a) { t -= 10; a--; } return t; }
+  function playBJ(arena, done) {
+    const word = Chance.randomWord(), duelId = ++S.duels, draw = deckFor(word, duelId);
+    const mine = [draw(), draw()], theirs = [draw(), draw()];
+    S.last = { duelId, word };
+    let over = false, shown = false;
+    function paintBJ(msg, cls) {
+      const mt = bjTotal(mine), tt = bjTotal(theirs);
+      arena.innerHTML =
+        '<div class="seats"><div class="pair">' +
+          '<div class="seat"><span class="cap' + (shown ? ' locked' : '') + '">GENESIS #' + P[them()].id +
+            (shown ? '' : ' · ONE DOWN') + '</span>' +
+            '<div class="cards">' + handHTML(shown ? theirs : [theirs[0], null]) + '</div>' +
+            '<span class="tot' + (shown && tt > 21 ? ' bust' : '') + '" id="bjtheirs">' +
+              (shown ? (tt > 21 ? tt + ' BUST' : tt) : '?') + '</span></div>' +
+          '<div class="seat"><span class="cap locked">GENESIS #' + P[me()].id + ' · YOU</span>' +
+            '<div class="cards">' + handHTML(mine) + '</div>' +
+            '<span class="tot' + (mt > 21 ? ' bust' : '') + '" id="bjmine">' + (mt > 21 ? mt + ' BUST' : mt) + '</span></div>' +
+        '</div></div>' +
+        (over ? '' : '<div class="acts2"><button class="go" type="button" id="bjhit">HIT</button>' +
+          '<button class="go alt" type="button" id="bjstand">STAND</button></div>') +
+        '<div class="result' + (cls || '') + '" id="bjres">' + (msg || '') + '</div>';
+      if ($('bjhit')) $('bjhit').onclick = hit;
+      if ($('bjstand')) $('bjstand').onclick = stand;
+    }
+    async function hit() {
+      if (over) return;
+      mine.push(draw());
+      const mt = bjTotal(mine);
+      paintBJ(mt > 21 ? 'YOU WENT OVER' : 'YOU ARE ON ' + mt);
+      say(mt > 21 ? 'Over 21. Nothing to do but turn them over.' : 'You are on <b>' + mt + '</b>. Hit again or stand.');
+      if (mt > 21) { await wait(800); await stand(); }
+    }
+    async function stand() {
+      if (over) return;
+      over = true; shown = true;
+      paintBJ('GENESIS #' + P[them()].id + ' TURNS THE DOWN CARD');
+      say('<b>GENESIS #' + P[them()].id + '</b> turns the down card over.');
+      await wait(750);
+      while (bjTotal(theirs) < STAND_ON) { theirs.push(draw()); paintBJ('GENESIS #' + P[them()].id + ' TAKES ONE'); await wait(650); }
+      const mt = bjTotal(mine), tt = bjTotal(theirs);
+      const res = mt > 21 && tt > 21 ? 'draw' : mt > 21 ? them() : tt > 21 ? me() : mt === tt ? 'draw' : mt > tt ? me() : them();
+      paintBJ((res === 'draw' ? 'A DRAW' : res === me() ? 'YOU WIN' : 'YOU LOSE') +
+        ' <span class="need">· ' + mt + (mt > 21 ? ' BUST' : '') + ' V ' + tt + (tt > 21 ? ' BUST' : '') + '</span>',
+        res === me() ? ' win' : '');
+      say(res === 'draw' ? 'Level on <b>' + mt + '</b>. Both stakes go back.'
+        : res === me() ? 'Your <b>' + mt + '</b> beats their <b>' + tt + '</b>.' : 'Their <b>' + tt + '</b> beats your <b>' + mt + '</b>.');
+      await wait(800);
+      done(res);
+    }
+    paintBJ('');
+    say('Two cards each, one of theirs face down. You are on <b>' + bjTotal(mine) + '</b> — hit or stand.');
+  }
+
+  /* ---------- Texas hold'em: the best five of seven ----------
+     Ranked the ordinary way and compared on the kickers after that. There are NO betting rounds and
+     that is not a shortcut: the stake is set once, by whoever opened the game, and everyone who joins
+     pays it — so there is nothing for a raise to change. The stake is the ante. PLAY ON or FOLD is the
+     decision at every street. Whether folding should be allowed at all is written down nowhere:
+     flagged for the deployer, not invented into a number. */
+  const HAND_NAMES = ['HIGH CARD', 'A PAIR', 'TWO PAIR', 'THREE OF A KIND', 'A STRAIGHT', 'A FLUSH',
+    'A FULL HOUSE', 'FOUR OF A KIND', 'A STRAIGHT FLUSH'];
+  function score5(cs) {
+    const rs = cs.map(c => { const r = rankIx(c); return r === 0 ? 14 : r + 1; }).sort((a, b) => b - a);
+    const ss = cs.map(suitIx), flush = ss.every(s => s === ss[0]), uniq = [...new Set(rs)];
+    let str = 0;
+    if (uniq.length === 5) { if (uniq[0] - uniq[4] === 4) str = uniq[0];
+      else if (uniq[0] === 14 && uniq[1] === 5) str = 5; }          // the wheel, A2345, where the ace is low
+    const cnt = new Map(); rs.forEach(r => cnt.set(r, (cnt.get(r) || 0) + 1));
+    const g = [...cnt.keys()].sort((a, b) => cnt.get(b) - cnt.get(a) || b - a), shape = g.map(r => cnt.get(r)).join('');
+    if (flush && str) return [8, str];
+    if (shape === '41') return [7, g[0], g[1]];
+    if (shape === '32') return [6, g[0], g[1]];
+    if (flush) return [5].concat(rs);
+    if (str) return [4, str];
+    if (shape === '311') return [3, g[0], g[1], g[2]];
+    if (shape === '221') return [2, g[0], g[1], g[2]];
+    if (shape === '2111') return [1, g[0], g[1], g[2], g[3]];
+    return [0].concat(rs);
+  }
+  const cmpScore = (a, b) => { const n = Math.max(a.length, b.length);
+    for (let i = 0; i < n; i++) { const d = (a[i] || 0) - (b[i] || 0); if (d) return d; } return 0; };
+  // the best five of however many are showing — five, six or seven
+  function bestOf(cards) {
+    if (cards.length < 5) return null;
+    let best = null, which = null;
+    const pick = (start, acc) => {
+      if (acc.length === 5) { const s = score5(acc); if (!best || cmpScore(s, best) > 0) { best = s; which = acc.slice(); } return; }
+      for (let i = start; i < cards.length; i++) { acc.push(cards[i]); pick(i + 1, acc); acc.pop(); }
+    };
+    pick(0, []);
+    return { score: best, cards: which, name: HAND_NAMES[best[0]] };
+  }
+  function playHoldem(arena, done) {
+    const word = Chance.randomWord(), duelId = ++S.duels, draw = deckFor(word, duelId);
+    const mine = [draw(), draw()], theirs = [draw(), draw()], board = [draw(), draw(), draw(), draw(), draw()];
+    S.last = { duelId, word };
+    const STREETS = [['HOLE CARDS', 0], ['THE FLOP', 3], ['THE TURN', 4], ['THE RIVER', 5]];
+    const TABLE = ['THE TABLE · FACE DOWN', 'THE FLOP', 'THE TURN', 'THE RIVER'];
+    let at = 0, over = false, folded = false;
+    function paintH(msg, cls, hi) {
+      const n = STREETS[at][1], up = over && !folded;
+      arena.innerHTML =
+        '<div class="seats">' +
+          '<div class="street"><span class="cap">' + TABLE[at] + '</span><div class="cards">' +
+            (n ? handHTML(board.slice(0, n), hi) : handHTML([null, null, null])) + '</div></div>' +
+          '<div class="pair">' +
+          '<div class="seat"><span class="cap' + (up ? ' locked' : '') + '">GENESIS #' + P[them()].id +
+            (up ? '' : ' · FACE DOWN') + '</span>' +
+            '<div class="cards">' + (up ? handHTML(theirs, hi) : handHTML([null, null])) + '</div>' +
+            '<span class="cap" id="htname">' + (up ? bestOf(theirs.concat(board)).name : '') + '</span></div>' +
+          '<div class="seat"><span class="cap locked">GENESIS #' + P[me()].id + ' · YOU</span>' +
+            '<div class="cards">' + handHTML(mine, hi) + '</div>' +
+            '<span class="cap" id="hmname">' + (n >= 3 ? bestOf(mine.concat(board.slice(0, n))).name : '') + '</span></div>' +
+          '</div>' +
+        '</div>' +
+        (over ? '' : '<div class="acts2"><button class="go" type="button" id="hon">' + (at < 3 ? 'PLAY ON' : 'SHOWDOWN') + '</button>' +
+          '<button class="go alt" type="button" id="hfold">FOLD</button></div>') +
+        '<div class="result' + (cls || '') + '" id="hres">' + (msg || '') + '</div>';
+      if ($('hon')) $('hon').onclick = on;
+      if ($('hfold')) $('hfold').onclick = fold;
+    }
+    async function on() {
+      if (over) return;
+      if (at < 3) { at++;
+        const n = STREETS[at][1], mb = bestOf(mine.concat(board.slice(0, n)));
+        paintH(STREETS[at][0] + ' · YOU HAVE ' + mb.name);
+        say(STREETS[at][0].toLowerCase() + ': you have <b>' + mb.name.toLowerCase() + '</b>. Play on or fold.');
+        return; }
+      over = true;
+      const m = bestOf(mine.concat(board)), t = bestOf(theirs.concat(board)), d = cmpScore(m.score, t.score);
+      const res = d === 0 ? 'draw' : d > 0 ? me() : them();
+      paintH((res === 'draw' ? 'A SPLIT POT' : res === me() ? 'YOU WIN' : 'YOU LOSE') +
+        ' <span class="need">· ' + m.name + ' V ' + t.name + '</span>', res === me() ? ' win' : '', (d >= 0 ? m : t).cards);
+      say(res === 'draw' ? 'The same hand both ways: <b>' + m.name.toLowerCase() + '</b>. Both stakes go back.'
+        : '<b>' + (res === me() ? m.name.toLowerCase() : t.name.toLowerCase()) + '</b> takes the pot.');
+      await wait(900);
+      done(res);
+    }
+    async function fold() {
+      if (over) return;
+      over = true; folded = true;
+      paintH('YOU FOLDED <span class="need">· THE POT GOES ACROSS</span>');
+      say('You folded at <b>' + STREETS[at][0].toLowerCase() + '</b>. The pot goes to <b>GENESIS #' + P[them()].id + '</b>.');
+      await wait(900);
+      done(them());
+    }
+    paintH('HOLE CARDS');
+    say('Two cards each, five to come in the middle. The stake is the ante — <b>PLAY ON</b> or <b>FOLD</b>.');
+  }
+
+  /* ---------- the glitching terminal ----------
+     A PORT of `mapgen.html`'s ruins layer, not a second commission: the same `sprites/terminal.svg`
+     the map draws, the same signal-coloured ghost knocked sideways by whole art-pixels, the same five
+     bands knocked about, in the same bursts, off for anyone who asks for reduced motion. It is
+     deliberately a DIFFERENT glitch from the title's and from `glitchArt` above, which is the NFT's. */
+  let termRaf = 0, termImg = null;
+  function stopTerminal() { cancelAnimationFrame(termRaf); termRaf = 0; }
+  function terminalGlitch(cv) {
+    stopTerminal();
+    const px = 96, step = Math.max(1, Math.round(px / 24));         // one of the art's own pixels at this size
+    cv.width = px; cv.height = px;
+    const c = cv.getContext('2d');
+    if (!termImg) { termImg = new Image(); termImg.src = 'sprites/terminal.svg'; }
+    let face = null, ghost = null;
+    let next = performance.now() + Math.random() * 800, until = 0;
+    const draw = (t) => {
+      if (!cv.isConnected) { stopTerminal(); return; }
+      termRaf = requestAnimationFrame(draw);
+      c.imageSmoothingEnabled = false;
+      c.fillStyle = '#000'; c.fillRect(0, 0, px, px);
+      if (!face) {
+        if (!termImg.complete || !termImg.naturalWidth) return;
+        face = document.createElement('canvas'); face.width = face.height = px;
+        face.getContext('2d').drawImage(termImg, 0, 0, px, px);
+        ghost = document.createElement('canvas'); ghost.width = ghost.height = px;
+        const g = ghost.getContext('2d'); g.drawImage(face, 0, 0);
+        g.globalCompositeOperation = 'source-in'; g.fillStyle = '#CCFF00'; g.fillRect(0, 0, px, px);
+      }
+      if (!CALM && t > next) { until = t + 120 + Math.random() * 260; next = t + 300 + Math.random() * 900; }
+      if (!(!CALM && t < until)) { c.drawImage(face, 0, 0); return; }
+      c.drawImage(ghost, (Math.random() < 0.5 ? -2 : 2) * step, 0);
+      const bands = 5, bh = Math.ceil(px / bands);
+      for (let b = 0; b < bands; b++) { const dx = Math.random() < 0.55 ? Math.round((Math.random() - 0.5) * 6) * step : 0;
+        c.drawImage(face, 0, b * bh, px, Math.min(bh, px - b * bh), dx, b * bh, px, Math.min(bh, px - b * bh)); }
+    };
+    termRaf = requestAnimationFrame(draw);
+  }
+
+  /* ---------- Friend or Fiend: the hidden-things game ----------
+     Battleship's shape with the name doing the work: each side hides Friends and fiends on its own
+     ground, you probe theirs, and what you turn up is one or the other. Find all of their Friends
+     first and the pot is yours. A Friend keeps the turn; a fiend or bare ground hands it over.
+     THE BOARD IS A GAMEPLAY SHAPE, NOT A NUMBER ANYBODY OWNS. DESIGN.md sets no size and no counts,
+     so they live in this one object and change in one line — nothing reads them twice. No odds, no
+     stake and no payout is invented here: this game pays through the same pot every other game pays
+     through, and `settle` is untouched. */
+  const FOF = { w: 5, h: 5, friends: 3, fiends: 3 };
+  function fofGround(below) {
+    const n = FOF.w * FOF.h, order = shuffled(n, below), kind = new Array(n).fill('empty');
+    order.slice(0, FOF.friends).forEach(i => kind[i] = 'friend');
+    order.slice(FOF.friends, FOF.friends + FOF.fiends).forEach(i => kind[i] = 'fiend');
+    return kind;
+  }
+  function playFoF(arena, done) {
+    const word = Chance.randomWord(), duelId = ++S.duels, below = rolls(word, duelId);
+    S.last = { duelId, word };
+    const theirs = fofGround(below), mine = fofGround(below);       // their ground first, then yours
+    const seen = new Array(theirs.length).fill(false), theySeen = new Array(mine.length).fill(false);
+    let found = 0, lost = 0, over = false, mine2move = true, note = '', noteCls = '';
+    const mark = (k) => k === 'friend' ? 'F' : k === 'fiend' ? 'X' : '·';
+    function paintFoF() {
+      arena.innerHTML =
+        '<div class="fof">' +
+          '<span class="lbl">GENESIS #' + P[them()].id + '’S GROUND · ' + FOF.w + '×' + FOF.h + '</span>' +
+          '<div class="gridn" style="grid-template-columns:repeat(' + FOF.w + ',minmax(0,1fr))">' +
+            theirs.map((k, i) => '<button class="cell' + (seen[i] ? ' ' + k : '') + '" type="button" data-cell="' + i + '"' +
+              (seen[i] || over || !mine2move ? ' disabled' : '') + '>' + (seen[i] ? mark(k) : '') + '</button>').join('') +
+          '</div>' +
+          '<div class="tally">' +
+            '<div><span class="k">THEIR FRIENDS</span><span class="v"><b>' + found + '</b> / ' + FOF.friends + '</span></div>' +
+            '<div><span class="k">YOURS FOUND</span><span class="v"><b>' + lost + '</b> / ' + FOF.friends + '</span></div>' +
+          '</div>' +
+        '</div>' +
+        '<div class="result' + noteCls + '" id="fofres">' + note + '</div>';
+      arena.querySelectorAll('[data-cell]').forEach(b => b.onclick = () => probe(+b.dataset.cell));
+    }
+    async function finish(res) {
+      over = true;
+      note = res === 'draw' ? 'A DRAW · NOTHING LEFT TO PROBE'
+        : res === me() ? 'YOU WIN · ALL ' + FOF.friends + ' OF THEIRS FOUND'
+        : 'YOU LOSE · THEY FOUND ALL ' + FOF.friends + ' OF YOURS';
+      noteCls = res === me() ? ' win' : '';
+      paintFoF();
+      say(res === 'draw' ? 'Nothing left to probe on either side: a draw.'
+        : res === me() ? 'All <b>' + FOF.friends + '</b> of their Friends found. The pot is yours.'
+        : 'They found all <b>' + FOF.friends + '</b> of yours first.');
+      await wait(900);
+      done(res);
+    }
+    async function probe(i) {
+      if (over || seen[i] || !mine2move) return;
+      seen[i] = true;
+      const k = theirs[i];
+      if (k === 'friend') { found++; note = 'A FRIEND · ' + found + ' OF ' + FOF.friends; }
+      else note = k === 'fiend' ? 'A FIEND · IT BITES, AND THE TURN GOES OVER' : 'BARE GROUND · THE TURN GOES OVER';
+      if (found >= FOF.friends) { await finish(me()); return; }
+      if (k === 'friend') { paintFoF(); say('A Friend. Keep going — <b>' + (FOF.friends - found) + '</b> of theirs left.'); return; }
+      mine2move = false; paintFoF();
+      say((k === 'fiend' ? 'A fiend bites. ' : 'Bare ground. ') + '<b>GENESIS #' + P[them()].id + '</b> probes yours.');
+      await wait(850);
+      await theirTurn();
+    }
+    async function theirTurn() {
+      for (;;) {
+        if (over) return;
+        const open = mine.map((_, i) => i).filter(i => !theySeen[i]);
+        if (!open.length) { await finish('draw'); return; }
+        const i = open[below(open.length)], k = mine[i];
+        theySeen[i] = true;
+        if (k === 'friend') {
+          lost++; note = 'THEY FOUND ONE OF YOURS · ' + lost + ' OF ' + FOF.friends;
+          paintFoF(); say('They turned up one of your Friends: <b>' + lost + '</b> of <b>' + FOF.friends + '</b>.');
+          if (lost >= FOF.friends) { await finish(them()); return; }
+          await wait(850); continue;                                // a Friend keeps their turn too
+        }
+        note = k === 'fiend' ? 'THEY HIT A FIEND · YOUR TURN' : 'THEY FOUND NOTHING · YOUR TURN';
+        mine2move = true; paintFoF();
+        say(k === 'fiend' ? 'They hit one of your fiends. Your turn.' : 'They found bare ground. Your turn.');
+        return;
+      }
+    }
+    // reached THROUGH a glitching terminal, which is what a terminal is for
+    arena.innerHTML =
+      '<div class="term"><canvas id="fofterm" aria-label="a terminal, glitching"></canvas>' +
+        '<span class="cap">A <b>TERMINAL</b> IN THE RUINS, GLITCHING HARD.<br>THIS IS WHERE FRIEND OR FIEND IS PLAYED.</span>' +
+        '<div class="acts2"><button class="go" type="button" id="fofuse">USE THE TERMINAL</button></div>' +
+      '</div>' +
+      '<div class="result" id="fofres"></div>';
+    terminalGlitch($('fofterm'));
+    say('The machine is glitching. <b>USE THE TERMINAL</b> to open Friend or Fiend.');
+    $('fofuse').onclick = () => { stopTerminal(); paintFoF();
+      say('Probe their ground. A <b>Friend</b> keeps your turn; a <b>fiend</b> or bare ground hands it over.'); };
+  }
+
+  /* ---------- a duel sprung by a terminal ----------
+     DECIDED, and the reason this card exists: a duel sprung by a terminal CANNOT BE DECLINED. The
+     challenge screen answers NOT WORTH MY TIME when one player challenges another and it keeps doing
+     that — but an ambush is not an invitation. You used the machine; the machine has you. So the page
+     has to know which of the two it is showing, and this one carries ONE button.
+     What is deliberately NOT here: how much better the Doopie's odds are and what it risks. That is
+     one of four open questions on the sprung trap and every one of them is the deployer's, so the card
+     SAYS the edge is unset rather than showing a number nobody chose. It does not set the game either:
+     which game a planted terminal opens is the collision M17 item 7 exists to settle. */
+  function renderSprung() {
+    const you = P[me()], g = gameOf(), pot = S.stake * 2;
+    $('prompt').className = 'card sprung';
+    $('prompt').innerHTML =
+      '<div class="mtop cold"><i class="dot"></i><span id="ptitle">SPRUNG · A DUEL YOU CANNOT DECLINE</span>' +
+        '<span class="sp"></span><span class="sample">SAMPLE RECORDS</span></div>' +
+      '<div class="pc">' +
+        '<div class="sprungart"><img id="sprungclip" alt="a Doopie taking the shape of a terminal"></div>' +
+        '<div class="pcmain">' +
+          '<div class="pcwho"><b>IT WAS NOT A MACHINE</b></div>' +
+          '<div class="pcline">A <b>1/1 DOOPIE</b> was standing as a terminal. You used it; it has you.</div>' +
+          '<div class="pcbig"><span class="n" id="bign">' + pot + '</span><span class="u">CRYSTALS<br>IN THE POT</span></div>' +
+          '<div class="pcline">' + g.name.toLowerCase() + ' · you stake <b>' + S.stake + '</b> of your <b>' + you.purse + '</b></div>' +
+          '<span class="sample">THE DOOPIE’S EDGE, AND WHAT IT RISKS · NOT SET · THE DEPLOYER’S</span>' +
+        '</div>' +
+        '<div class="acts"><button class="go" type="button" id="paccept">THE MACHINE HAS YOU · PLAY IT OUT</button></div>' +
+      '</div>';
+    $('sprungclip').src = 'burrow/terminal-6289.gif';   // the disguise clip that already exists, not a new one
+    $('paccept').onclick = () => { S.screen = 'main'; render(); startStakes(); };
+  }
+
+  /* ---------- the algorithm, to test: the same rules and roll as RareDuel.sol ---------- */
+  function openAlgo() {
+    const c = $('algo'), picks = Duel.PICKS;
+    const A = { p1: 'rock', p2: 'scissors', word: (S.last && S.last.word) || Chance.randomWord(), id: (S.last && S.last.duelId) || 1 };
+    const pill = (k, v) => '<button class="ghost" type="button" data-ap="' + k + ':' + v + '"' + (A[k] === v ? ' aria-pressed="true"' : '') + '>' + v.toUpperCase() + '</button>';
+    const draw = () => {
+      const ctx = { word: A.word, contract: Chance.PREVIEW_CONTRACT, chainId: Chance.CHAIN_ID };
+      let one; try { one = Duel.settle(ctx, A.id, A.p1, A.p2, S.stake); } catch (e) { one = null; }
+      c.innerHTML = '<div class="mtop"><i class="dot"></i><span id="atitle">THE ALGORITHM</span><span class="sp"></span><button class="ghost" type="button" id="aclose">CLOSE</button></div>' +
+        '<div class="algo">' +
+        '<p class="a-lede">The rules RareDuel.sol runs on chain, with the FriendSDK\'s chance roll. The same word always gives the same result, here and on chain.</p>' +
+        '<div class="a-row"><span class="k">CHALLENGER</span><span class="seg">' + picks.map(v => pill('p1', v)).join('') + '</span></div>' +
+        '<div class="a-row"><span class="k">CHALLENGED</span><span class="seg">' + picks.map(v => pill('p2', v)).join('') + '</span></div>' +
+        '<div class="a-row"><span class="k">ENTROPY WORD</span><input id="aword" spellcheck="false" value="' + A.word + '"><button class="ghost" type="button" id="anew">NEW</button></div>' +
+        '<div class="a-row"><span class="k">DUEL ID</span><input id="aid" type="number" min="1" value="' + A.id + '" style="width:80px"></div>' +
+        (one ? '<pre class="a-math">odds   the challenger wins ' + one.odds + ' in 10000  (' + (A.p1 === A.p2 ? 'the same pick' : Duel.beats(A.p1, A.p2) ? A.p1 + ' beats ' + A.p2 : A.p2 + ' beats ' + A.p1) + ')\n' +
+          'roll   keccak256(abi.encode(word, contract, ' + Chance.CHAIN_ID + ', ' + A.id + ', 0)) % 10000 = <b>' + one.roll + '</b>\n' +
+          'result ' + one.roll + (one.winner === 'p1' ? ' < ' : ' ≥ ') + one.odds + '  →  <b>' + (one.winner === 'p1' ? 'THE CHALLENGER' : 'THE CHALLENGED') + ' WINS</b> ' + one.payout + '</pre>'
+          : '<pre class="a-math">That word isn\'t a 32-byte hex number.</pre>') +
+        '<div class="a-row"><button class="go" type="button" id="arun">RUN 2,000 DUELS FOR EVERY PAIR OF PICKS</button></div><div id="agrid"></div>' +
+        '</div>';
+      c.querySelectorAll('[data-ap]').forEach(b => b.onclick = () => { const [k, v] = b.dataset.ap.split(':'); A[k] = v; draw(); });
+      $('aword').onchange = () => { A.word = $('aword').value.trim(); draw(); };
+      $('aid').onchange = () => { A.id = Math.max(1, parseInt($('aid').value, 10) || 1); draw(); };
+      $('anew').onclick = () => { A.word = Chance.randomWord(); draw(); };
+      $('aclose').onclick = closeAlgo;
+      $('arun').onclick = () => {
+        $('arun').disabled = true; $('arun').textContent = 'RUNNING…';
+        setTimeout(() => {
+          const N = 2000, ctx = { contract: Chance.PREVIEW_CONTRACT, chainId: Chance.CHAIN_ID };
+          let html = '<table class="a-grid"><tr><th>challenger ↓ · challenged →</th>' + picks.map(v => '<th>' + v.toUpperCase() + '</th>').join('') + '</tr>';
+          picks.forEach(a => { html += '<tr><th>' + a.toUpperCase() + '</th>'; picks.forEach(b => {
+            let w = 0; for (let k = 0; k < N; k++) if (Duel.settle(Object.assign({ word: Chance.randomWord() }, ctx), k + 1, a, b, 1).winner === 'p1') w++;
+            html += '<td><b>' + (w / N * 100).toFixed(1) + '%</b><span>odds ' + Duel.oddsBps(a, b) / 100 + '%</span></td>'; }); html += '</tr>'; });
+          $('agrid').innerHTML = html + '</table><p class="a-lede">How often the challenger won, out of ' + N.toLocaleString('en-US') + ' fresh words a cell, against the odds the picks set.</p>';
+          $('arun').textContent = 'RUN AGAIN'; $('arun').disabled = false;
+        }, 30);
+      };
+    };
+    draw(); c.hidden = false; ['main', 'prompt', 'nope'].forEach(k => { $(k).hidden = true; });
+  }
+  // back to whatever was on screen, as it was (a game in play keeps its hands)
+  function closeAlgo() { $('algo').hidden = true; ['main', 'prompt', 'nope'].forEach(k => { $(k).hidden = S.screen !== k; }); }
+
+  /* ---------- wiring ---------- */
+  document.querySelectorAll('[data-view]').forEach(b => b.onclick = () => { S.view = b.dataset.view; restart(); });
+  document.querySelectorAll('[data-answer]').forEach(b => b.onclick = () => { S.answer = b.dataset.answer; render(); });
+  $('algoBtn').onclick = openAlgo;
+  $('xclose').onclick = () => { if (EMBED) leave(); else location.href = 'base.html'; };
+  $('reset').onclick = () => { const o = JSON.parse(START); Object.assign(P, o.P); Object.assign(H2H, o.H2H); Object.assign(POTS, o.POTS);
+    restart(); };
+  // ?as=challenged opens on the incoming prompt; ?answer=decline makes the other side say no
+  const q = new URLSearchParams(location.search);
+  if (q.get('as') === 'challenged') S.view = 'defender';
+  if (q.get('answer') === 'decline') S.answer = 'decline';
+  if (q.get('stake')) S.stake = +q.get('stake');
+  if (q.get('game') && GAMES.some(x => x.id === q.get('game') && x.ready)) S.game = q.get('game');
+  // ?sprung=1 opens the ambush: a duel a terminal sprang, which cannot be declined. It does NOT pick a
+  // game — which game a planted terminal opens is the collision item 7 exists to settle.
+  if (q.get('sprung') === '1') { S.sprung = true; S.view = 'defender'; }
+  restart();
+  window.challenge = { S, P, H2H, GAMES, POTS, STAKES, settle, restart, potStats, rankOf, PLAYERS, TERMS: Duel.TERMS,
+    bjTotal, score5, bestOf, cmpScore, rolls, deckFor, shuffled, FOF, STAND_ON };                      // a handle for the checks
+})();
+</script>
+</body>
+</html>

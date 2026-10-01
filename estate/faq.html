@@ -1,0 +1,436 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="icon" href="/favicon.ico" sizes="32x32">
+<link rel="icon" type="image/png" sizes="32x32" href="icon-32.png">
+<link rel="apple-touch-icon" sizes="180x180" href="icon-180.png">
+<link rel="manifest" href="site.webmanifest">
+<meta name="theme-color" content="#CCFF00">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Rare Fiends · FAQ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Silkscreen:wght@400;700&family=Sometype+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* ---------------------------------------------------------------------------------------------------
+   The look, borrowed from rarefriends.com so the two sites read as one family. Taken from their own
+   stylesheet rather than guessed at:
+     fonts    Silkscreen for display, Archivo for anything long enough to read, Sometype Mono for data
+     buttons  a 1px rule, a hard offset shadow, brackets around the label, and a press that moves the
+              button onto its own shadow
+     cards    the same rule with a 4px shadow — their swap panel
+     themes   one [data-theme=invert] block that swaps four values, which is all their dark mode is
+   The one thing that cannot come straight across is the signal colour: #CCFF00 on their #eee paper
+   measures 1.01:1, which is no contrast at all. So signal stays the brand colour wherever it is a FILL
+   (with ink on top of it), and light mode uses --signal-ink for the times it has to be text.
+   --------------------------------------------------------------------------------------------------- */
+:root {
+  --ink: #FFFFFF; --paper: #000000; --signal: #CCFF00;
+  --signal-ink: var(--signal);          /* signal used as text: on a dark page the brand colour is fine */
+  --on-signal: #000000;                 /* what sits on top of a signal fill */
+  --veil: 0, 0, 0;                      /* the colour the game is dimmed towards */
+  --page: #090B09; --bar: #000000;
+  --dim: rgba(255,255,255,.62); --faint: rgba(255,255,255,.28);
+  --line: rgba(255,255,255,.15); --hair: 1px solid rgba(204,255,0,.4);
+  --display: Silkscreen, monospace;
+  --body: Archivo, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "Sometype Mono", ui-monospace, monospace;
+  --rule: 1px solid var(--ink);
+  --raised: 2px 2px 0 var(--ink);
+  --raised-lg: 4px 4px 0 var(--ink);
+}
+[data-theme="invert"] {
+  --ink: #111111; --paper: #EEEEEE;
+  --signal-ink: var(--signal);          /* the theme colour is the theme colour, in both modes */
+  --on-signal: #000000;
+  --veil: 238, 238, 238;
+  --page: #EEEEEE; --bar: #EEEEEE;
+  --dim: rgba(17,17,17,.66); --faint: rgba(17,17,17,.3);
+  --line: rgba(17,17,17,.16); --hair: 1px solid var(--ink);
+}
+
+/* ---------- their button: rule, shadow, brackets, and a press that lands on the shadow ---------- */
+.btn {
+  font-family: var(--display); letter-spacing: .1em;
+  display: inline-flex; align-items: center; gap: 8px; white-space: nowrap;
+  border: var(--rule); box-shadow: var(--raised); cursor: pointer;
+  background: var(--home-bg); color: var(--home-fg);
+  text-decoration: none; -webkit-user-select: none; user-select: none;
+}
+.btn::before { content: "["; }
+.btn::after  { content: "]"; }
+.btn:hover { background: var(--home-fg); color: var(--home-bg); }
+.btn:active { box-shadow: none; transform: translate(2px, 2px); }
+.btn[disabled] { cursor: default; opacity: .6; }
+.btn[disabled]:hover { background: var(--home-bg); color: var(--home-fg); }
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; background: var(--page); color: var(--ink); }
+body { font-family: var(--body); font-size: 16px; line-height: 1.6; height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
+button { font: inherit; color: inherit; }
+
+/* the same bar as the landing page */
+header { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: var(--hair);
+  background: var(--bar); position: relative; z-index: 5; padding-top: max(10px, env(safe-area-inset-top)); flex-wrap: wrap; }
+.brand { display: flex; align-items: center; gap: 9px; font-family: var(--display); font-size: 19px; letter-spacing: .12em;
+  text-decoration: none; color: var(--ink); }
+.brand i { width: 8px; height: 8px; background: var(--signal); border-radius: 50%; }
+header .sp { flex: 1; }
+.theme { --home-bg: var(--paper); --home-fg: var(--ink); padding: 8px 9px; line-height: 0; font-size: 13px; }
+.theme svg { display: block; }
+.wallet { --home-bg: var(--signal); --home-fg: var(--on-signal); font-size: 17px; letter-spacing: .1em; padding: 9px 12px; }
+
+main { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; width: 100%; padding: 26px 16px 40px; }
+main > * { max-width: 900px; margin-inline: auto; }
+main::-webkit-scrollbar { width: 10px; }
+main::-webkit-scrollbar-track { background: transparent; }
+main::-webkit-scrollbar-thumb { background: var(--faint); border: 2px solid var(--page); }
+main::-webkit-scrollbar-thumb:hover { background: var(--dim); }
+h1 { font-family: var(--display); font-weight: 400; font-size: clamp(26px, 4vw, 40px); letter-spacing: .04em; margin: 0 auto 6px; }
+.sub { color: var(--dim); font-size: 15px; margin: 0 auto 26px; }
+.sec { font-family: var(--display); font-weight: 400; font-size: 14px; letter-spacing: .12em; color: var(--ink);
+  margin: 34px 0 2px; padding-bottom: 8px; }
+.sec:first-child { margin-top: 6px; }
+
+/* In light mode a question is plain black type — no theme colour, so nothing to outline. */
+[data-theme="invert"] .q { color: var(--ink); }
+/* and the answers read darker than the muted grey the rest of the page uses */
+[data-theme="invert"] :is(.a, .steps li, .cap) { color: #333333; }
+
+/* each question is their card: a rule, and the shadow sitting behind it */
+.qa { border: var(--rule); box-shadow: var(--raised); background: var(--paper); margin: 0 0 10px; }
+.q { font-family: var(--body); font-size: 17.5px; letter-spacing: .08em; color: var(--signal-ink);
+  padding: 15px 34px 15px 14px; cursor: pointer; list-style: none; position: relative; }
+.q::-webkit-details-marker { display: none; }
+.q::after { content: "+"; position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
+  font-size: 20px; color: var(--dim); }
+.qa[open] .q::after { content: "\2212"; color: var(--signal-ink); }
+.qa[open] .q { border-bottom: 1px solid var(--line); }
+/* Hovering, and the one that is open, take the theme colour — that is what marks the live row. Black on
+   #CCFF00 reads at 16:1, so it works the same in either mode and the text needs no outline on it. */
+.q:hover, .qa[open] > .q { background: var(--signal); color: var(--on-signal); }
+.q:hover::after, .qa[open] > .q::after { color: var(--on-signal); }
+[data-theme="invert"] :is(.q:hover, .qa[open] > .q) { color: var(--on-signal); }
+.qa .a { padding: 14px; }
+.a { margin: 0; color: var(--dim); }
+.a b { color: var(--ink); font-weight: 600; }
+.a a { color: var(--signal-ink); }
+.steps { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 6px; }
+.steps li { display: grid; grid-template-columns: 22px 1fr; gap: 10px; font-size: 15px; color: var(--dim); align-items: baseline; }
+.steps i { font-family: var(--display); font-style: normal; font-size: 11px; color: var(--signal-ink); }
+.steps b { color: var(--ink); font-weight: 600; }
+
+/* the conversions, running inside the answer */
+.shots { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 16px 0 4px; }
+.shot { background: var(--paper); }
+.shot iframe { width: 100%; aspect-ratio: 1; border: 0; display: block; }
+.cap { font-size: 14px; color: var(--dim); margin: 8px 0 0; }
+
+/* the same footer as the landing page */
+.credits { display: flex; justify-content: center; align-items: center; gap: 8px;
+  font-family: var(--display); font-size: 13px; letter-spacing: .12em; color: var(--ink); background: var(--bar);
+  border-top: var(--hair); padding: 9px 16px calc(9px + env(safe-area-inset-bottom, 0px)); }
+.credits .mark { display: inline-flex; align-items: center; }
+.credits .mark img { image-rendering: pixelated; display: block; }
+.credits .mark:hover img { filter: brightness(1.25); }
+/* the mark is the theme colour too, so on a light page it gets the same black edge as the type */
+[data-theme="invert"] .credits .mark img {
+  filter: drop-shadow(1px 0 0 var(--ink)) drop-shadow(-1px 0 0 var(--ink))
+          drop-shadow(0 1px 0 var(--ink)) drop-shadow(0 -1px 0 var(--ink)); }
+.credits .by { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: center; text-align: center; }
+.credits .by a { color: var(--signal-ink); text-decoration: none; display: inline-flex; align-items: center; gap: 6px; }
+.credits .by a:hover { text-decoration: underline; }
+.credits img { image-rendering: pixelated; vertical-align: middle; }
+
+@keyframes nope {
+  0%   { background: var(--home-bg); color: var(--home-fg); transform: translate(0,0); }
+  12%  { background: #ff2a4a; color: #fff; transform: translate(-6px,1px); }
+  24%  { background: #ff2a4a; color: #fff; transform: translate(5px,-2px); clip-path: inset(0 0 42% 0); }
+  36%  { background: #120000; color: #ff2a4a; transform: translate(-3px,0); clip-path: inset(38% 0 0 0); }
+  52%  { background: #ff2a4a; color: #fff; transform: translate(4px,1px); clip-path: none; }
+  70%  { background: #ff8090; color: #200; transform: translate(-2px,0); }
+  100% { background: var(--home-bg); color: var(--home-fg); transform: translate(0,0); }
+}
+.nope { animation: nope .6s steps(1, end) 1; border-color: #ff2a4a; }
+@media (prefers-reduced-motion: reduce) { .nope { animation: none; background: #ff2a4a; color: #fff; } }
+
+/* ---------- light mode: every run of the theme colour gets its own small bordered box ----------
+   #CCFF00 is the theme colour in both modes and does not change. On a light page it measures 1.02:1
+   against the paper, so instead of touching the colour, each place that uses it as text is boxed: a
+   1px rule with the ink behind it. That is the same pairing the colour has in dark mode, so it reads
+   at 17.9:1, and only the runs actually using #CCFF00 are affected. */
+[data-theme="invert"] .brand i { border: 1px solid var(--ink); }
+[data-theme="invert"] :is(.a a, .steps i, .credits .by a) {
+  /* A real stroke, painted behind the fill so the letterform stays open — eight stacked shadows clogged
+     the counters at body size. The colour itself is untouched; it just gets an edge to sit against. */
+  -webkit-text-stroke: 3.5px var(--ink);
+  paint-order: stroke fill;
+}
+
+/* ---------- the nav: one menu, same on a desk and a phone ---------- */
+.burger { --home-bg: var(--paper); --home-fg: var(--ink); padding: 8px 9px; line-height: 0; }
+.burger svg { display: block; }
+.menu { position: absolute; z-index: 20; top: 100%; right: 16px; margin-top: 8px; display: grid; gap: 8px;
+  padding: 10px; min-width: 260px; background: rgba(var(--veil), .62); backdrop-filter: blur(2px);
+  border: var(--rule); box-shadow: var(--raised-lg); }
+.menu .btn { width: 100%; justify-content: center; font-size: 14px; letter-spacing: .1em; padding: 12px; }
+.menu .wallet { font-size: 14px; letter-spacing: .1em; padding: 12px; }
+@media (max-width: 560px) { .menu { right: 12px; left: 12px; min-width: 0; } }
+
+/* ---------- the application sheet: a project asking to join ---------- */
+.sheet { width: min(560px, calc(100vw - 32px)); padding: 0; border: var(--rule); box-shadow: var(--raised-lg);
+  background: var(--paper); color: var(--ink); }
+.sheet::backdrop { background: rgba(0, 0, 0, .62); }
+.sheet form { display: grid; gap: 0; }
+.sheet .head { display: flex; align-items: baseline; gap: 10px; padding: 16px; border-bottom: 1px solid var(--line); }
+.sheet .head h2 { margin: 0; font-family: var(--display); font-weight: 400; font-size: 15px; letter-spacing: .1em; }
+.sheet .head p { margin: 0; font-size: 14px; color: var(--dim); }
+.sheet .rows { display: grid; gap: 14px; padding: 16px; max-height: min(58vh, 460px); overflow-y: auto; }
+.sheet label { display: grid; gap: 5px; font-family: var(--display); font-size: 11px; letter-spacing: .1em; color: var(--dim); }
+.sheet input, .sheet select, .sheet textarea { font-family: var(--mono); font-size: 15px; color: var(--ink);
+  background: transparent; border: var(--rule); padding: 9px 10px; width: 100%; border-radius: 0; }
+.sheet textarea { resize: vertical; min-height: 64px; }
+.sheet input:focus, .sheet select:focus, .sheet textarea:focus { outline: 2px solid var(--signal); outline-offset: -2px; }
+.sheet .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.sheet .pick { display: flex; gap: 8px; }
+.sheet .pick button { flex: 1; font-family: var(--display); font-size: 12px; letter-spacing: .08em; padding: 9px;
+  border: var(--rule); background: transparent; color: var(--ink); cursor: pointer; }
+.sheet .pick button[aria-pressed="true"] { background: var(--signal); color: var(--on-signal); }
+.sheet .foot { display: flex; gap: 8px; justify-content: flex-end; padding: 14px 16px; border-top: 1px solid var(--line); }
+.sheet .foot .btn { font-size: 12px; letter-spacing: .08em; padding: 10px 12px; }
+.sheet .send { --home-bg: var(--signal); --home-fg: var(--on-signal); }
+.sheet .shut { --home-bg: var(--paper); --home-fg: var(--ink); }
+.sheet .note { margin: 0; padding: 0 16px 14px; font-size: 13px; color: var(--dim); }
+.sheet .trap { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+.sheet .fail { margin: 0; padding: 0 16px 14px; font-size: 13px; color: #ff6b80; }
+.sheet .done { padding: 26px 16px; display: grid; gap: 10px; justify-items: center; text-align: center; }
+.sheet .done b { font-family: var(--display); font-weight: 400; font-size: 14px; letter-spacing: .1em; color: var(--signal-ink); }
+.sheet .done p { margin: 0; font-size: 14px; color: var(--dim); max-width: 42ch; }
+@media (max-width: 560px) { .sheet .pair { grid-template-columns: 1fr; } }
+
+@media (max-width: 560px) {
+  header { gap: 6px 8px; flex-wrap: nowrap; }
+  .brand { font-size: 15px; letter-spacing: .06em; }
+  header .sp { flex: 1 1 auto; min-width: 0; }
+  .theme { padding: 7px 8px; }
+  .wallet { font-size: 12px; padding: 7px 9px; }
+  main { padding: 20px 14px 30px; }
+  body { font-size: 15px; }
+  .credits { gap: 6px 8px; font-size: 9px; }
+  .credits .by { justify-content: center; gap: 5px; }
+    }
+</style>
+</head>
+<body>
+<header>
+  <a class="brand" href="start.html"><i></i>RARE FIENDS</a>
+  <span class="sp"></span>
+  <button class="btn theme" id="theme" type="button" aria-label="switch between light and dark"></button>
+  <button class="btn burger" id="burger" type="button" aria-expanded="false" aria-controls="menu" aria-label="menu"></button>
+  <nav class="menu" id="menu" hidden>
+    <a class="btn" href="faq.html">FAQ</a>
+    <a class="btn" href="#" data-apply>APPLY</a>
+    <a class="btn" href="bridge.html">BRIDGE YOUR DOOPIES</a>
+    <button class="btn wallet" id="wallet" type="button">CONNECT</button>
+  </nav>
+</header>
+<dialog class="sheet" id="apply" aria-labelledby="applyTitle">
+  <form method="dialog" id="applyForm">
+    <div class="head">
+      <h2 id="applyTitle">BRING YOUR PROJECT</h2>
+      <p>What we need to map a collection onto the map.</p>
+    </div>
+    <div class="rows">
+      <label>PROJECT NAME
+        <input name="name" required placeholder="Doopies" autocomplete="off">
+      </label>
+      <div class="pair">
+        <label>CHAIN
+          <select name="chain" required>
+            <option value="">choose one</option>
+            <option>Solana</option><option>Ethereum</option><option>Base</option>
+            <option>Robinhood Chain</option><option>Bitcoin</option><option>Other</option>
+          </select>
+        </label>
+        <label>SUPPLY
+          <input name="supply" required inputmode="numeric" placeholder="10000" autocomplete="off">
+        </label>
+      </div>
+      <label>IS THE ART ON CHAIN TODAY?
+        <span class="pick" role="group" aria-label="is the art on chain today">
+          <button type="button" data-onchain="yes" aria-pressed="false">YES</button>
+          <button type="button" data-onchain="no" aria-pressed="false">NO</button>
+        </span>
+      </label>
+      <label>CONTRACT OR MINT ADDRESS
+        <input name="contract" required placeholder="0x... or a Solana mint" autocomplete="off">
+      </label>
+      <label>DOES IT HAVE TRAITS WE CAN MAP TO TIER AND CLASS?
+        <textarea name="traits" required placeholder="Which traits mark a rare one, and which read as a class or a role."></textarea>
+      </label>
+      <div class="pair">
+        <label>WHERE WE CAN SEE IT
+          <input name="link" required type="url" placeholder="https://" autocomplete="off">
+        </label>
+        <label>HOW WE REACH YOU
+          <input name="contact" required placeholder="@handle" autocomplete="off">
+        </label>
+      </div>
+    </div>
+    <label class="trap" aria-hidden="true"><span>Website</span><input name="website" tabindex="-1" autocomplete="off"></label>
+    <p class="note">We read every one of these. Expect a reply on the handle you leave.</p>
+    <div class="foot">
+      <button class="btn shut" type="button" id="applyShut">CANCEL</button>
+      <button class="btn send" type="submit">SEND</button>
+    </div>
+  </form>
+  <div class="done" id="applyDone" hidden>
+    <b>THAT IS EVERYTHING WE NEED</b>
+    <p>In the finished thing this would reach us and we would come back to you with a charter: how your
+       traits map to tier, class, toughness, terrain and a perk.</p>
+    <button class="btn shut" type="button" id="applyClose">CLOSE</button>
+  </div>
+</dialog>
+
+<main>
+  <h1>FAQ</h1>
+  <div id="list"></div>
+</main>
+
+<footer class="credits">
+  <a class="mark" href="https://x.com/rarefiends" target="_blank" rel="noopener" aria-label="Rare Fiends on X"><img src="icon-192.png" alt="" width="20" height="20"></a>
+  <span class="by">POWERED BY <a href="https://x.com/intelstrata" target="_blank" rel="noopener">@INTELSTRATA</a>
+  AND <a href="https://rarefriends.com" target="_blank" rel="noopener"><img src="token.svg" alt="" width="18" height="18"> RAREFRIENDS</a></span>
+</footer>
+
+<script>
+(() => {
+  'use strict';
+  // The conversions, shown inside the answer about bridging: each one takes a Doopie from its own art
+  // to the sprite the chain keeps to the model the game draws.
+  const SHOTS = ['6289', '3170', 'v1', 'slime'];
+  const shots = '<div class="shots">' + SHOTS.map((f) =>
+    '<div class="shot"><iframe src="anim/' + f + '.html?auto=1" title="a Doopie being converted" loading="lazy" scrolling="no"></iframe></div>').join('') +
+    '</div><p class="cap">Its own art, pixelated down, turned into the sprite the contract keeps, then built into the model the game draws. Tap one to run it again.</p>';
+
+  const GAME = [
+    ['What are Rare Friends?', 'A collection on Robinhood Chain with deflationary mechanics, in two parts: <b>Genesis</b> and <b>Generations</b>. Both are main players in this game. Rare Friends also provide the <b>SDK</b> this is built on: the art, the characters and some of the on-chain plumbing we build the game with.'],
+    ['What is Rare Fiends?', 'An on-chain strategy game on Robinhood Chain. Claim a base, farm crystal, wood and power, upgrade your buildings and evolve your squad; then attack everyone else and take theirs.'],
+    ['What do I need to play?', 'Any Genesis or Generation. Each brings its own strengths and offensive skills. Doopies can play too; see below. And <b>$RF</b> for the pot, when you are ready.'],
+    ['What is the $RF token for?', '$RF sets the pot. <b>Winner takes all</b>; we keep <b>5%</b> to cover the oracle calls that make the randomness real, since true entropy comes from outside the chain.'],
+    ['Is this on-chain?', 'V1 is to test gaming dynamics; V2 will move on-chain.'],
+    ['How is randomness handled?', 'Pyth Entropy. Every roll is verifiable; no house RNG, no trust-me-bro.'],
+    ['Where do I follow?', '<a href="https://x.com/rarefiends" target="_blank" rel="noopener">@rarefiends</a>. Everything else is noise.'],
+  ];
+  const VISITORS = [
+    ['What is a Doopie?', 'A Solana PFP project from the <a href="https://x.com/doodles" target="_blank" rel="noopener">@doodles</a> team, and the first outside project on Rare Fiends. Bridge one and it lands on the map as a hidden bandit that taxes whoever walks into it.'],
+    ['How do I use a Solana Doopie on Robinhood Chain?',
+     'You do not bridge it. Prove you own it and a <b>soulbound shadow</b> is minted on Robinhood Chain with its art and traits. The original never leaves Solana.' + shots +
+     '<ol class="steps"><li><i>1</i><span>Connect Phantom; read-only, nothing signed, nothing spent</span></li>' +
+     '<li><i>2</i><span>Pick your Doopies and check the converted art</span></li>' +
+     '<li><i>3</i><span>Sign a <b>message</b>, not a transaction, linking your Solana wallet to your EVM address</span></li>' +
+     '<li><i>4</i><span>The attestor reads Solana and signs the claim</span></li>' +
+     '<li><i>5</i><span>You redeem it on Robinhood Chain; shadow minted</span></li></ol>'],
+    ['What if I sell my Doopie?', 'The shadow auto-revokes on the next check. Play stops; the new owner bridges it themselves.'],
+    ['What if I sell mid-game?', 'The shadow revokes, your fiend leaves the map, and its satchel <b>drops on the tile it was hiding on</b>; whoever walks there takes it. The buyer bridges it themselves and starts empty.'],
+    ['Can I flip the shadow?', 'No. Non-transferable by design; no buying your way into a squad you do not own. One shadow per mint, ever.'],
+    ['How can other projects apply to join?', 'A collection arrives with a charter: how its traits map to tier, class, toughness, terrain and a perk. Doopies are first. Tell us about yours and we will send you one. <a href="#" data-apply>Apply here</a>.'],
+  ];
+  const fold = (rows, openAt) => rows.map(([q, a], i) =>
+    '<details class="qa"' + (i === openAt ? ' open' : '') + '><summary class="q">' + q + '</summary><div class="a">' + a + '</div></details>').join('');
+  document.getElementById('list').innerHTML =
+    '<h2 class="sec">THE GAME</h2>' + fold(GAME, 4) +
+    '<h2 class="sec">CAN OTHER PROJECTS PLAY?</h2>' + fold(VISITORS, 1);
+
+// One menu holds the way in and the way on: FAQ, CONNECT, then the bridge. Silkscreen has no menu glyph,
+  // so the bars are drawn, the same as the sun and the moon.
+  const BURGER = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M3.5 7h17M3.5 12h17M3.5 17h17"/></svg>';
+  const CLOSE  = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M5.5 5.5l13 13M18.5 5.5l-13 13"/></svg>';
+  const burger = document.getElementById('burger'), menu = document.getElementById('menu');
+  function setMenu(open) {
+    menu.hidden = !open;
+    burger.innerHTML = open ? CLOSE : BURGER;
+    burger.setAttribute('aria-expanded', String(open));
+  }
+  setMenu(false);
+  burger.onclick = (e) => { e.stopPropagation(); setMenu(menu.hidden); };
+  document.addEventListener('click', (e) => { if (!menu.hidden && !menu.contains(e.target)) setMenu(false); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') setMenu(false); });
+
+  // Light and dark, the same switch as the landing page.
+  // Silkscreen has no sun or moon, and a font fallback for one glyph is how the ETH symbol went wrong —
+  // so these are drawn, not typed. Feather's sun and crescent, inheriting the button's own colour.
+  const SUN = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 1.8v2.4M12 19.8v2.4M4.22 4.22l1.7 1.7M18.08 18.08l1.7 1.7M1.8 12h2.4M19.8 12h2.4M4.22 19.78l1.7-1.7M18.08 5.92l1.7-1.7"/></svg>';
+  const MOON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.5 14.4A8.6 8.6 0 1 1 9.6 3.5a6.9 6.9 0 0 0 10.9 10.9z"/></svg>';
+  const THEME_KEY = 'rf-theme';
+  const themeBtn = document.getElementById('theme');
+  function applyTheme(mode) {
+    const light = mode === 'light';
+    document.documentElement.setAttribute('data-theme', light ? 'invert' : 'dark');
+    themeBtn.innerHTML = light ? MOON : SUN;
+    themeBtn.title = light ? 'Switch to dark' : 'Switch to light';
+    try { sessionStorage.setItem(THEME_KEY, mode); } catch (_) {}
+  }
+  let theme = 'dark';
+  try { theme = sessionStorage.getItem(THEME_KEY) || 'dark'; } catch (_) {}
+  applyTheme(theme);
+  themeBtn.onclick = () => { theme = theme === 'light' ? 'dark' : 'light'; applyTheme(theme); };
+
+  // the finished thing would say back.
+  (function applySheet() {
+    const dlg = document.getElementById('apply');
+    if (!dlg) return;
+    const form = document.getElementById('applyForm');
+    const done = document.getElementById('applyDone');
+    let onchain = null;
+    dlg.querySelectorAll('[data-onchain]').forEach((b) => {
+      b.onclick = () => {
+        onchain = b.dataset.onchain;
+        dlg.querySelectorAll('[data-onchain]').forEach((o) => o.setAttribute('aria-pressed', String(o === b)));
+      };
+    });
+    const open = () => { form.hidden = false; done.hidden = true; dlg.showModal(); };
+    document.querySelectorAll('[data-apply]').forEach((a) => {
+      a.addEventListener('click', (e) => { e.preventDefault(); setMenu(false); open(); });
+    });
+    document.getElementById('applyShut').onclick = () => dlg.close();
+    document.getElementById('applyClose').onclick = () => dlg.close();
+    form.addEventListener('submit', (e) => {
+      if (!onchain) {                                   // the one field a browser cannot require for us
+        e.preventDefault();
+        dlg.querySelector('[data-onchain]').focus();
+        return;
+      }
+      e.preventDefault();
+      const send = form.querySelector('.send');
+      const say = (m) => { let n = form.querySelector('.fail');
+        if (!n) { n = document.createElement('p'); n.className = 'fail'; form.querySelector('.foot').before(n); }
+        n.textContent = m; };
+      const body = { onchain };
+      new FormData(form).forEach((v, k) => { body[k] = String(v); });
+      send.disabled = true; send.textContent = 'SENDING';
+      fetch('apply.php', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+        .then((r) => r.json().catch(() => ({ ok: false })).then((j) => ({ r, j })))
+        .then(({ r, j }) => {
+          if (r.ok && j.ok) { form.hidden = true; done.hidden = false; return; }
+          say(r.status === 429 ? 'That is several already. Try again in an hour, or DM @rarefiends.'
+                               : 'That did not send. Try again, or DM @rarefiends.');
+        })
+        .catch(() => say('That did not send. Try again, or DM @rarefiends.'))
+        .finally(() => { send.disabled = false; send.textContent = 'SEND'; });
+    });
+  })();
+
+  // nothing is live yet: the buttons say so rather than pretending
+  const LIVE = false;
+  const refuse = (el) => { el.classList.remove('nope'); void el.offsetWidth; el.classList.add('nope');
+    setTimeout(() => el.classList.remove('nope'), 620); };
+  document.querySelectorAll('nav a[href="bridge.html"]').forEach((a) =>
+    a.addEventListener('click', (e) => { if (LIVE) return; e.preventDefault(); refuse(a); }));
+  document.getElementById('wallet').onclick = () => { if (!LIVE) refuse(document.getElementById('wallet')); };
+})();
+</script>
+</body>
+</html>

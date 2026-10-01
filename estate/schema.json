@@ -1,0 +1,587 @@
+{
+  "schema": "rarefriends-state",
+  "version": 1,
+  "milestone": "M3",
+  "written": "2026-09-30",
+
+  "what": [
+    "Every piece of state in RareFriends, written down once, with exactly one home. This file is the",
+    "schema M3 item 6 asks for: something the code reads, not prose. It names FIELDS, TYPES, HOMES and",
+    "SOURCES. It carries NO VALUES - not one number - because values are the economist's and the",
+    "deployer's, and because a number written here would be a second home for it. schemacheck.js",
+    "enforces that: there is no JSON number anywhere under `entities`, `enums` or `oneHome`.",
+    "",
+    "It is JSON and not a document, not a .d.ts, not a .proto and not annotated Solidity, for four",
+    "reasons that are all about this repository rather than about taste:",
+    "  1. estate/ has NO package.json and NO node_modules. Every check in it is plain Node with zero",
+    "     dependencies. A JSON-Schema validator, protobuf or a TypeScript type would be the first",
+    "     dependency estate/ ever had, and it would be a dependency of the schema itself.",
+    "  2. There is no hardhat and no foundry; solc 0.8.36 is called directly. So the schema cannot be",
+    "     an annotation on Solidity - the Solidity does not exist yet (M20 writes it). The schema has",
+    "     to be the thing the Solidity is checked AGAINST, which means a declaration a plain-Node check",
+    "     can compare a .sol file's structs to. gencheck.js already does exactly this for the HP table.",
+    "  3. Both halves of the codebase can read JSON with nothing added: Node `require`, and a page",
+    "     `fetch`. base-data.json is the precedent for the page half.",
+    "  4. It is INERT. index.html's ECON became a client belief by being assembled out of 25 live",
+    "     constants; a schema that can compute is a schema that will. Nothing here evaluates."
+  ],
+
+  "homes": {
+    "chain": "A slot, a mapping entry or an event on chain 4663. The only home a thing can be argued about from.",
+    "map": "Frozen into a map at its seed. Reproducible from the seed and the generator version; never stored.",
+    "client": "A client belief. Redrawable, guessable, and worth nothing in a dispute. DESIGN's third home."
+  },
+
+  "types": [
+    "bool", "uint8", "uint16", "uint32", "uint64", "uint128", "uint256",
+    "int16", "int256", "bytes32", "bytes", "address", "string",
+    "enum", "ref",
+    "bool[]", "uint8[]", "uint16[]", "uint32[]", "uint64[]", "uint128[]", "uint256[]",
+    "int16[]", "bytes32[]", "address[]", "string[]", "ref[]", "enum[]",
+    "mapping(address => bool)"
+  ],
+  "typesNote": "mapping(address => bool) is a per-address lookup: a page reads it one address at a time (whitelisted(addr)) and can never enumerate it - there is no list on chain to show. deployer.html's whitelist add/remove rows already treat it that way. Ruling 21.",
+
+  "gaps": {
+    "note": "BINDING.md §12's eight rows, keyed so an entity can name the one it closes. `covered` says whether THIS file gives it a home; it never claims a contract exists - M20 builds them.",
+    "rows": {
+      "baseState": { "was": "No contract holds a tile, a building, a level, a finished-or-building flag, a watchtower's occupant, a wall's crew, or a Friend's post. base.defense() is the specification and it exists only in the page", "covered": true, "entities": ["base", "tile", "building", "wallCrew", "towerWatch"] },
+      "rulesOnChain": { "was": "The rules table lives in base.ECON in index.html - a client belief. Five of its fields are PROPOSED", "covered": true, "entities": ["rules", "buildingType"] },
+      "rulesIdInRecord": { "was": "DESIGN's replay list is 'the word, line-ups and spots'. The numbers are not in it, so a recorded fight does not name the table it was fought under", "covered": true, "entities": ["fight", "game"] },
+      "ordersCommitment": { "was": "Decided in approach, M20's to design, nothing built. No commitment, no reveal, no consequence for not revealing", "covered": "shape only", "entities": ["ordersCommitment"] },
+      "rosterStorage": { "was": "The line-up row { collection, tokenId, gen, x, y, tower, order, fx, fy } has no home. §4.4 says every field of it is chain state; none of it is", "covered": true, "entities": ["rosterRow"] },
+      "fightLifecycle": { "was": "No state machine, no fight id, no LinedUp/Rolling/Settled, no FightSealed", "covered": true, "entities": ["fight"] },
+      "disputeProcess": { "was": "No submitter, no bond, no challenge window, no deadline. 'Dispute' appears once in DESIGN. BINDING §18 says this is the largest hole in the whole file", "covered": false, "entities": [], "why": "A bond and a deadline are numbers and a policy, not a shape. Two fields are reserved on `fight` (bond, challengeDeadline) and marked undecided; the process itself needs the deployer, and BINDING §18 is right that a scoreboard nobody can challenge is a scoreboard we are asserting. THIS FILE DOES NOT CLOSE IT." },
+      "rentedFriendOwner": { "was": "base.defense() marks defenders rented:true and the mockup fields three of them. Part one §2.1 checks ownerOf(tokenId) == msg.sender at join. Nothing in DESIGN says whether a rented Friend defends, or who counts as its owner for that check", "covered": "shape only", "entities": ["rosterRow", "hire"], "why": "`rosterRow.postedBy` and the `hire` entity give the question somewhere to land, but WHICH address the join guard checks is the deployer's (BINDING §13 item 7)." }
+    }
+  },
+
+  "enums": {
+    "note": "`members` is ordered; a member's on-chain value is its index, from zero. An enum with `decided: false` has an empty members list on purpose: nobody has said what belongs in it, and an empty list is countable where a guess is not.",
+
+    "home": { "decided": true, "members": ["chain", "map", "client"], "note": "DESIGN's three-way classification. Not on chain; this file's own vocabulary." },
+
+    "order": { "decided": true, "members": ["hold", "engage", "defend", "fallback"], "note": "A defender's standing order. combat.js ORDERS and RareCombat.Defender.order read the index, so the ORDER OF THIS LIST IS CONSENSUS - moving a member changes every recorded fight." },
+
+    "side": { "decided": true, "members": ["N", "E", "S", "W"], "note": "The side an attack comes in from. combat.js SIDES. The vector is derived from the base's tile bounding box, never supplied - BINDING §10.3." },
+
+    "fightState": { "decided": true, "members": ["none", "linedUp", "rolling", "settled"], "note": "BINDING §11.5, §11.6 and §16.2. `settled` is one-shot and terminal: the same fight cannot credit the scoreboard twice. `none` is index zero so an unwritten slot is not a live state, which is the RareDuel.State pattern." },
+
+    "duelState": { "decided": true, "built": "RareDuel.State", "members": ["None", "Offered", "Picking", "Rolling", "Settled", "Closed"], "note": "Already deployed shape, copied here rather than restated. Members keep their Solidity spelling because schemacheck compares them to the .sol file character for character." },
+
+    "stakeCurrency": { "decided": "contested", "members": ["crystals", "rf"], "note": "COORDINATION POINT, NOT A DECISION MADE HERE. BINDING §20.1 as written says 'you bet with crystals not RF', crystals only. The deployer has since allowed a duel to be staked in EITHER, and a second chain-engineer is specifying it in BINDING. Two members are recorded so the schema has a place for a discriminator; which members survive is theirs and the deployer's, and §20.1 must be reconciled before M20." },
+
+    "buildingKind": { "decided": true, "notAnEnum": true, "members": ["keep", "hut", "silo", "tower", "wall", "cell", "generator", "collectionDepot"], "note": "THESE ARE THE SETTLED CODE NAMES (M2 item 6) AND THEY ARE NOT A SOLIDITY ENUM. M3 item 4 requires that adding a building be an identity and a row of numbers with no code change; a Solidity enum is a code change and an upgrade. So a building's kind is a `uint16 kindId` into the stored `buildingType` registry, and this list is the eight rows that registry starts with - not its ceiling. index.html's KIND object is the client's copy of those rows, and `oneHome` says so." },
+
+    "job": { "decided": false, "members": [], "note": "M3 item 2 requires 'a Friend's job'. DESIGN names chopping, harvesting, standing watch, manning a wall and science at a cell, but never as a closed list, and a Friend posted at a cell for science is doing a job AND holding a post. Needs the game engineer plus the deployer; M8/M9/M11 territory." },
+
+    "gameState": { "decided": "proposed", "built": "RareGame.State", "members": ["None", "Open", "Started", "Settled", "Abandoned"], "note": "BUILT as RareGame.State by the chain engineer from the decided clocks (join window, start delay, length) and the decided end (the winners are declared); `Abandoned` is joining closing short of the minimum with every stake refunded. The members are the contract's, not the deployer's: PROPOSED, and the steward owes the deployer the question. `None` is index zero so an unwritten slot is not a live state - the RareDuel.State pattern." },
+
+    "moveKind": { "decided": false, "members": [], "note": "The move log's discriminator. §17.2.2 makes every move an event folded into moveRoot, so THIS LIST IS THE DEFINITION OF WHAT COUNTS AS HISTORY - a move kind left off it is a thing that happened and is not in the record. Visible in the mockup today and not yet decided as a list: build, upgrade, claim ground, gather, chop, post a Friend, set an order, hire, fight, duel, list, buy, sell back. Needs the deployer. M6 writes it, M18 closes the game against it." },
+
+    "closeReason": { "decided": false, "members": [], "note": "Why a game ended. BINDING §16.4 last bullet: an era must not close with fights still open, and what happens if it does is undecided." }
+  },
+
+  "entities": {
+
+    "player": {
+      "home": "chain",
+      "note": "Who a player is. NOT a row we invent: a player IS an address, and what they hold is held by tokens and by per-game accumulators. This entity exists so the schema has one place to say that - and to say that a player has no profile row at all.",
+      "milestone": "M5",
+      "fields": {
+        "addr": { "type": "address", "note": "The identity. There is no id, no nickname and no registration: an address that holds a Genesis can join a game." },
+        "genesisHeld": { "type": "ref[]", "ref": "genesis", "derived": true, "note": "Derived, not stored: ownerOf over the Genesis collection. Storing it is a second home for ownership and it would go stale on every transfer." },
+        "displayName": { "type": "string", "home": "client", "note": "OVERRIDDEN HOME. M5 is 'the player as a person' and a name is not chain state unless somebody pays to store it. Recorded here as client so nothing later assumes it settles anything." }
+      }
+    },
+
+    "genesis": {
+      "home": "chain",
+      "note": "The Genesis token. M3 item 8, DECIDED: the Genesis token owns the base, and the base's purse is that token's own account. So selling a base is a token transfer and not a bespoke function, which is why it had to be settled before M20.",
+      "milestone": "M3",
+      "fields": {
+        "collection": { "type": "address", "note": "The Genesis contract. Named rather than assumed because the roster row carries a collection too and the two must be comparable." },
+        "tokenId": { "type": "uint256", "note": "Together with `collection`, the owner of a base." },
+        "account": { "type": "address", "derived": true, "note": "tokenBoundAccount(tokenId). DERIVED - the toolkit computes it, so storing it is a second home. This is the base's purse; the deployer's words were 'it should be the Genesis NFT wallet, they all come with one'." }
+      }
+    },
+
+    "friend": {
+      "home": "chain",
+      "note": "A Friend, as a token. Its generation is READ FROM THE CHAIN AND NEVER SUPPLIED - gencheck.js enforces that no deployable contract commits state or moves a token on a generation it was handed. Everything a Friend is, except where it is standing in a game, belongs to the token and not to us.",
+      "milestone": "M11",
+      "fields": {
+        "collection": { "type": "address", "note": "The Friends contract. Not assumed to be one address: the roster row is keyed by collection AND tokenId because partnerships bring other collections in." },
+        "tokenId": { "type": "uint256", "note": "The unit. DESIGN §1: a unit is a token, never a generation." },
+        "gen": { "type": "uint8", "note": "1 to 6. READ, never supplied: generation(tokenId) on the collection. The single most-guarded value in the game - BINDING §10 ranks a forged generation fourth of seven and gencheck.js exists for it alone." },
+        "family": { "type": "uint16", "note": "M3 item 2's 'family'. Read from the collection's own metadata, not stored by us. Named so nothing later stores a copy." },
+        "seed": { "type": "bytes32", "note": "The token's own seed, which the sprite is drawn from. Read from the collection." },
+        "wallet": { "type": "address", "derived": true, "note": "tokenBoundAccount(tokenId) - every Friend has one, the marketplace is built on it, and nothing has used it yet." }
+      }
+    },
+
+    "hire": {
+      "home": "chain",
+      "note": "A rented Friend: hired from a holder who owns no Genesis, so it can man a wall or a tower for somebody else's base. index.html fields three of them on random free tiles today. THIS ENTITY IS A PLACE FOR AN UNANSWERED QUESTION, not an answer: BINDING §12's last row and §13 item 7 ask whether a rented Friend defends at all and whose ownership check it passes, and that is the deployer's.",
+      "gap": "rentedFriendOwner",
+      "milestone": "M15",
+      "fields": {
+        "friend": { "type": "ref", "ref": "friend", "note": "What was hired." },
+        "holder": { "type": "address", "note": "Who owns the token and is letting it out. The join guard's ownerOf check passes against THIS unless the deployer says otherwise." },
+        "hirer": { "type": "address", "note": "Who is fielding it." },
+        "game": { "type": "ref", "ref": "game", "note": "A hire is per game, because a game's numbers are frozen and a hire is a number." },
+        "fee": { "type": "uint128", "decided": false, "note": "NO VALUE AND NO UNIT DECIDED. Whether a hire is paid in crystals or $RF, once or per game, is the economist's and the deployer's." }
+      }
+    },
+
+    "map": {
+      "home": "map",
+      "note": "THE ONE ENTITY WHOSE HOME IS THE SEED. Everything here is reproducible from the seed plus the generator's version, so none of it is stored - and the generator's version is stored WITH the seed, because a seed without the code that read it reproduces nothing. That pairing is the whole reason this home exists.",
+      "milestone": "M12",
+      "fields": {
+        "seed": { "type": "bytes32", "home": "chain", "note": "OVERRIDDEN HOME: the seed itself is chain state on the game row. It is the anchor; everything below is what it unfolds into." },
+        "generatorVersion": { "type": "uint32", "home": "chain", "note": "OVERRIDDEN HOME, and §19.1 names it explicitly. Chain state beside the seed. A generator change with the version unchanged silently re-draws every recorded game." },
+        "width": { "type": "uint16", "note": "Frozen with the seed." },
+        "height": { "type": "uint16", "note": "Frozen with the seed." },
+        "hill": { "type": "uint8[]", "note": "The height field. index.html's HILL - derived from the seed by mapgen.js, never stored." },
+        "waterSites": { "type": "int16[]", "note": "Tile x,y pairs where water runs. index.html's WATER_SITES. A generator may only stand on one, which is why placement reads this." },
+        "seams": { "type": "int16[]", "note": "Crystal seams, tile x,y pairs. index.html's SEAM_PLAN." },
+        "groves": { "type": "int16[]", "note": "Tree groves, tile x,y pairs. index.html's GROVES." },
+        "baseSites": { "type": "int16[]", "note": "Where a base may be planted. mapcheck already proves 100 of these are reproducible from the seed." }
+      }
+    },
+
+    "game": {
+      "home": "chain",
+      "note": "A game, and the row that makes every other row replayable. `rulesId` freezes the numbers; `moveRoot` and `moveCount` chain the history together - one word and a counter, and BINDING §19.1 calls them THE NEW THING the deployer's 'we keep the scoreboard and the moves' answer adds to the schema.",
+      "gap": "rulesIdInRecord",
+      "milestone": "M18",
+      "fields": {
+        "id": { "type": "uint64", "note": "The game. Every other row in the schema that is per game points at this, and a number frozen per game is frozen against it." },
+        "state": { "type": "enum", "enum": "gameState", "note": "Undecided members - see the enum." },
+        "mapSeed": { "type": "bytes32", "note": "The map. Stored, because the map's home is the seed and the seed's home is here." },
+        "generatorVersion": { "type": "uint32", "note": "The code that reads the seed. Stored beside it or the pair is worthless." },
+        "rulesId": { "type": "bytes32", "note": "The keccak of the rules table this game was created with, written once and never again. NO NUMBER CHANGES DURING A RUNNING GAME - every number, not just money - and this id is what makes that claim checkable rather than a promise. BINDING §16.3: because the table a fight was fought under cannot have moved, a recorded fight can always be replayed." },
+        "cutBps": { "type": "uint16", "note": "The house's cut, in bps. A stored value and not a constant, because anything the deployer page can change is stored state - 'No diamond'. No value here." },
+        "cutFrozen": { "type": "bool", "note": "Set true at the first payment. §19.1's 'frozen-at-first-payment flag'." },
+        "places": { "type": "uint8", "note": "How many ranked places pay, deployer-set per game, at most MAX_PLACES (10). RareGame.Game.places. The SPLIT is a rule and not a field (DESIGN, Starting a game): 50 / 30 / the rest equally - RareGame.split(prize, n) is that rule as a pure function, so no share is stored." },
+        "minPlayers": { "type": "uint8", "note": "The fewest players a game needs to start. PROPOSED 2 (the economist's), not decided; a parameter with a starting value, never a constant. RareGame.Game.minPlayers." },
+        "demo": { "type": "bool", "note": "The demo bit the game was created under, frozen for its life. BINDING §28; RareRoles.requireMayJoin reads it. RareGame.Game.demo." },
+        "length": { "type": "uint64", "note": "How long the game runs, seconds. Starting value seven days, the deployer's or the gamemaster's to set. RareGame.Game.length; closesAt = startsAt + length." },
+        "cut": { "type": "uint128", "note": "In $RF: what left the pot for feeTo AT START (DESIGN: the cut is taken at game start). RareGame.Game.cut." },
+        "starter": { "type": "address", "note": "Who opened the game and set its entry; the first player. RareGame.Game.starter." },
+        "players": { "type": "address[]", "note": "The roster, in join order. RareGame.Game.players; inGame(id, who) is the per-address lookup." },
+        "joinClosesAt": { "type": "uint64", "note": "When joining shuts. The start screen's first clock." },
+        "startsAt": { "type": "uint64", "note": "When play begins. The second clock." },
+        "closesAt": { "type": "uint64", "note": "When the game ends and the pot pays." },
+        "pot": { "type": "uint128", "note": "In $RF. The pot pays the three ranked places; a duel is staked separately - see stakeCurrency." },
+        "entry": { "type": "uint128", "note": "What joining costs. No value." },
+        "moveRoot": { "type": "bytes32", "note": "The running hash: moveRoot = keccak256(abi.encode(moveRoot, move)), one word, updated in the same transaction as the move. BINDING §17.3 is the six free reads a player uses to prove the history is intact. §17.4 is the honest limit: it proves the record is INTACT, never that it is TRUE." },
+        "moveCount": { "type": "uint64", "note": "How many moves are folded in. Lets a reader know when they have fetched them all." },
+        "finalScoreboard": { "type": "bytes32", "note": "The scoreboard frozen at close. §19.1's last row: a later game or the marketplace may read it, and a live accumulator is not a result." },
+        "closeReason": { "type": "enum", "enum": "closeReason", "note": "Undecided." }
+      }
+    },
+
+    "rules": {
+      "home": "chain",
+      "note": "THE RULES TABLE, and the largest gap BINDING found: today it is base.ECON in index.html, assembled by Combat.rulesFrom() - a client belief. BINDING §10 ranks forging it FIRST of seven, ahead of deleting the walls, because it is not one number about one body, it is all the numbers about all the bodies. Written once per game, frozen for it, addressed by rulesId, never a Solidity constant.",
+      "gap": "rulesOnChain",
+      "built": "RareCombat.Rules",
+      "milestone": "M20",
+      "fields": {
+        "hp": { "type": "uint32[]", "note": "By generation, 7 entries with index 0 unused. index.html HP_OF. gencheck.js already holds this table to one source." },
+        "dmg": { "type": "uint32[]", "note": "By generation. WEAPONS[g].dmg." },
+        "reach": { "type": "uint32[]", "note": "By generation, IN SPOTS - a spot is half a tile, so a weapon's tile range doubles here. Integers only; the Solidity is a line-for-line copy." },
+        "period": { "type": "uint32[]", "note": "By generation, ms between shots. COMBAT.periodMs by weapon class." },
+        "melee": { "type": "bool[]", "note": "By generation." },
+        "siege": { "type": "bool[]", "note": "By generation." },
+        "pierce": { "type": "bool[]", "note": "By generation." },
+        "area": { "type": "uint32[]", "note": "By generation, splash radius in spots." },
+        "vsBuilding": { "type": "uint32[]", "note": "By generation, the multiplier against a building." },
+        "wallHp": { "type": "uint32", "note": "A level-1 wall section. BINDING §16.3's own example of why the freeze matters: a fight fought at one wallHp and replayed at another produces two truths about two worlds." },
+        "landVsBuildingBps": { "type": "uint32", "note": "COMBAT.landVsBuildingBps." },
+        "towerReach": { "type": "uint32", "note": "How much further a Friend up a watchtower can shoot, in spots. COMBAT.towerRange doubled." },
+        "dropReach": { "type": "uint32", "note": "How far a wall crew can drop stones, in spots. COMBAT.dropRange doubled." },
+        "coverDiv": { "type": "uint32", "decided": false, "note": "PROPOSED, no value. One of the five BINDING §10.1.3 names; the deployer decides and a contract must not." },
+        "maxMs": { "type": "uint32", "decided": false, "note": "PROPOSED, no value. The fight clock." },
+        "stepMs": { "type": "uint32", "decided": false, "note": "PROPOSED, no value. Derived from walking pace, which is undecided." },
+        "defendReach": { "type": "uint32", "decided": false, "note": "PROPOSED, no value. How far a DEFEND order may stray from its post, in spots." },
+        "splashFalloff": { "type": "uint32", "decided": false, "note": "PROPOSED, no value, AND NOT IN RareCombat.Rules TODAY. DESIGN says 'the splash falling off by half a spot'; §10.1.3 counts it among the five, and the struct has no field for it. So the table is one field short of the specification and schemacheck records the mismatch rather than hiding it." },
+        "entryGap": { "type": "uint32", "decided": false, "note": "NO VALUE, AND IT MAY NOT BELONG HERE AT ALL. BINDING §10.3.3: the mockup offers three gaps and defaults to one, DESIGN says only 'in a line off the base', and WHETHER THE ATTACKER PICKS IT is the deployer's. If the attacker picks it, it is a fight field and not a rules field. Declared here with that fork written down." }
+      }
+    },
+
+    "buildingType": {
+      "home": "chain",
+      "note": "THE BUILDING REGISTRY, and M3 items 3 and 4 in one row. A building's placement rule and its footprint are DATA THE ROW CARRIES, not code, so a new building is an identity and a row of numbers. Today this is index.html's KIND object plus WOOD_COST plus SILO_CAP plus CELL_REACH plus CELL_NEEDS plus lockReason() - five constants and a function, in five places. One row here.",
+      "gap": "rulesOnChain",
+      "milestone": "M8",
+      "fields": {
+        "kindId": { "type": "uint16", "note": "The identity. A NUMBER AND NOT AN ENUM MEMBER, which is the whole of M3 item 4's first case: a new building is a new row with a new id, and no contract is redeployed. The eight starting rows are `buildingKind`'s members." },
+        "codeName": { "type": "string", "note": "The settled name: keep, hut, silo, tower, wall, cell, generator, collectionDepot (M2 item 6)." },
+        "levels": { "type": "uint8", "note": "How many levels the row defines. M3 item 4's second case: adding a level is a row of numbers, so every per-level field below is an array this long and nothing is a fixed-size struct." },
+        "levelName": { "type": "string[]", "note": "Per level. KIND[k].tiers." },
+        "crystalCost": { "type": "uint32[]", "unit": "hundredths", "note": "Per level. KIND[k].cost. No values. HOME: RareRules.setLadder/ladderOf, per rulesId, frozen by RareRules.freeze - M15 item 11's chain half." },
+        "woodCost": { "type": "uint32[]", "unit": "hundredths", "note": "Per level. WOOD_COST - level 1 is built of logs, upgrades are paid in crystals, and that asymmetry is data rather than a rule in code. HOME: RareRules, beside crystalCost. Not refunded by a demolition (BINDING §46.4)." },
+        "buildMs": { "type": "uint32[]", "note": "Per level. ECON.buildMs is one number for every building today; per level per kind is the shape." },
+        "strength": { "type": "uint32[]", "note": "Per level. M3 item 2's 'strength'. A wall's is the one the fight reads (rules.wallHp today - see oneHome, it is declared in two places and one must go)." },
+        "capacity": { "type": "uint32[]", "note": "Per level, the one number the kind caps: a silo's crystals (SILO_CAP), a wall's crew (WALL_CAP), a depot's harvesters, a hut's Friends. One field because they are one concept, and the note on the row says which." },
+        "reach": { "type": "uint32[]", "note": "Per level, in spots: a cell's claim (CELL_REACH), a tower's sight. Zero for a kind that reaches nowhere." },
+        "footprint": { "type": "int16[]", "note": "RELATIVE TILE OFFSETS, x,y pairs. A one-tile building is a single [0,0]. DATA, so a building bigger than one tile needs no code change - which matters because wallsortcheck's uncovered column says 'buildings bigger than one tile, which do not exist yet' and this is the field that lets them." },
+        "placement": { "type": "ref", "ref": "placementRule", "note": "The rule as data. M3 item 3." },
+        "abilityId": { "type": "uint16", "note": "M3 ITEM 4'S THIRD CASE, AND THE HONEST ANSWER TO IT. Adding a level is a row of numbers; adding a building is an identity and a row of numbers; ADDING AN ABILITY IS NEW BEHAVIOUR AND NO ROW CAN CARRY IT. So the row carries a pointer to behaviour, and what that pointer must point AT is a constraint on contract shape: it cannot be a library, because RareChance and RareCombat are libraries with internal functions, inlined at compile time, with no deployed address to re-point. An ability the deployer can add after launch must be reachable through an address this row names." },
+        "addedInGame": { "type": "uint64", "note": "The game id from which this row exists. A row added mid-game would change a running game's numbers, which the freeze forbids - so a new building becomes available to the NEXT game, and this field is what makes that enforceable instead of remembered." }
+      }
+    },
+
+    "placementRule": {
+      "home": "chain",
+      "note": "Where a building may stand, as data. Today this is lockReason() in index.html - two lines that know only about the keep - plus the water test for a generator, plus CELL_NEEDS for a cell's science, spread across the placement code. Every one of them is a field here.",
+      "milestone": "M9",
+      "fields": {
+        "needsKeep": { "type": "bool", "note": "Nothing can stand until the keep does. lockReason()'s only real rule today." },
+        "isKeep": { "type": "bool", "note": "One to a base, and the thing every other row waits on. lockReason()'s other branch." },
+        "cappedByKeepLevel": { "type": "bool", "note": "'No building can be raised past the keep's own tier' - the keep's own sub-line, which is a rule living in a display string." },
+        "onWater": { "type": "bool", "note": "A generator needs running water: map.waterSites. terraincheck already proves a generator is refused on dry ground." },
+        "onBaseEdge": { "type": "bool", "note": "A wall stands on a tile's edge, not in its middle - which is why a wall carries a direction and nothing else does." },
+        "onClaimedGround": { "type": "bool", "note": "A cell may be placed on claimed ground to push further still." },
+        "maxPerBase": { "type": "uint16", "note": "Zero for no limit. This is where a base's seventeenth wall section becomes a decided thing rather than a discovered one: RareCombat's MAX_WALLS is 16 and BINDING §10.2 says it becomes reachable by ordinary play the moment walls are read instead of supplied. No value - it is the deployer's, BINDING §13 item 5." },
+        "scienceGen": { "type": "uint8[]", "note": "Per level, the worst generation that can run it - CELL_NEEDS. Zero where no posted Friend is needed. Per level because a cell's second level needs a Gen 3 and its fourth a Gen 1." },
+        "needsKind": { "type": "uint16", "note": "A kindId this one requires, or zero. Named rather than hard-coded so a partnership's building can require a partner's." }
+      }
+    },
+
+    "base": {
+      "home": "chain",
+      "note": "THE BASE'S RECORDED STATE - the first of BINDING §12's eight gaps and the one the other five wait on. Today the ONLY specification of it is base.defense() inside index.html, which is a client belief describing the thing a fight is decided by. §10.2, §10.5.2, §10.6 and §10.7 all read it.",
+      "gap": "baseState",
+      "milestone": "M6",
+      "fields": {
+        "id": { "type": "uint64", "note": "The base. index.html already carries this: BASES, HOME and ofBase(id) exist because every building and every Friend belongs to a base." },
+        "game": { "type": "ref", "ref": "game", "note": "A base is per game." },
+        "ownerCollection": { "type": "address", "note": "The Genesis collection. M3 item 8." },
+        "ownerTokenId": { "type": "uint256", "note": "The Genesis token that owns this base. NOT an address: the owner is the token, so selling the base is a token transfer." },
+        "purse": { "type": "address", "derived": true, "note": "tokenBoundAccount(ownerTokenId). Derived, never stored." },
+        "crystals": { "type": "uint128", "unit": "hundredths", "note": "What the base holds. Capped by its silo's capacity, which is why the cap is a buildingType field and not a constant. CRYSTALS HAVE NO ON-CHAIN EXISTENCE TODAY - BINDING §20.1 grepped for it and found nothing in any .sol file - and this is the field that gives them one. See `oneHome` and the crystalLedger entity." },
+        "wood": { "type": "uint128", "unit": "hundredths", "note": "Level 1 is built of logs. Same standing as crystals: nothing on chain holds it today." },
+        "ordersCommit": { "type": "bytes32", "note": "One word per base, the sealed standing orders - BINDING §11.3, and the commitment must predate any fight against it. Declared on the base and not on the fight for exactly that reason: a field on the fight row would be written after the fight exists." },
+        "ordersCommitAt": { "type": "uint64", "note": "When it was sealed. The ordering rule is 'the line-up is committed before the word is requested', and a timestamp is what lets that be checked rather than trusted." }
+      }
+    },
+
+    "tile": {
+      "home": "chain",
+      "note": "A tile a base holds. The claim, not the terrain - the terrain's home is the seed. base.defense() returns baseTiles(id) mapped to x,y pairs and the fight derives its entry vector from the bounding box of exactly this list.",
+      "gap": "baseState",
+      "milestone": "M6",
+      "fields": {
+        "base": { "type": "ref", "ref": "base", "note": "Who claimed it. index.html's WORLDGEN.claimed maps a tile key to a base id today." },
+        "x": { "type": "int16", "note": "Tile coordinate, whole numbers. The mockup carries half-tile positions because a building sits in a tile's middle; the CLAIM is whole." },
+        "y": { "type": "int16", "note": "Tile coordinate." },
+        "claimedByBuilding": { "type": "uint64", "note": "The cell that reached it, or zero for the keep's own ground. Ground is claimed by a building's reach, so the record says which - and stepcheck's ladder is a consequence of this field, not a rule beside it." }
+      }
+    },
+
+    "building": {
+      "home": "chain",
+      "note": "One building on one base. Every field BINDING §10.2 says a wall list must come from, and §19.1's row: kind, level, tile, direction for a wall, FINISHED-OR-BUILDING, progress. `!b.build` is load-bearing - an unfinished wall is not a wall - and it is a flag in a page today.",
+      "gap": "baseState",
+      "milestone": "M6",
+      "fields": {
+        "id": { "type": "uint64", "note": "The building." },
+        "base": { "type": "ref", "ref": "base", "note": "Whose it is." },
+        "kindId": { "type": "uint16", "note": "Into buildingType. A number, so a new kind needs no redeploy." },
+        "level": { "type": "uint8", "note": "1 upward. Every per-level array in buildingType is indexed by this." },
+        "x": { "type": "int16", "note": "Tile coordinate. The footprint spreads from here by buildingType.footprint." },
+        "y": { "type": "int16", "note": "Tile coordinate." },
+        "vert": { "type": "bool", "note": "A wall only. Which edge of the tile it stands on: false is the back (north) edge and covers spots (2x, 2y) and (2x+1, 2y); true is the west edge and covers (2x, 2y) and (2x, 2y+1). RareCombat.Wall.vert and combat.js read it the same way, so the SPELLING IS CONSENSUS - index.html calls it dir 'x'/'y' and converts, which is a translation the chain must not inherit." },
+        "finished": { "type": "bool", "note": "BINDING §10.2: '!b.build is load-bearing and an unfinished wall is not a wall'. A fight must not count it and the page's flag is not a record." },
+        "startedAt": { "type": "uint64", "note": "When it went up. Progress is DERIVED from this plus buildingType.buildMs, not stored - a stored percentage is a second home for a clock." },
+        "strengthLeft": { "type": "uint32", "note": "Damage taken, as what is left. A wall that survived a fight is not a fresh wall, and the record has to say so or the next fight replays against a wall that was already broken." },
+        "harvesters": { "type": "uint8", "note": "A collection depot only, capped by buildingType.capacity. index.html carries it on the building row already." }
+      }
+    },
+
+    "towerWatch": {
+      "home": "chain",
+      "note": "Who is standing watch in a watchtower. §19.1: 'the watchtower's occupant'. One Friend to a tower, and their generation sets the defence while the level sets the reach - so this row is read by the fight and by nothing else.",
+      "gap": "baseState",
+      "milestone": "M6",
+      "fields": {
+        "building": { "type": "ref", "ref": "building", "note": "The tower." },
+        "roster": { "type": "ref", "ref": "rosterRow", "note": "The posted Friend. A ref and not a tokenId, so a Friend cannot be up a tower in a game it never joined." }
+      }
+    },
+
+    "wallCrew": {
+      "home": "chain",
+      "note": "A wall's crew, and EACH MEMBER'S SLOT. BINDING §10.6 is explicit that the slot is part of the truth, not a display detail: the crew stand side by side along the wall's own axis and the slot decides which spot each one occupies, so a fight fought with the slots shuffled is a different fight.",
+      "gap": "baseState",
+      "milestone": "M6",
+      "fields": {
+        "building": { "type": "ref", "ref": "building", "note": "The wall section." },
+        "slot": { "type": "uint8", "note": "Which place along the wall, from zero. Capped by buildingType.capacity. THE SLOT IS THE TRUTH - see the entity note." },
+        "roster": { "type": "ref", "ref": "rosterRow", "note": "Who is in it." }
+      }
+    },
+
+    "rosterRow": {
+      "home": "chain",
+      "note": "A posted Friend, per game. BINDING §19.1: { collection, tokenId, gen, x, y, tower, post slot }, and §12 says none of it has a home today. Part one §4.4 says every field of it is chain state. SNAPSHOT AT JOIN, DO NOT RE-READ EACH FIGHT (§4) - which is why gen is stored here having been READ at join, and is not a supplied value.",
+      "gap": "rosterStorage",
+      "milestone": "M7",
+      "fields": {
+        "id": { "type": "uint64", "note": "The row, so a tower and a wall slot can point at it." },
+        "game": { "type": "ref", "ref": "game", "note": "A posting is per game." },
+        "base": { "type": "ref", "ref": "base", "note": "Which base it defends." },
+        "collection": { "type": "address", "note": "The Friend's collection. Stored, not assumed - a partnership fields another collection's tokens." },
+        "tokenId": { "type": "uint256", "note": "The Friend." },
+        "gen": { "type": "uint8", "note": "READ from generation(tokenId) AT JOIN and frozen here. Never supplied, never re-read mid-game: re-reading it is how a generation changes under a recorded fight." },
+        "postedBy": { "type": "address", "note": "Who posted it, and WHOSE OWNERSHIP WAS CHECKED. For a hired Friend this is the open question - BINDING §13 item 7, undecided." },
+        "x": { "type": "int16", "note": "IN SPOTS, not tiles. Defenders hold their spots: where you leave a Friend is where it fights." },
+        "y": { "type": "int16", "note": "In spots. Whole numbers, so a contract can hold the whole fight in integers." },
+        "tower": { "type": "bool", "note": "Up a watchtower. BINDING §10 ranks a forged value here seventh: it takes two spots of reach off the crew." },
+        "order": { "type": "enum", "enum": "order", "note": "The standing order, set beforehand so the player need not be online. SEALED, not read: BINDING §10 ranks it fifth and §11.3 puts the commitment on the base." },
+        "fx": { "type": "int16", "note": "The fall-back spot, in spots. Read only for a FALL BACK order." },
+        "fy": { "type": "int16", "note": "In spots. Read only for a FALL BACK order, and sealed with the order it belongs to." },
+        "job": { "type": "enum", "enum": "job", "note": "Undecided members - see the enum. M3 item 2 requires it." },
+        "carrying": { "type": "uint32", "note": "What it carries - M3 item 2's 'what it carries'. A harvester's haul on its way back to the silo. NO UNIT AND NO CAP DECIDED." }
+      }
+    },
+
+    "item": {
+      "home": "chain",
+      "note": "An item and its power. M3 item 2's shortest noun and the one DESIGN says least about - M14 builds powers and items. Declared so it has a home and so nothing invents one later; every number in it is undecided.",
+      "milestone": "M14",
+      "fields": {
+        "id": { "type": "uint64", "note": "The item itself, as distinct from its type: two swords of one type are two items." },
+        "typeId": { "type": "uint16", "note": "A registry id, for the same reason buildingType.kindId is: a new item must not be a redeploy." },
+        "holder": { "type": "address", "note": "Who has it. An address and not a Friend, until DESIGN says an item is carried rather than owned." },
+        "power": { "type": "uint32", "decided": false, "note": "NO VALUE, NO UNIT, AND NOT ONE SCALE DECIDED. 'An item and its power' is all DESIGN says. M14's and the economist's." },
+        "abilityId": { "type": "uint16", "note": "Where an item's behaviour lives, on the same footing as buildingType.abilityId and for the same reason." },
+        "uses": { "type": "uint32", "decided": false, "note": "Whether an item is consumed is not decided." }
+      }
+    },
+
+    "crystalLedger": {
+      "home": "chain",
+      "note": "WHERE A CRYSTAL LIVES - and this entity is a QUESTION WITH A SHAPE, not an answer. BINDING §20.1 checked rather than assumed: grep for crystal and for ore over all five .sol files returns nothing. Crystals live in index.html's purse and are a client belief. A duel is staked in them, so a contract must be able to move them.",
+      "gap": "rulesOnChain",
+      "milestone": "M20",
+      "decided": false,
+      "fields": {
+        "shape": { "type": "string", "decided": false, "note": "TWO SHAPES, AND ONE DECIDED RULE ALREADY POINTS AT THE SECOND. (a) an ERC-20 the game mints and burns, or (b) a balance in the game's own storage with an internal transfer. DESIGN's capability table says a player CANNOT 'give crystals or wood to another player, except by staking them in a game' - AN ERC-20 IS FREELY TRANSFERABLE BY DEFINITION, so shape (a) contradicts a decided rule on the day it deploys. That is a collision, not a choice made here. A SECOND CHAIN-ENGINEER IS SPECIFYING THIS IN BINDING AND THIS FILE DEFERS TO IT." },
+        "holder": { "type": "ref", "ref": "base", "note": "Crystals are per base and per game, not per address - which is itself an argument for shape (b), because an ERC-20 balance is per address." },
+        "balance": { "type": "uint128", "unit": "hundredths", "note": "Declared here AND on base.crystals. THAT IS A DELIBERATE COLLISION RECORDED IN `oneHome`: exactly one of the two survives, and which one survives is decided by `shape`. It is written down twice here so it cannot be forgotten once." },
+        "escrow": { "type": "uint128", "unit": "hundredths", "note": "Staked in a duel and not yet won or returned. With shape (b) there is no safeTransferFrom to call, so the duel and the ledger are either the same contract or the ledger exposes a move-on-behalf function WITH AN ON-CHAIN GUARD - every setter needs one." },
+        "overflow": { "type": "uint128", "unit": "hundredths", "decided": false, "note": "THE DEPOT FILLS UP. DESIGN decided the collection depot holds crystals and it fills up; a duel pot can exceed the winner's remaining room, and WHERE AN OVERFLOWING PRIZE GOES IS NOT DECIDED - BINDING §21 item 12. A field with no policy is better than a policy invented here." }
+      }
+    },
+
+    "fight": {
+      "home": "chain",
+      "note": "A fight, and the lifecycle BINDING §12 says has no contract to put it in: a fight id, LinedUp/Rolling/Settled, and the sealing. The row is its INPUTS AND ITS RESULT TOGETHER, never the result alone (§17.2.4) - that is what makes 'fights resolve off chain and the chain records the result' safe rather than a promise, because the recorded result carries everything needed to reproduce it.",
+      "gap": "fightLifecycle",
+      "milestone": "M13",
+      "fields": {
+        "id": { "type": "uint64", "note": "The fight. It is also the roll's batch id, so the same word gives the same fight." },
+        "game": { "type": "ref", "ref": "game", "note": "Which game." },
+        "rulesId": { "type": "bytes32", "note": "THE FIELD BINDING §12 SAYS IS MISSING FROM DESIGN'S REPLAY LIST. 'The word, line-ups and spots' does not name the numbers, and a replay of word plus line-up plus spots against a table nobody recorded is not verifiable. Reverts UnknownRules(bytes32) when a fight names a table its game was not created with." },
+        "attacker": { "type": "address", "note": "Who came. An address rather than a base, because DESIGN decided anyone may attack." },
+        "defenderBase": { "type": "ref", "ref": "base", "note": "What was attacked." },
+        "side": { "type": "enum", "enum": "side", "note": "One of four. THE ONLY LEGITIMATE INPUT on BINDING §10's list - and even then the vector is derived from the defender's recorded tiles, so there is nothing to validate because nobody supplied it." },
+        "gap": { "type": "uint16", "decided": false, "note": "How far out the line starts, in spots. NO VALUE, AND WHETHER THE ATTACKER PICKS IT IS THE DEPLOYER'S - BINDING §13 item 4. A real tactical lever with three mockup buttons and no ruling. It appears on `rules` too, and `oneHome` records that exactly one of the two is right." },
+        "attackers": { "type": "uint8[]", "note": "The line-up, by generation, at most MAX_SIDE. Snapshotted, and each generation READ at line-up rather than supplied." },
+        "attackerTokens": { "type": "uint256[]", "note": "The tokens behind those generations. gencheck.js's third part is vacuous today because no contract accepts a combat tokenId; THIS FIELD IS WHAT MAKES IT NON-VACUOUS, because a generation must be looked up from a token and not handed over." },
+        "defenderSnapshot": { "type": "bytes32", "note": "The hash of the defender's roster rows, walls and tiles as they stood when the fight was lined up. Read from our own storage, never supplied - BINDING §10 items 2, 4, 6 and 7 are all forgeries this one field prevents." },
+        "seq": { "type": "uint64", "note": "The Entropy sequence number. RareDuel's lesson, already paid for: any other sequence's word must be discarded, and an abandoned request's word must not settle anything." },
+        "word": { "type": "bytes32", "note": "The Entropy word. One word decides a whole fight; every shot takes the next roll off it." },
+        "state": { "type": "enum", "enum": "fightState", "note": "LinedUp, Rolling, Settled. `settled` is terminal and one-shot, which is what stops the scoreboard being credited twice - BINDING §16.2, and RareDuel._duel is the working precedent." },
+        "ordersOpened": { "type": "bytes32", "note": "The revealed orders, checked against base.ordersCommit. WHO OPENS THEM AND WHAT A FIGHT THAT IS NEVER OPENED DOES IS UNDECIDED - BINDING §13 item 6 and §11.7, DESIGN's own named open problem." },
+        "settleDeadline": { "type": "uint64", "decided": false, "note": "NO VALUE. BINDING §16.4 is blunt that a settlement that never arrives is the live failure, and the two precedents in RareDuel draw the line: where somebody failed to do their part the default punishes them (forfeit); where everybody did their part and the machinery failed the default awards nothing and hands the money back (refundStuck). WHAT A FIGHT'S DEFAULT OUTCOME IS is the deployer's." },
+        "result": { "type": "bytes32", "note": "The outcome, hashed: who won, why, how long, and the hit points left on both sides and on every wall. RareCombat.Result is the shape. Stored as a hash and not a struct because the blow-by-blow is DERIVED - RareCombatLab.fight reproduces it from rulesId, word, line-up and snapshot, free, and it is the largest thing in the game and the most perfectly reproducible." },
+        "bond": { "type": "uint128", "decided": false, "note": "RESERVED FOR A DISPUTE PROCESS THAT DOES NOT EXIST. BINDING §18: a scoreboard updated from an off-chain replay that nobody can challenge is a scoreboard we are asserting. No submitter, no bond, no window, no deadline; 'dispute' appears once in DESIGN. THE FIELD IS HERE SO THE HOLE HAS A SHAPE, and the hole is NOT closed by this file." },
+        "challengeDeadline": { "type": "uint64", "decided": false, "note": "Same standing as `bond`. Reserved, undecided, and named so nothing reports the gap as covered." }
+      }
+    },
+
+    "ordersCommitment": {
+      "home": "chain",
+      "note": "The sealed standing orders. ONE WORD PER BASE, WRITTEN BY THE DEFENDER'S OWN SESSION WRITE, PREDATING ANY FIGHT AGAINST IT - BINDING §11.3. Not a separate table: the fields live on `base` because a row created when the fight is created cannot predate it. This entity exists to say that out loud and to point at where they are.",
+      "gap": "ordersCommitment",
+      "milestone": "M20",
+      "fields": {
+        "livesOn": { "type": "ref", "ref": "base", "note": "base.ordersCommit and base.ordersCommitAt. DELIBERATELY NOT DUPLICATED HERE." },
+        "openedOn": { "type": "ref", "ref": "fight", "note": "fight.ordersOpened. The reveal is per fight; the commitment is per base." }
+      }
+    },
+
+    "move": {
+      "home": "chain",
+      "note": "ONE EVENT PER MOVE, and events are the move log's home - append-only by construction, because a log cannot be rewritten. Folded into game.moveRoot and credited to the scoreboard IN THE SAME TRANSACTION, by the same function, from the same value. There is no second call to forget, no keeper to fall behind and no indexer to crash.",
+      "event": true,
+      "milestone": "M6",
+      "fields": {
+        "game": { "type": "uint64", "indexed": true, "note": "Indexed so a player can fetch a game's whole history with one free log query - step 1 of BINDING §17.3's six free reads." },
+        "actor": { "type": "address", "indexed": true, "note": "Who acted." },
+        "kind": { "type": "enum", "enum": "moveKind", "note": "Undecided members, and the enum's note says why that matters more than it looks: a move kind left off the list is a thing that happened and is not in the record." },
+        "seq": { "type": "uint64", "note": "The move's index, equal to game.moveCount before the write. Lets a reader fold in the right order without trusting log ordering." },
+        "parentRoot": { "type": "bytes32", "note": "EVERY BATCH NAMES ITS PARENT. A session's write carries the moveRoot it was built against and is refused if that is not the current root - reverts StaleParent(bytes32 saw, bytes32 is_). This is the compare-and-swap that closes BOTH the two-clients-out-of-step case the deployer flagged (§16.5) and the replayed-batch half of double-crediting (§16.2), with one comparison and one cold SLOAD." },
+        "body": { "type": "bytes", "note": "The move's own fields, per kind. For a fight it is the INPUTS AND THE RESULT TOGETHER - rulesId, word, line-up, defender's snapshot, revealed orders, outcome - never the result alone." }
+      }
+    },
+
+    "scoreboard": {
+      "home": "chain",
+      "note": "PER PLAYER PER GAME, MAINTAINED MOVE BY MOVE IN THE SAME TRANSACTION AS THE MOVE. Not derived privately off chain and pushed back - that is the natural cheap design and it reintroduces the missed-second-write failure permanently. The RANKING is not here: it is derived, because storing it means writing N players' ranks every time one player moves.",
+      "milestone": "M18",
+      "fields": {
+        "game": { "type": "ref", "ref": "game", "note": "Which game." },
+        "player": { "type": "address", "note": "Whose row this is. Keyed by address and by game, so one player has one row per game and no global total." },
+        "crystalsGathered": { "type": "uint128", "unit": "hundredths", "note": "Ever gathered - the running total DESIGN calls progress. Goes up and never down." },
+        "crystalsBanked": { "type": "uint128", "unit": "hundredths", "note": "The balance. SPEND YOUR CRYSTALS AND THIS FALLS WHILE crystalsGathered DOES NOT - they are two different numbers, both stored, because WHICH ONE STANDING IS has not been decided (BINDING §21 item 10) and storing both is cheaper than guessing." },
+        "tilesHeld": { "type": "uint32", "note": "Ground. A count and not a list; the list is `tile`." },
+        "fightsWon": { "type": "uint32", "note": "Attacks that took a base." },
+        "fightsLost": { "type": "uint32", "note": "Attacks that did not, and defences that fell." },
+        "duelsWon": { "type": "uint32", "note": "From RareDuel.settle." },
+        "duelsLost": { "type": "uint32", "note": "Including a forfeit." },
+        "stakeIn": { "type": "uint128", "unit": "hundredths", "note": "What this player staked, over every duel in the game. Folded in move by move, so it is the moves and not a separate tally." },
+        "stakeOut": { "type": "uint128", "unit": "hundredths", "note": "Taken. NOTE THE ONE HOLE THE FREEZE DOES NOT COVER: decision 5 says the marketplace's 1.5% does not get the cut's freeze, so ANY figure computed net of a sale is not replayable. If standing is crystals and nothing else there is no problem at all. Named, not decided." }
+      }
+    },
+
+    "ranking": {
+      "home": "client",
+      "note": "DERIVED, AND DELIBERATELY NOT STORED. The sort order over the stored accumulators - anyone can redo it, nobody has to trust it, and the ranking is not the record: the totals are, and the moves are underneath them. Declared as an entity with no stored fields so that the standings page has a named home and nothing later adds a `rank` column to `scoreboard`. THIS IS THE SEAM THE ANSWER TO QUESTION 1 FALLS ON.",
+      "derived": true,
+      "milestone": "M18",
+      "fields": {
+        "order": { "type": "uint32[]", "derived": true, "note": "The sort. Computed by whoever is looking." },
+        "winRate": { "type": "uint32", "derived": true, "note": "Arithmetic over stored numbers." },
+        "netCrystals": { "type": "uint128", "derived": true, "note": "Arithmetic." },
+        "streak": { "type": "uint32", "derived": true, "note": "Folded from the move events." },
+        "recomputedScoreboard": { "type": "bytes32", "derived": true, "note": "THE REDUNDANCY BEING USED: the scoreboard recomputed from the move events by anybody and compared with the stored accumulators. Step 5 of the six free reads. estate/standings-data.json is a SAMPLE FILE FULL OF INVENTED OWNERS and is what this replaces - M3 item 7's own words." }
+      }
+    },
+
+    "close": {
+      "home": "chain",
+      "note": "What the end of a game writes down. The three paid places and the amounts, and the final scoreboard frozen at close - because a later game or the marketplace may read it and A LIVE ACCUMULATOR IS NOT A RESULT.",
+      "milestone": "M18",
+      "fields": {
+        "game": { "type": "ref", "ref": "game", "note": "Which game." },
+        "place": { "type": "uint8", "note": "1, 2 or 3." },
+        "player": { "type": "address", "note": "Who was paid. Taken from the scoreboard frozen at close, not from the live accumulators, which may still be moving." },
+        "amount": { "type": "uint128", "note": "In $RF, out of the pot. No value." },
+        "paidAt": { "type": "uint64", "note": "When. An era must not close with fights still open - BINDING §16.4 - and a timestamp is what a check compares against the last unsettled fight." }
+      }
+    },
+
+    "duel": {
+      "home": "chain",
+      "note": "ALREADY BUILT AND ALREADY RIGHT: RareDuel.Duel, 243 lines deployed nowhere but proven by the parity check against duel.js. Copied here field for field so the schema covers the whole game rather than the unbuilt part of it, and so schemacheck can hold the .sol file to it. THE ONLY OPEN THING IS THE STAKE'S CURRENCY.",
+      "built": "RareDuel.Duel",
+      "milestone": "M20",
+      "fields": {
+        "gameId": { "type": "uint256", "decided": true, "note": "The game this duel is inside. Opaque to RareDuel - it is stored, indexed on Challenged and never interpreted - until RareGame exists (BINDING §54). Permanent: it is in the struct and in the event's topics, so it cannot be removed without a new contract." },
+        "p1": { "type": "address", "note": "The challenger." },
+        "p2": { "type": "address", "note": "The challenged." },
+        "stake": { "type": "uint128", "note": "Each; the pot is twice this. See stakeCurrency: §20.1 says crystals only, the deployer has since allowed either, and a second chain-engineer is specifying it. WHICHEVER IT IS, THE CONTRACT CAN ONLY STAKE SOMETHING A CONTRACT CAN MOVE, and crystals are not that today." },
+        "currency": { "type": "enum", "enum": "stakeCurrency", "decided": "contested", "note": "NOT IN RareDuel.Duel TODAY. The contract is currency-agnostic - it stakes whatever ERC-20 address it is constructed with, one immutable token - so 'either crystals or $RF' needs a discriminator the struct does not have. Declared here as the shape that ruling implies; the other chain-engineer's section decides it." },
+        "deadline": { "type": "uint64", "note": "To answer while Offered, to reveal while Picking, for the word to arrive while Rolling. One field, three meanings, by state." },
+        "state": { "type": "enum", "enum": "duelState", "note": "RareDuel.State." },
+        "pick1": { "type": "uint8", "note": "The challenger's revealed pick." },
+        "pick2": { "type": "uint8", "note": "The challenged's." },
+        "requested": { "type": "bool", "note": "A word has been asked for." },
+        "fulfilled": { "type": "bool", "note": "A word has arrived." },
+        "commit1": { "type": "bytes32", "note": "The challenger's sealed pick." },
+        "commit2": { "type": "bytes32", "note": "The challenged's." },
+        "word": { "type": "bytes32", "note": "The Entropy word." },
+        "winner": { "type": "address", "note": "Set by settle, in the same body that pays, sets the roll, sets the odds and sets the state - which is what §16.1's 'same transaction, same function, same value' rule looks like in code that already exists." },
+        "roll": { "type": "uint16", "note": "0 to 9999." },
+        "odds": { "type": "uint16", "note": "The challenger's chance in bps." },
+        "seq": { "type": "uint64", "note": "The LIVE Entropy sequence number; any other one's word is discarded. A defect already found and fixed - an abandoned request's word settled the duel." }
+      }
+    },
+
+    "roles": {
+      "home": "chain",
+      "note": "RareRoles.sol. The registry itself is not a game row; the one tuned number it holds is here so the deployer page can name its home.",
+      "fields": {
+        "roleChangeDelay": { "type": "uint64", "note": "Seconds a role change waits before it takes effect. DECIDED 2026-09-30: zero for v1, a deployer-page setting." },
+        "whitelistOpen": { "type": "bool", "note": "The launch whitelist gate. DECIDED 2026-09-30 (ruling 21): CLOSED at launch; the deployer may open it to everyone later. RareRoles.whitelistOpen." },
+        "whitelisted": { "type": "mapping(address => bool)", "note": "The launch whitelist itself: who may play while the gate is closed. Ruling 21. Edited from the deployer page with setWhitelisted(address[], bool), read back with whitelisted(address)." }
+      }
+    },
+
+    "partnership": {
+      "home": "chain",
+      "note": "A partnership and its split. M3 item 2's noun; M16 builds it. Declared for its home and its shape; every number in it is undecided. RarePartners stores payee and splitBps per base (collection, tokenId) and answers saleClaim(collection, tokenId, price) - the PRICE is an argument, which tonight's IRarePartners in RareMarket does not pass; the next RareMarket must.",
+      "built": "RarePartners",
+      "milestone": "M16",
+      "fields": {
+        "id": { "type": "uint64", "note": "The partnership." },
+        "collection": { "type": "address", "note": "The partner collection whose tokens may be fielded. This is why rosterRow carries a collection at all." },
+        "splitBps": { "type": "uint16[]", "decided": false, "note": "The split, in bps, adding to 10000. NO VALUES - the economist's and the deployer's." },
+        "payee": { "type": "address[]", "note": "Who the split pays. Same length as splitBps, which is a thing a check can assert and a prose schema cannot." },
+        "frozen": { "type": "bool", "note": "Set once the game starts and never cleared; setSplit is refused after it. RarePartners.freeze, behind FREEZE_PARTNERSHIP - the games contract's power when one exists, root's tonight." },
+        "game": { "type": "ref", "ref": "game", "note": "A split is a number, so it is frozen per game like every other number." }
+      }
+    },
+
+    "listing": {
+      "home": "chain",
+      "note": "A marketplace listing. SELLING IS ON CHAIN - decided, and M3 item 1 records rather than chooses it: an item bought on the marketplace, a building sold back for half, a whole base sold to a Genesis. A base sale is a TOKEN TRANSFER because the Genesis token owns the base, which is the whole payoff of M3 item 8.",
+      "milestone": "M15",
+      "fields": {
+        "id": { "type": "uint64", "note": "The listing." },
+        "seller": { "type": "address", "note": "Who is selling. For a base this is the Genesis holder, and the sale moves the token." },
+        "collection": { "type": "address", "note": "What kind of thing. A Friend, a Genesis, or zero for an item that is not a token." },
+        "tokenId": { "type": "uint256", "note": "Which one." },
+        "itemId": { "type": "uint64", "note": "For an item rather than a token." },
+        "price": { "type": "uint128", "note": "In $RF - money moves in $RF. No value." },
+        "feeBps": { "type": "uint16", "decided": true, "note": "THE ONE NUMBER THE FREEZE EXPLICITLY DOES NOT COVER. Decision 5: the marketplace's fee does not get the cut's freeze, the deployer's words were 'no need', and the reasoning is sound - a fee on a sale nobody has agreed to yet. The consequence is recorded on scoreboard.stakeOut: any standing figure netted of a sale is not replayable. No value here." },
+        "maxFeeBps": { "type": "uint16", "decided": true, "note": "The fee's ceiling: RareMarket.maxFeeBps, an immutable constructor argument. Ruling 1 (2026-09-30): 10% (1000 bps). Permanent once deployed - no setter exists, and setFeeBps refuses anything above it." },
+        "state": { "type": "uint8", "decided": false, "note": "open, sold, cancelled - not decided as a list. M15's." }
+      }
+    }
+  },
+
+  "oneHome": {
+    "note": [
+      "M3 ITEM 1, MADE MECHANICAL. Each row is one piece of state that exists in more than one place today,",
+      "the single home it is going to have, and the copies that must leave. `stillThere` is what schemacheck",
+      "greps for: while a copy is still in the file, the row is live. When the extraction happens the row is",
+      "marked gone and the check stops looking. So the list cannot go stale by being forgotten - it goes red.",
+      "",
+      "EVERY ROW WHOSE FILE IS estate/index.html IS THE CONTENDED WORK. A front-end agent is in that file.",
+      "Nothing in this file touched it."
+    ],
+    "rows": [
+      { "what": "the rules table", "home": "chain", "entity": "rules", "todayAlso": [{ "file": "estate/index.html", "stillThere": "const ECON = {", "why": "assembled from 25 live constants into one object the page hands to Combat.rulesFrom(); a client belief describing what a fight is decided by" }, { "file": "estate/combat.js", "stillThere": "function rulesFrom(E, proposed)", "why": "the assembler. It stays as the READER of the chain's table; what must stop is it reading ECON" }], "gone": false },
+      { "what": "the building registry", "home": "chain", "entity": "buildingType", "todayAlso": [{ "file": "estate/index.html", "stillThere": "const KIND = {", "why": "names, level names and crystal costs" }, { "file": "estate/index.html", "stillThere": "const WOOD_COST = {", "why": "the wood half of the same row, in a second place" }, { "file": "estate/index.html", "stillThere": "const SILO_CAP = [", "why": "one kind's capacity, in a third place" }, { "file": "estate/index.html", "stillThere": "const CELL_REACH = [", "why": "one kind's reach, in a fourth place" }, { "file": "estate/index.html", "stillThere": "const CELL_NEEDS = {", "why": "one kind's placement rule, in a fifth place" }, { "file": "estate/index.html", "stillThere": "function lockReason(k)", "why": "the placement rule AS CODE - M3 item 3 says it must be data the building carries" }], "gone": false },
+      { "what": "the base's recorded state", "home": "chain", "entity": "base", "todayAlso": [{ "file": "estate/index.html", "stillThere": "function defense(id = HOME)", "why": "THE ONLY SPECIFICATION OF THE BASE THAT EXISTS, and it is a page function. It reads buildings, actors, crews, occupants and posts and returns what a fight is decided by" }, { "file": "estate/index.html", "stillThere": "const buildings = WORLDGEN", "why": "the building rows themselves" }, { "file": "estate/index.html", "stillThere": "const PURSE = new Map(", "why": "the crystals and the wood" }], "gone": false },
+      { "what": "a crystal balance", "home": "chain", "entity": "crystalLedger", "todayAlso": [{ "file": "estate/schema.json", "stillThere": "\"balance\": { \"type\": \"uint128\"", "why": "DECLARED TWICE ON PURPOSE - base.crystals and crystalLedger.balance. Exactly one survives and `crystalLedger.shape` decides which. Recorded so it cannot be forgotten once rather than found twice" }, { "file": "estate/index.html", "stillThere": "crystals: id === HOME", "why": "the purse, a client belief. Nothing on chain holds a crystal today" }], "gone": false },
+      { "what": "the entry gap", "home": "chain", "entity": "fight", "todayAlso": [{ "file": "estate/schema.json", "stillThere": "\"entryGap\"", "why": "DECLARED TWICE ON PURPOSE - rules.entryGap and fight.gap. If the attacker picks it, it is a fight field; if the game fixes it, it is a rules field. BINDING §13 item 4 is the deployer's, and one of the two must go when it is answered" }, { "file": "estate/attack_defense.html", "stillThere": "data-gap", "why": "three mockup buttons and a default, which is a value in a page standing in for a ruling" }], "gone": false },
+      { "what": "the standings record", "home": "chain", "entity": "scoreboard", "todayAlso": [{ "file": "estate/standings-data.json", "stillThere": "\"players\"", "why": "M3 item 7's own words: a sample file full of invented owners. The deploy script already refuses to stage it; the schema is what replaces it" }], "gone": false },
+      { "what": "a defender's standing order", "home": "chain", "entity": "rosterRow", "todayAlso": [{ "file": "estate/index.html", "stillThere": "const ORDERS = [", "why": "the four orders and their on-chain indices. The LIST is consensus and belongs in the schema; the page keeps a reader, not the definition" }], "gone": false },
+      { "what": "the hit-point table", "home": "chain", "entity": "rules", "todayAlso": [{ "file": "estate/index.html", "stillThere": "const HP_OF = {", "why": "ALREADY HELD TO ONE SOURCE BY gencheck.js, which reads it through paritycheck's readConst and compares it with the table the Solidity is held to. So this row is the one piece of the rules table that ALREADY has a single-home check - and it proves the pattern the rest of the table needs" }], "gone": false }
+    ]
+  },
+
+  "needsDeployer": [
+    "The five PROPOSED rules fields - coverDiv, maxMs, stepMs, defendReach - plus splashFalloff, which is named in DESIGN and MISSING FROM RareCombat.Rules altogether. The table cannot be frozen per game until they have values.",
+    "The entry gap, and whether the attacker chooses it. It decides whether the field lives on `rules` or on `fight`, so it is a schema question and not only a balance one.",
+    "Whether crystals are an ERC-20 or an internal balance - and the collision that shape (a) contradicts the decided rule that a player cannot give crystals to another player.",
+    "Whether a duel is staked in crystals, $RF, or either - §20.1 currently says crystals only and must be reconciled.",
+    "Which number standing is: crystals ever gathered, or crystals banked at close. Both are stored; only one is standing.",
+    "The move kinds. The list IS the definition of what counts as history.",
+    "A game's states, and whether a game may close with fights still open.",
+    "A fight's default outcome when it is never settled or never opened, and who opens sealed orders.",
+    "A base with more than 16 finished wall sections: which 16 are fought, or whether the cap rises.",
+    "Whether a rented Friend defends, and whose ownership check it passes.",
+    "The dispute process - submitter, bond, window, deadline. NOT COVERED BY THIS FILE and BINDING §18 is right that without it the scoreboard is asserted.",
+    "Where an overflowing duel prize goes when the winner's depot is full."
+  ]
+}

@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Rare Fiends — cost tracking</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Silkscreen:wght@400;700&family=Sometype+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --ink: #FFFFFF; --paper: #000000; --signal: #CCFF00;
+  --dim: rgba(255,255,255,.62); --faint: rgba(255,255,255,.28);
+  --display: Silkscreen, monospace; --mono: "Sometype Mono", ui-monospace, monospace;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; background: #090B09; color: var(--ink); }
+body { font-family: var(--mono); font-size: 21px; line-height: 1.55; }
+a { color: var(--signal); }
+header { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid rgba(204,255,0,.4); background: #000;
+  position: sticky; top: 0; z-index: 5; padding-top: max(10px, env(safe-area-inset-top)); flex-wrap: wrap; }
+.brand { display: flex; align-items: center; gap: 9px; font-family: var(--display); font-size: 19px; letter-spacing: .12em; }
+.brand i { width: 8px; height: 8px; background: var(--signal); border-radius: 50%; }
+.brand span { color: var(--dim); }
+header nav { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; }
+header nav a { font-family: var(--display); font-size: 14px; letter-spacing: .1em; color: #fff; text-decoration: none; border: 1px solid var(--faint); padding: 5px 7px; }
+header nav a:hover { border-color: var(--signal); color: var(--signal); }
+main { max-width: 1040px; margin: 0 auto; padding: 24px 16px 60px; }
+h1 { font-family: var(--display); font-weight: 400; font-size: clamp(35px, 5vw, 60px); line-height: 1; margin: 6px 0 12px; letter-spacing: .02em; }
+.lede { color: rgba(255,255,255,.78); max-width: 760px; margin: 0 0 14px; }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; font-size: 21px; color: var(--dim); margin: 0 0 8px; }
+.tag { display: inline-block; font-family: var(--display); font-size: 13px; letter-spacing: .1em; padding: 2px 5px; vertical-align: middle; white-space: nowrap; }
+.tag.live { background: var(--signal); color: #000; }
+.tag.meas { border: 1px solid var(--signal); color: var(--signal); }
+.tag.est { border: 1px dashed rgba(255,255,255,.7); color: #fff; }
+.tag.prop { border: 1px solid rgba(255,255,255,.7); color: #fff; }
+.tag.open { border: 1px dashed var(--faint); color: var(--dim); }
+.tag.sample { border: 1px dashed var(--signal); color: var(--signal); }
+section { border-top: 1px solid var(--faint); padding: 26px 0 6px; scroll-margin-top: 60px; }
+h2 { font-family: var(--display); font-weight: 400; font-size: 22px; letter-spacing: .08em; margin: 0 0 4px; display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+h2 .n { color: var(--signal); }
+.q { color: var(--dim); font-size: 19px; margin: 0 0 14px; max-width: 780px; }
+h3 { font-family: var(--display); font-weight: 400; font-size: 18px; letter-spacing: .1em; color: var(--dim); margin: 18px 0 8px; }
+p { margin: 0 0 10px; max-width: 780px; }
+p b, li b, td b { color: #fff; font-weight: 500; }
+.statement { border: 2px solid var(--signal); background: #000; padding: 18px 20px; max-width: 820px; margin: 0 0 12px; }
+.statement .big { font-family: var(--display); font-size: clamp(30px, 3.4vw, 38px); line-height: 1.15; margin: 0 0 12px; }
+.statement .big b { color: var(--signal); font-weight: 400; }
+.statement ul { margin: 6px 0 12px; padding-left: 18px; }
+.statement li { margin: 0 0 6px; }
+.split { display: flex; height: 26px; border: 1px solid var(--faint); margin: 0 0 6px; max-width: 820px; }
+.split i { display: flex; align-items: center; padding: 0 8px; font-style: normal; font-family: var(--display); font-size: 14px; letter-spacing: .08em; white-space: nowrap; overflow: hidden; }
+/* drawn to scale: flex-basis 0 so the bands are exactly 95 and 5, not 95 and 5 plus their text */
+.split .win { background: rgba(255,255,255,.12); flex: 95 95 0; min-width: 0; }
+.split .cut { background: var(--signal); color: #000; flex: 5 5 0; min-width: 0; padding: 0; }
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; margin: 0 0 12px; }
+.fact { border: 1px solid var(--faint); padding: 10px 12px; display: grid; gap: 4px; align-content: start; min-width: 0; }
+.fact .k { font-family: var(--display); font-size: 14px; letter-spacing: .1em; color: var(--dim); display: flex; justify-content: space-between; gap: 6px; align-items: center; flex-wrap: wrap; }
+.fact .v { font-family: var(--display); font-size: 30px; letter-spacing: .02em; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.fact .v small { font-size: 19px; color: var(--dim); font-family: var(--mono); letter-spacing: 0; margin-left: 3px; }
+.fact .s { font-size: 20px; color: var(--dim); }
+.fact.hi { border-color: var(--signal); }
+.fact.hi .v { color: var(--signal); }
+.inputs { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 8px; margin: 0 0 12px; }
+.inp { border: 1px solid var(--faint); padding: 10px 12px; display: grid; gap: 6px; min-width: 0; }
+.inp label { font-family: var(--display); font-size: 14px; letter-spacing: .1em; color: var(--dim); display: flex; justify-content: space-between; gap: 6px; flex-wrap: wrap; }
+.inp input { background: #000; color: #fff; border: 1px solid var(--faint); font: 22px var(--mono); padding: 6px 8px; width: 100%; }
+.inp input:focus { outline: none; border-color: var(--signal); }
+.inp .s { font-size: 19px; color: var(--dim); }
+.seg { display: inline-flex; flex-wrap: wrap; }
+.btn { font-family: var(--display); font-size: 15px; letter-spacing: .08em; background: none; color: #fff; border: 1px solid rgba(255,255,255,.5); padding: 6px 9px; cursor: pointer; }
+.btn + .btn { border-left: 0; }
+.btn[aria-pressed="true"] { background: var(--signal); color: #000; border-color: var(--signal); }
+.formula { font-family: var(--mono); background: #000; border: 1px solid var(--faint); border-left: 3px solid var(--signal); padding: 10px 12px; margin: 0 0 12px;
+  overflow-x: auto; white-space: pre; font-size: 19px; color: #fff; }
+.tw { overflow-x: auto; margin: 0 0 12px; border: 1px solid var(--faint); }
+table { border-collapse: collapse; width: 100%; font-size: 19px; font-variant-numeric: tabular-nums; }
+th, td { padding: 7px 10px; border-bottom: 1px solid rgba(255,255,255,.12); text-align: right; white-space: nowrap; }
+th { font-family: var(--display); font-weight: 400; font-size: 14px; letter-spacing: .1em; color: var(--dim); background: rgba(255,255,255,.03); }
+th:first-child, td:first-child { text-align: left; }
+tr:last-child td { border-bottom: 0; }
+td.sig { color: var(--signal); }
+tfoot td { color: #fff; border-top: 1px solid var(--faint); }
+.note { border: 1px dashed var(--faint); padding: 10px 12px; margin: 0 0 12px; font-size: 19px; color: rgba(255,255,255,.8); max-width: 900px; }
+.note b { color: #fff; }
+.note.warn { border-color: rgba(204,255,0,.55); }
+.src { font-size: 18px; color: var(--dim); }
+.src code { color: rgba(255,255,255,.8); }
+.toc { display: flex; flex-wrap: wrap; gap: 6px; margin: 14px 0 6px; }
+.toc a { font-family: var(--display); font-size: 14px; letter-spacing: .08em; color: #fff; text-decoration: none; border: 1px solid var(--faint); padding: 5px 7px; }
+.toc a:hover { border-color: var(--signal); color: var(--signal); }
+#status { font-family: var(--display); font-size: 16px; letter-spacing: .1em; color: var(--dim); }
+.bars { display: grid; gap: 6px; margin: 0 0 12px; max-width: 900px; }
+.bars .row { display: grid; grid-template-columns: 96px 1fr 120px; gap: 10px; align-items: center; font-size: 21px; }
+.bars .track { height: 14px; background: rgba(255,255,255,.08); position: relative; }
+.bars .track i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--signal); }
+.bars .track b { position: absolute; left: 0; top: 0; bottom: 0; border-right: 2px solid #fff; }
+.bars .v { text-align: right; font-variant-numeric: tabular-nums; color: var(--dim); }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><i></i>RARE FIENDS<span>· COST TRACKING</span></div>
+  <nav><a href="base.html">BASE</a><a href="economy.html">ECONOMY</a><a href="attack_defense.html">ATTACK &amp; DEFENSE</a></nav>
+</header>
+<main>
+  <h1>COST TRACKING</h1>
+  <p class="lede">What it costs to run a game, and where the 5% of every pool goes. Prices are read live from Robinhood Chain when this page opens;
+    gas is what the game's contracts actually use, measured by running them.</p>
+  <div class="legend">
+    <span><span class="tag live">LIVE</span> read from the chain or the site's price feed just now</span>
+    <span><span class="tag meas">MEASURED</span> from running the contracts (<code>paritycheck.js</code>)</span>
+    <span><span class="tag est">ESTIMATE</span> a guess until real games are played</span>
+    <span><span class="tag open">NOT COUNTED</span> the counter is built; no game has been played, so there is nothing in it</span>
+    <span><span class="tag prop">PROPOSED</span> suggested, not agreed</span>
+    <span><span class="tag open">NOT DECIDED</span> no answer yet</span>
+    <span><span class="tag sample">SAMPLE</span> made-up rows showing what the page will show</span>
+  </div>
+  <div id="status">READING THE CHAIN…</div>
+  <nav class="toc"><a href="#tenpercent">THE 5%</a><a href="#estimate">WHAT A GAME COSTS</a><a href="#measured">WHAT ACTUALLY HAPPENED</a><a href="#ledger">EVERY GAME</a><a href="#how">HOW IT'S WORKED OUT</a></nav>
+  <div id="out"></div>
+</main>
+<script src="chance.js"></script>
+<script src="chainlive.js"></script>
+<script>
+(() => {
+  'use strict';
+  const $ = (id) => document.getElementById(id);
+  const T = { live: '<span class="tag live">LIVE</span>', meas: '<span class="tag meas">MEASURED</span>', est: '<span class="tag est">ESTIMATE</span>',
+              prop: '<span class="tag prop">PROPOSED</span>', open: '<span class="tag open">NOT DECIDED</span>', sample: '<span class="tag sample">SAMPLE</span>',
+              uncounted: '<span class="tag open">NOT COUNTED</span>' };
+  const sec = (id, n, title, q, body) => '<section id="' + id + '"><h2><span class="n">' + n + '</span>' + title + '</h2><p class="q">' + q + '</p>' + body + '</section>';
+  const fact = (k, v, s, tag, hi) => '<div class="fact' + (hi ? ' hi' : '') + '"><span class="k"><span>' + k + '</span>' + (tag || '') + '</span><span class="v">' + v + '</span>' + (s ? '<span class="s">' + s + '</span>' : '') + '</div>';
+  const usd = (v) => v >= 100 ? '$' + Math.round(v).toLocaleString('en-US') : v >= 1 ? '$' + v.toFixed(2) : v >= 0.01 ? '$' + v.toFixed(3) : '$' + v.toFixed(4);
+  const eth = (v) => (v < 0.001 ? v.toFixed(6) : v.toFixed(4)) + ' ETH';
+  const num = (v) => Math.round(v).toLocaleString('en-US');
+
+  // every chain number on this page comes from chainlive.js, read when the page opens: nothing typed in
+  const TX_BASE = ChainLive.TX_BASE;
+
+  // the proposed split, and the estimator's starting guesses. The rate has one home: chainlive.js
+  const CUT = ChainLive.CUT;
+  const IN = { players: 100, entryUsd: 10, fights: 20, challenges: 5, onChainFights: false, batch: true, days: 7 };
+
+  let L = null;
+
+  // M18 item 10, THE MEASURING. The two inputs above that are not decided and not read from the chain -
+  // how much fighting there was, and how many times the game wrote - are the model's only guesses. They
+  // are replaced by counts the moment there are counts: `measured.json` is the record, written by the
+  // game, and the page reads it rather than holding a copy. It is empty, because no game has been
+  // played, and an empty record is left empty - a zero would be a number nobody counted.
+  let M = { games: [] };
+
+  // the counts, summed and per player, across every game in the record. null while nothing is counted,
+  // which is what keeps the ESTIMATE tags honest instead of showing zeros as if they were measurements.
+  function measured() {
+    const gs = (M.games || []).filter(g => g && g.players > 0);
+    if (!gs.length) return null;
+    const sum = (k) => gs.reduce((a, g) => a + (g[k] || 0), 0);
+    const players = sum('players'), fights = sum('fights'), challenges = sum('challenges');
+    return { games: gs.length, players, fights, challenges, writes: sum('writes'), requests: sum('randomNumbers'),
+             days: sum('days') / gs.length, fightsPer: fights / players, challengesPer: challenges / players };
+  }
+
+  // one game's costs, from the inputs and what was read
+  function costs(inp) {
+    const g = L.gas, gwei = L.gasPrice, per = (gas) => gas * gwei * 1e-9;   // ETH for that much gas
+    const pool = inp.players * inp.entryUsd, cut = pool * CUT;
+    const fights = inp.players * inp.fights, challenges = inp.players * inp.challenges;
+    // one random number per fight and challenge, or (the FriendSDK's way) one an hour shared by everything
+    // settled in that hour, each with its own id
+    const requests = inp.batch ? Math.ceil(inp.days * 24) : fights + challenges;
+    const entropyEth = requests * L.fee;
+    // the game's own transactions: for every fight, ask for the word and (if fought on chain) run it; for every
+    // challenge, ask for the word and settle. Players pay their own moves (challenging, accepting, revealing).
+    const reqGas = g.requestRandomness + TX_BASE, settleGas = g.settle + TX_BASE, fightGas = g.fightAvg + TX_BASE;
+    const gasAsk = requests * reqGas;
+    const gasFights = fights * (inp.onChainFights ? fightGas : settleGas);
+    const gasChallenges = challenges * settleGas;
+    const gasEth = per(gasAsk + gasFights + gasChallenges);
+    const chainUsd = (entropyEth + gasEth) * L.ethUsd;
+    // HOW MANY TIMES THE GAME WRITES TO THE CHAIN - one of the two things M18 item 10 exists to measure.
+    // It is the count of the very transactions the gas above is the price of: one for every random number
+    // asked for, one for every fight recorded or run, one for every challenge settled. Worked out here,
+    // counted in `measured.json` once a game has been played, and the two are compared in section 03.
+    const writes = requests + fights + challenges;
+    return { pool, cut, fights, challenges, requests, writes, entropyEth, entropyUsd: entropyEth * L.ethUsd, gasEth, gasUsd: gasEth * L.ethUsd,
+      chainUsd, left: cut - chainUsd, share: chainUsd / cut, reqGas, settleGas, fightGas };
+  }
+
+  (async () => {
+    L = await ChainLive.read();
+    // the record of what happened. A record that cannot be read leaves the page on its estimates and
+    // says so, rather than falling back to a zero that would read as "no fighting happened".
+    try { const r = await fetch('measured.json', { cache: 'no-store' }); if (r.ok) M = await r.json(); } catch (_) { M = { games: [] }; }
+    if (!L.gas || L.fee == null || L.gasPrice == null || !L.ethUsd) {
+      $('status').textContent = 'COULD NOT READ EVERYTHING (' + L.errors.join(', ') + '). OPEN THIS PAGE FROM THE SITE.';
+      return;
+    }
+    // a count beats a guess: if a game has been played, the estimator starts from what happened.
+    const m0 = measured();
+    if (m0) { IN.fights = Math.round(m0.fightsPer * 10) / 10; IN.challenges = Math.round(m0.challengesPer * 10) / 10; }
+    $('status').textContent = 'READ FROM ROBINHOOD CHAIN · ' + L.at.toLocaleString()
+      + ' · ' + (m0 ? m0.games + ' GAME' + (m0.games === 1 ? '' : 'S') + ' COUNTED' : 'NO GAME COUNTED YET');
+    build();
+  })();
+
+  function build() {
+    const out = [];
+    const MEAS = measured();
+    // the two guesses' tag is not a constant: it is ESTIMATE while nothing has been counted and
+    // MEASURED once something has, which is the whole of what M18 item 10 changes on this page.
+    const countTag = MEAS ? T.meas : T.est;
+    const countWord = MEAS ? 'counted over ' + MEAS.games + ' game' + (MEAS.games === 1 ? '' : 's') : 'a guess: nothing has been counted';
+    out.push(sec('tenpercent', '01', 'WHERE THE 5% GOES', 'The wording players would see where they join. ' + T.prop,
+      '<div class="statement">' +
+      '<div class="big">95% of the pool goes to the winners. <b>5% runs the game.</b></div>' +
+      '<div class="split"><i class="win">95% · PAID TO THE WINNERS</i><i class="cut"></i></div>' +
+      '<p class="src">To scale: the narrow band on the right is the 5% that runs the game, one twentieth of the bar.</p>' +
+      '<p>Every entry goes into the game\'s pool. When the game ends, 95% of it is paid out to the winners. Rare Friends keeps 5% to run the game, and it pays for:</p>' +
+      '<ul>' +
+      '<li><b>Fair dice.</b> Every fight and every challenge is decided by a random number from Pyth Entropy, so no one, including us, can know or steer the result. Pyth charges a small fee in ETH for each one.</li>' +
+      '<li><b>The transactions the game sends for you</b>: asking for that random number, and settling what it decides.</li>' +
+      '<li><b>Servers</b> that run the map and keep the game online.</li>' +
+      '<li><b>Development</b>: fixes, new levels, and the next game.</li>' +
+      '</ul>' +
+      '<p>The cut is set when a game is created, and <b>it cannot change once the first player has paid</b>: it doesn\'t go up when a game is busy or when fees rise. You know the cut you paid under before you pay. What every game actually cost is published below, game by game.</p>' +
+      '</div>' +
+      '<p class="src">All three things that were open here are decided, and none of them is still a question: the cut is taken <b>at game start</b>; ' +
+      'a game whose chain costs pass its cut is not covered by moving the cut — <b>the next game is priced differently and the running one never is</b>; ' +
+      'and <b>the contract holds the pool</b>, for trust, so winners are paid from it directly. The cut is also <b>bounded by a floor and a ceiling</b>, so no game can launch with a surprise take — ' +
+      'both are deployer numbers and live on the deployer page, not here. Still ' + T.open + ': the entry, which has no decided value.</p>'));
+
+    out.push(sec('estimate', '02', 'WHAT A GAME COSTS', 'A game\'s chain costs against its 5%, at today\'s prices. Change the inputs to see how it scales with players.',
+      '<h3>TODAY\'S PRICES</h3><div class="facts">' +
+      fact('A RANDOM NUMBER', eth(L.fee), usd(L.fee * L.ethUsd) + ' · Pyth Entropy\'s fee, from the Dice contract', T.live) +
+      fact('GAS PRICE', (L.gasPrice).toFixed(4) + '<small>gwei</small>', 'Robinhood Chain, right now', T.live) +
+      fact('ETH', usd(L.ethUsd), 'the site\'s price feed', T.live) +
+      (L.rfUsd ? fact('$RF', '$' + L.rfUsd.toPrecision(3), 'the site\'s price feed', T.live) : '') +
+      '</div>' +
+      '<h3>THE GAME</h3><div class="inputs">' +
+      '<div class="inp"><label><span>PLAYERS</span></label><input id="iPlayers" type="number" min="2" step="1" value="' + IN.players + '"><span class="s">the map is built for 100</span></div>' +
+      '<div class="inp"><label><span>ENTRY, PER PLAYER, IN $</span>' + T.open + '</label><input id="iEntry" type="number" min="0.1" step="0.5" value="' + IN.entryUsd + '"><span class="s">paid in $RF · ' + (L.rfUsd ? '<span id="iEntryRf"></span>' : '') + '</span></div>' +
+      '<div class="inp"><label><span>FIGHTS, PER PLAYER</span>' + countTag + '</label><input id="iFights" type="number" min="0" step="1" value="' + IN.fights + '"><span class="s">attacks started over the game · ' + countWord + '</span></div>' +
+      '<div class="inp"><label><span>CHALLENGES, PER PLAYER</span>' + countTag + '</label><input id="iChal" type="number" min="0" step="1" value="' + IN.challenges + '"><span class="s">one-on-one matches over the game · ' + countWord + '</span></div>' +
+      '<div class="inp"><label><span>A GAME LASTS, DAYS</span>' + T.open + '</label><input id="iDays" type="number" min="1" step="1" value="' + IN.days + '"><span class="s">after joining closes</span></div>' +
+      '</div>' +
+      '<div class="row" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0 0 8px"><span class="src">RANDOM NUMBERS</span><span class="seg">' +
+        '<button class="btn" type="button" data-batch="off">ONE PER FIGHT AND CHALLENGE</button><button class="btn" type="button" data-batch="on">ONE AN HOUR, SHARED</button></span>' +
+        '<span class="src">' + T.prop + ' the FriendSDK asks for one number per batch of plays; every fight and challenge settled in that hour gets its own roll off it</span></div>' +
+      '<div class="row" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0 0 12px"><span class="src">FIGHTS ARE</span><span class="seg">' +
+        '<button class="btn" type="button" data-mode="off">REPLAYED OFF CHAIN</button><button class="btn" type="button" data-mode="on">FOUGHT ON CHAIN</button></span>' +
+        '<span class="src">' + T.open + ' on chain every shot is paid for in gas; off chain only the random number and the result are</span></div>' +
+      '<div id="est"></div>' +
+      '<h3>HOW IT SCALES WITH PLAYERS</h3><p class="src">Chain costs as a share of the 5%, with everything else as above. The white line is the 5%; past it, the game would lose money.</p>' +
+      '<div class="bars" id="bars"></div>'));
+
+    // 03 ---------- M18 item 10: the measuring. The counters this reads are not this page's to build.
+    out.push(sec('measured', '03', 'WHAT ACTUALLY HAPPENED',
+      'Everything above is worked out. Two of its inputs are not worked out and not read from the chain — how much fighting there was, and how many times the game wrote to the chain — so those two are counted here instead of guessed. ' + (MEAS ? T.meas : T.uncounted),
+      (MEAS
+        ? '<div class="note"><b>' + num(MEAS.games) + ' game' + (MEAS.games === 1 ? '' : 's') + ' counted.</b> The estimator above starts from these counts, not from a guess, and its two ' + T.meas + ' inputs are what they produced.</div>'
+        : '<div class="note warn"><b>Nothing has been counted, because no game has been played.</b> The counter is built and it is empty. ' +
+          'While it is empty the estimator above runs on <b>FIGHTS, PER PLAYER</b> and <b>CHALLENGES, PER PLAYER</b> as ' + T.est + ', ' +
+          'and every figure derived from them is an estimate too. This page does not put a number here to fill the gap: it reads ' +
+          '<code>measured.json</code>, and that file is empty on purpose — <b>a zero would be a count nobody took.</b></div>') +
+      '<div class="facts">' +
+      fact('GAMES COUNTED', MEAS ? num(MEAS.games) : '0', MEAS ? 'played and ended' : 'no game has been played', MEAS ? T.meas : T.uncounted) +
+      fact('FIGHTS', MEAS ? num(MEAS.fights) : '—', MEAS ? (Math.round(MEAS.fightsPer * 10) / 10) + ' a player' : 'the fight counter is not built', MEAS ? T.meas : T.uncounted) +
+      fact('CHALLENGES', MEAS ? num(MEAS.challenges) : '—', MEAS ? (Math.round(MEAS.challengesPer * 10) / 10) + ' a player' : 'the fight counter is not built', MEAS ? T.meas : T.uncounted) +
+      fact('WRITES TO THE CHAIN', MEAS ? num(MEAS.writes) : '—', MEAS ? 'counted, not worked out' : 'the write counter is not built', MEAS ? T.meas : T.uncounted) +
+      '</div>' +
+      '<h3>WHAT THE MODEL SAYS, AND WHAT HAPPENED</h3>' +
+      '<p class="src">The model is only worth what it predicts. This table is how it gets judged: the left column is what the estimator above works out for the same game, the right is what was counted, and the difference is the model\'s error rather than a number to argue about.</p>' +
+      '<div class="tw"><table><thead><tr><th>Over the games counted</th><th>The model works out</th><th>Counted</th><th>Out by</th></tr></thead><tbody id="cmpTab"></tbody></table></div>' +
+      '<p class="src"><b>The two counters are not this page\'s to build, and each has a home.</b> ' +
+      'The <b>fight counter</b> belongs where fighting is built, and the <b>write counter</b> where writing to the chain is built — ' +
+      'M13 and M6. This page is the other half: the place the counts arrive, the shape they arrive in (<code>measured.json</code> ' +
+      'documents its own fields), and the switch from ' + T.est + ' to ' + T.meas + ' that happens with no change to this page. ' +
+      'It takes a count from nowhere else and invents none.</p>'));
+
+    out.push(sec('ledger', '04', 'EVERY GAME', 'Once games are played, each one gets a row here, and every figure links to the transactions behind it.',
+      '<div class="note warn"><b>No game has been played yet.</b> The rows below are ' + T.sample + ': made-up games, worked out with this page\'s formulas at today\'s prices, to show what will be published.</div>' +
+      '<div id="ledgerTab"></div>'));
+
+    out.push(sec('how', '05', 'HOW IT\'S WORKED OUT', 'Every figure above, from its sources.',
+      '<div class="formula" id="formula"></div>' +
+      '<div class="tw"><table><thead><tr><th>What the game pays for, per item</th><th>Gas</th><th>Source</th></tr></thead><tbody id="gasTab"></tbody></table></div>' +
+      '<p class="src">Gas ' + T.meas + ' is what the contracts use on an EVM set to Robinhood Chain, run by <code>estate/contracts/paritycheck.js</code> (' + new Date(L.gas.measuredAt).toLocaleDateString() + ', solc ' + L.gas.solc + '), plus the 21,000 every transaction pays. ' +
+      'A real transaction on an Arbitrum chain also pays a small fee for its data on Ethereum, not counted here. The Entropy request is measured against a stand-in; the real Dice request, estimated on chain just now, is ' + (L.requestGas ? num(L.requestGas) + ' gas ' + T.live : '(could not be estimated)') + ' as a transaction of its own.</p>'));
+
+    $('out').innerHTML = out.join('');
+    wire(); render();
+  }
+
+  function wire() {
+    const num2 = (id, k, min) => { $(id).oninput = () => { const v = parseFloat($(id).value); if (v >= min) { IN[k] = v; render(); } }; };
+    num2('iPlayers', 'players', 2); num2('iEntry', 'entryUsd', 0.1); num2('iFights', 'fights', 0); num2('iChal', 'challenges', 0); num2('iDays', 'days', 1);
+    document.querySelectorAll('[data-batch]').forEach(b => b.onclick = () => { IN.batch = b.dataset.batch === 'on'; render(); });
+    document.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => { IN.onChainFights = b.dataset.mode === 'on'; render(); });
+  }
+
+  function render() {
+    document.querySelectorAll('[data-mode]').forEach(b => b.setAttribute('aria-pressed', String((b.dataset.mode === 'on') === IN.onChainFights)));
+    document.querySelectorAll('[data-batch]').forEach(b => b.setAttribute('aria-pressed', String((b.dataset.batch === 'on') === IN.batch)));
+    if ($('iEntryRf') && L.rfUsd) $('iEntryRf').textContent = '≈ ' + num(IN.entryUsd / L.rfUsd) + ' $RF at today\'s price';
+    const c = costs(IN);
+    $('est').innerHTML = '<div class="facts">' +
+      fact('THE POOL', usd(c.pool), num(IN.players) + ' players × ' + usd(IN.entryUsd)) +
+      fact('THE 5%', usd(c.cut), 'kept to run the game', '', true) +
+      fact('RANDOM NUMBERS', num(c.requests), IN.batch ? 'one an hour for ' + IN.days + ' days, shared by ' + num(c.fights) + ' fights and ' + num(c.challenges) + ' challenges' : num(c.fights) + ' fights + ' + num(c.challenges) + ' challenges') +
+      fact('WRITES TO THE CHAIN', num(c.writes), num(c.requests) + ' asks + ' + num(c.fights) + ' fights + ' + num(c.challenges) + ' challenges · see 03') +
+      fact('ENTROPY FEES', usd(c.entropyUsd), eth(c.entropyEth)) +
+      fact('GAME TRANSACTIONS', usd(c.gasUsd), eth(c.gasEth) + (IN.onChainFights ? ' · every fight run on chain' : ' · fights replayed off chain')) +
+      fact('CHAIN COSTS', usd(c.chainUsd), Math.round(c.share * 100) + '% of the 5%', '', c.share <= 1) +
+      fact(c.left >= 0 ? 'LEFT FOR SERVERS AND DEVELOPMENT' : 'OVER THE 5% BY', usd(Math.abs(c.left)), c.left >= 0 ? usd(c.left / Math.max(1, IN.players)) + ' a player' : 'the game would lose this', '', c.left >= 0) +
+      '</div>';
+    // 03's comparison. The two columns are the same quantity twice: worked out on the left, counted on
+    // the right. The rows that matter are the last two - the model derives the random numbers and the
+    // writes from the fights and challenges, so given the counted fights it can be wrong about them,
+    // and that gap is the model's error. Empty until a game has been played; never filled with a zero.
+    const MEAS = measured();
+    const k = MEAS ? costs(Object.assign({}, IN, { players: MEAS.players, days: MEAS.days })) : c;
+    const cmp = (label, model, count) => '<tr><td>' + label + '</td><td>' + num(model) + '</td><td>' + (count == null ? '—' : num(count)) + '</td><td>' +
+      (count == null ? '—' : (count - model >= 0 ? '+' : '−') + num(Math.abs(count - model)) + (model ? ' <span class="src">' + Math.round(Math.abs(count - model) / model * 100) + '%</span>' : '')) + '</td></tr>';
+    if ($('cmpTab')) $('cmpTab').innerHTML =
+      cmp('Fights', k.fights, MEAS ? MEAS.fights : null) +
+      cmp('Challenges', k.challenges, MEAS ? MEAS.challenges : null) +
+      cmp('Random numbers asked for', k.requests, MEAS ? MEAS.requests : null) +
+      cmp('Writes to the chain', k.writes, MEAS ? MEAS.writes : null);
+    const ps = [2, 10, 25, 50, 100, 150, 200];
+    $('bars').innerHTML = ps.map(n => { const k = costs(Object.assign({}, IN, { players: n })), w = Math.min(100, k.share * 50);
+      return '<div class="row"><span>' + n + ' players</span><span class="track"><i style="width:' + w + '%"></i><b style="width:50%"></b></span><span class="v">' + Math.round(k.share * 100) + '% of the 5%</span></div>'; }).join('');
+    // the ledger: sample games
+    const eras = [{ n: 1, players: 12, days: 5 }, { n: 2, players: 37, days: 7 }, { n: 3, players: 64, days: 7 }, { n: 4, players: 100, days: 7 }];
+    $('ledgerTab').innerHTML = '<div class="tw"><table><thead><tr><th>Game ' + T.sample + '</th><th>Players</th><th>Pool</th><th>The 5%</th><th>Random numbers</th><th>Entropy fees</th><th>Game transactions</th><th>Chain costs</th><th>Servers and development</th></tr></thead><tbody>' +
+      eras.map(e => { const k = costs(Object.assign({}, IN, { players: e.players, days: e.days }));
+        return '<tr><td>Game ' + e.n + ' · ' + e.days + ' days</td><td>' + e.players + '</td><td>' + usd(k.pool) + '</td><td class="sig">' + usd(k.cut) + '</td><td>' + num(k.requests) + '</td><td>' + usd(k.entropyUsd) + '</td><td>' + usd(k.gasUsd) + '</td><td>' + usd(k.chainUsd) + '</td><td>' + (k.left >= 0 ? usd(k.left) : '−' + usd(-k.left)) + '</td></tr>'; }).join('') +
+      '</tbody></table></div>';
+    $('gasTab').innerHTML = [
+      ['Ask Entropy for a random number (per fight and challenge, or once an hour)', c.reqGas, T.meas],
+      ['Settle a challenge, or record a fight\'s result', c.settleGas, T.meas],
+      ['Run a whole fight on chain (average of ' + L.gas.fights + ' fights)', c.fightGas, T.meas],
+      ['Run the longest fight on chain (twelve against twelve, to the clock)', L.gas.fightMax + TX_BASE, T.meas],
+      ['Players\' own moves: challenge, accept, reveal', L.gas.challenge + L.gas.accept + L.gas.reveal * 2 + TX_BASE * 4, 'paid by the players'],
+    ].map(([k, g, s]) => '<tr><td>' + k + '</td><td>' + num(g) + '</td><td>' + s + '</td></tr>').join('');
+    $('formula').textContent =
+      'pool               = players × entry                                    = ' + IN.players + ' × ' + usd(IN.entryUsd) + ' = ' + usd(c.pool) + '\n' +
+      'the 5%            = pool × 5%                                         = ' + usd(c.cut) + '\n' +
+      'random numbers     = ' + (IN.batch ? 'one an hour × 24 × days                             = ' : 'players × (fights + challenges each)               = ') + num(c.requests) + '\n' +
+      'writes to the chain = random numbers + fights + challenges              = ' + num(c.writes) + '   (counted, not worked out, once a game has been played)\n' +
+      'entropy fees       = random numbers × Entropy fee                       = ' + num(c.requests) + ' × ' + eth(L.fee) + ' = ' + eth(c.entropyEth) + '\n' +
+      'game transactions  = random numbers × ask + fights × ' + (IN.onChainFights ? 'fight on chain' : 'record the result') + ' + challenges × settle\n' +
+      '                     × gas price (' + L.gasPrice.toFixed(4) + ' gwei)                          = ' + eth(c.gasEth) + '\n' +
+      'chain costs        = (entropy fees + game transactions) × ETH price     = ' + usd(c.chainUsd) + '\n' +
+      'left               = the 5% − chain costs                              = ' + usd(c.left) + '   (servers, development)';
+    window.costPage = { IN, L, costs, c, M, measured: MEAS };
+  }
+})();
+</script>
+</body>
+</html>

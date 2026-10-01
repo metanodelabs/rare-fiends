@@ -1,0 +1,697 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="icon" href="/favicon.ico" sizes="32x32">
+<link rel="icon" type="image/png" sizes="32x32" href="icon-32.png">
+<link rel="apple-touch-icon" sizes="180x180" href="icon-180.png">
+<link rel="manifest" href="site.webmanifest">
+<meta name="theme-color" content="#CCFF00">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Rare Fiends</title>
+<link rel="modulepreload" href="three.module.js">
+<link rel="modulepreload" href="three.core.js">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Silkscreen:wght@400;700&family=Sometype+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* ---------------------------------------------------------------------------------------------------
+   The look, borrowed from rarefriends.com so the two sites read as one family. Taken from their own
+   stylesheet rather than guessed at:
+     fonts    Silkscreen for display, Archivo for anything long enough to read, Sometype Mono for data
+     buttons  a 1px rule, a hard offset shadow, brackets around the label, and a press that moves the
+              button onto its own shadow
+     cards    the same rule with a 4px shadow — their swap panel
+     themes   one [data-theme=invert] block that swaps four values, which is all their dark mode is
+   The one thing that cannot come straight across is the signal colour: #CCFF00 on their #eee paper
+   measures 1.01:1, which is no contrast at all. So signal stays the brand colour wherever it is a FILL
+   (with ink on top of it), and light mode uses --signal-ink for the times it has to be text.
+   --------------------------------------------------------------------------------------------------- */
+:root {
+  --ink: #FFFFFF; --paper: #000000; --signal: #CCFF00;
+  --signal-ink: var(--signal);          /* signal used as text: on a dark page the brand colour is fine */
+  --on-signal: #000000;                 /* what sits on top of a signal fill */
+  --veil: 0, 0, 0;                      /* the colour the game is dimmed towards */
+  --page: #090B09; --bar: #000000;
+  --dim: rgba(255,255,255,.62); --faint: rgba(255,255,255,.28);
+  --line: rgba(255,255,255,.15); --hair: 1px solid rgba(204,255,0,.4);
+  --display: Silkscreen, monospace;
+  --body: Archivo, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "Sometype Mono", ui-monospace, monospace;
+  --rule: 1px solid var(--ink);
+  --raised: 2px 2px 0 var(--ink);
+  --raised-lg: 4px 4px 0 var(--ink);
+}
+[data-theme="invert"] {
+  --ink: #111111; --paper: #EEEEEE;
+  --signal-ink: var(--signal);          /* the theme colour is the theme colour, in both modes */
+  --on-signal: #000000;
+  --veil: 238, 238, 238;
+  --page: #EEEEEE; --bar: #EEEEEE;
+  --dim: rgba(17,17,17,.66); --faint: rgba(17,17,17,.3);
+  --line: rgba(17,17,17,.16); --hair: 1px solid var(--ink);
+}
+
+/* ---------- their button: rule, shadow, brackets, and a press that lands on the shadow ---------- */
+.btn {
+  font-family: var(--display); letter-spacing: .1em;
+  display: inline-flex; align-items: center; gap: 8px; white-space: nowrap;
+  border: var(--rule); box-shadow: var(--raised); cursor: pointer;
+  background: var(--home-bg); color: var(--home-fg);
+  text-decoration: none; -webkit-user-select: none; user-select: none;
+}
+.btn::before { content: "["; }
+.btn::after  { content: "]"; }
+.btn:hover { background: var(--home-fg); color: var(--home-bg); }
+.btn:active { box-shadow: none; transform: translate(2px, 2px); }
+.btn[disabled] { cursor: default; opacity: .6; }
+.btn[disabled]:hover { background: var(--home-bg); color: var(--home-fg); }
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; height: 100%; background: var(--page); color: var(--ink); }
+body { font-family: var(--body); display: flex; flex-direction: column; min-height: 100dvh; }
+button { font: inherit; color: inherit; }
+
+/* ---------- header ---------- */
+header { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: var(--hair);
+  background: var(--bar); position: relative; z-index: 5; padding-top: max(10px, env(safe-area-inset-top)); }
+.brand { display: flex; align-items: center; gap: 9px; font-family: var(--display); font-size: 19px; letter-spacing: .12em;
+  color: var(--ink); text-decoration: none; }
+.brand i { width: 8px; height: 8px; background: var(--signal); border-radius: 50%; }
+.brand span { color: var(--dim); }
+header { flex-wrap: wrap; }
+header .sp { flex: 1; }
+/* the way between light and dark: a drawn sun or moon, never a font glyph */
+.theme { --home-bg: var(--paper); --home-fg: var(--ink); padding: 8px 9px; line-height: 0; font-size: 13px; }
+.theme svg { display: block; }
+header .wallet { margin-left: 0; }
+.wallet { --home-bg: var(--signal); --home-fg: var(--on-signal); font-size: 17px; letter-spacing: .1em; padding: 9px 12px; }
+.wallet.on { --home-bg: var(--paper); --home-fg: var(--ink); }
+.wallet.on b { color: var(--signal-ink); font-weight: 400; }
+
+/* ---------- hero: the estate raising itself, with the game over it ---------- */
+.hero { position: relative; flex: 1; min-height: 520px; overflow: hidden; }
+.hero iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; pointer-events: none; }
+/* the island downloads immediately but is only shown once the title is up */
+.hero > iframe { opacity: 0; transition: opacity .35s linear; }
+.hero > iframe.on { opacity: 1; }
+.hero::before { content: ""; position: absolute; inset: 0; z-index: 1; pointer-events: none;
+  background: linear-gradient(90deg, rgba(var(--veil), .88) 0%, rgba(var(--veil), .55) 45%, rgba(var(--veil), .2) 75%, rgba(var(--veil), .45) 100%),
+              repeating-linear-gradient(0deg, rgba(204,255,0,.035) 0 1px, transparent 1px 3px); }
+/* Light mode does not dim the game towards white — that only ever made grey. The map is drawn for a dark
+   page (near-black ground, white voxels), so in light mode the map itself is flipped: the ground turns
+   white, the voxels turn dark, and the page behind it is plain paper. The hue-rotate after the invert is
+   what keeps the signal colour signal instead of turning it blue. */
+/* A plain invert, with no hue-rotate: invert() is its own inverse, so the map draws the greens as their
+   own inverse and gets them back exactly. hue-rotate could not — #CCFF00 is outside the gamut it can
+   produce (it clips to #B0E3A8), which is why the power and storage bars came out muddy. */
+[data-theme="invert"] .hero > iframe { filter: invert(1); }
+/* The title outlines its own green parts — a silhouette filter here would outline the ink ones too. */
+/* and nothing is painted over it. The veil is a dark-mode device: over a flipped map it only turns the
+   black back into grey, which is what made it look washed out. The readings keep their own solid card
+   instead, so they do not need the page dimmed behind them. */
+[data-theme="invert"] .hero::before { background: none; }
+[data-theme="invert"] .specs { background: rgba(var(--veil), .82); }
+/* the status dot is the theme colour too, so it gets the same black edge as everything else */
+[data-theme="invert"] :is(.brand i, .eyebrow .dot) { border: 1px solid var(--ink); }
+.over { position: absolute; inset: 0; z-index: 2; display: grid; grid-template-columns: minmax(0, 360px) minmax(0, 1fr);
+  gap: 24px; align-items: center; padding: 24px clamp(16px, 5vw, 64px); }
+/* the readings and the way in, stacked together down the left */
+.side { display: grid; gap: 16px; align-content: center; justify-items: start; }
+
+.pitch { max-width: 520px; display: grid; gap: 16px; justify-items: start; width: 100%; }
+.eyebrow { font-family: var(--display); font-size: 16px; letter-spacing: .16em; color: var(--signal-ink); display: flex; gap: 8px; align-items: center; }
+.eyebrow .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--signal); animation: blink 1.2s steps(2) infinite; }
+.eyebrow .dot.idle { background: var(--ink); animation: none; opacity: .5; }
+@keyframes blink { 50% { opacity: .2; } }
+h1 { margin: 0; font-family: var(--display); font-weight: 400; font-size: clamp(50px, 7vw, 105px); line-height: .95; letter-spacing: .02em; }
+/* the voxel title from web_assets, playing itself, with nothing of its demo page around it: it floats
+   over the estate at the top, centred, so the island runs behind it rather than a band of black */
+.wordmark { position: absolute; z-index: 3; top: 0; left: 50%; transform: translateX(-50%);
+  width: min(775px, 96vw); aspect-ratio: 16 / 5.6; pointer-events: none; }
+.wordmark iframe { position: static; inset: auto; width: 100%; height: 100%; border: 0; display: block;
+  background: transparent; pointer-events: none; opacity: 0; transition: opacity .12s linear; }
+.wordmark iframe.ready { opacity: 1; }
+.lede { margin: 0; font-size: 19px; line-height: 1.55; color: var(--dim); max-width: 440px; }
+/* the refusal: it glitches red, tears sideways, and settles back to where it started */
+@keyframes nope {
+  0%   { background: var(--home-bg); color: var(--home-fg); transform: translate(0, 0); }
+  12%  { background: #ff2a4a; color: #fff; transform: translate(-6px, 1px); }
+  24%  { background: #ff2a4a; color: #fff; transform: translate(5px, -2px); clip-path: inset(0 0 42% 0); }
+  36%  { background: #120000; color: #ff2a4a; transform: translate(-3px, 0); clip-path: inset(38% 0 0 0); }
+  52%  { background: #ff2a4a; color: #fff; transform: translate(4px, 1px); clip-path: none; }
+  70%  { background: #ff8090; color: #200; transform: translate(-2px, 0); }
+  100% { background: var(--home-bg); color: var(--home-fg); transform: translate(0, 0); }
+}
+.nope { animation: nope .6s steps(1, end) 1; border-color: #ff2a4a; }
+@media (prefers-reduced-motion: reduce) { .nope { animation: none; background: #ff2a4a; color: #fff; } }
+.cta { --home-bg: var(--signal); --home-fg: var(--on-signal); box-shadow: var(--raised-lg);
+  font-size: clamp(20px, 1.6vw, 24px); letter-spacing: .14em; padding: 18px 26px;
+  justify-content: center; width: 100%; min-width: 0; }
+/* it stays the theme colour throughout — the press is the feedback, not a colour change */
+.cta:hover { background: var(--home-bg); color: var(--home-fg); }
+.cta:active { box-shadow: none; transform: translate(4px, 4px); }
+.cta.in { --home-bg: var(--paper); --home-fg: var(--signal-ink); cursor: default; }
+.fine { font-size: 17px; color: var(--dim); line-height: 1.5; }
+.fine b { color: var(--ink); font-weight: 600; }
+.fine a { color: var(--signal-ink); }
+.fine.v1 { margin: 0; font-size: 14px; }
+
+/* ---------- the game's readings: their swap panel — a rule and a hard shadow ---------- */
+.specs { border: var(--rule); box-shadow: var(--raised-lg); background: rgba(var(--veil), .62); display: grid; width: 100%; }
+.specs .row { padding: 14px 16px; border-bottom: 1px solid var(--line); display: grid; gap: 5px; }
+.specs .row:last-child { border-bottom: 0; }
+.specs .k { font-family: var(--display); font-size: 15px; letter-spacing: .12em; color: var(--ink); display: flex; justify-content: space-between; gap: 8px; }
+.specs .v { font-family: var(--display); font-size: clamp(30px, 3.2vw, 42px); letter-spacing: .03em; font-variant-numeric: tabular-nums; }
+.specs .v small { font-size: .45em; color: var(--dim); letter-spacing: .1em; margin-left: 4px; }
+.specs .sub { font-size: 17px; line-height: 1.45; color: var(--ink); }
+.specs .sub .hl { color: var(--signal-ink); font-weight: 600; }
+.meter { height: 6px; border: 1px solid var(--dim); position: relative; margin-top: 3px; }
+.meter i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--signal); }
+.specs.idle .v { color: var(--faint); }
+/* the countdown is a real reading, not a blank one, so it keeps the page's ink */
+.specs.idle #openT { color: var(--ink); }
+.ph { font-family: var(--display); font-size: 12px; letter-spacing: .1em; color: var(--dim); border: 1px dashed var(--faint); padding: 1px 4px; }
+
+/* who made it, along the bottom */
+.credits { display: flex; justify-content: center; align-items: center; gap: 8px;
+  font-family: var(--display); font-size: 13px; letter-spacing: .12em; color: var(--ink); background: var(--bar);
+  border-top: var(--hair); padding: 9px 16px calc(9px + env(safe-area-inset-bottom, 0px)); }
+.credits .mark { display: inline-flex; align-items: center; }
+.credits .mark img { image-rendering: pixelated; display: block; }
+.credits .mark:hover img { filter: brightness(1.25); }
+/* the mark is the theme colour too, so on a light page it gets the same black edge as the type */
+[data-theme="invert"] .credits .mark img {
+  filter: drop-shadow(1px 0 0 var(--ink)) drop-shadow(-1px 0 0 var(--ink))
+          drop-shadow(0 1px 0 var(--ink)) drop-shadow(0 -1px 0 var(--ink)); }
+.credits .by { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: center; text-align: center; }
+.credits .by a { color: var(--signal-ink); text-decoration: none; display: inline-flex; align-items: center; gap: 6px; }
+.credits .by a:hover, .credits .by a:focus-visible { text-decoration: underline; }
+.credits img { image-rendering: pixelated; vertical-align: middle; display: inline-block; }
+@media (max-width: 560px) { .credits { font-size: 11px; letter-spacing: .08em; gap: 6px; } }
+.demo { position: absolute; z-index: 3; right: 12px; bottom: 12px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap;
+  font-family: var(--display); font-size: 13px; letter-spacing: .1em; color: var(--dim);
+  background: rgba(var(--veil), .85); border: 1px dashed var(--faint); padding: 5px 8px; }
+.demo button { font-family: var(--display); font-size: 13px; letter-spacing: .08em; background: none; color: var(--ink);
+  border: 1px solid var(--dim); padding: 4px 7px; cursor: pointer; }
+.demo button[aria-pressed="true"] { background: var(--signal); color: var(--on-signal); border-color: var(--signal); }
+@media (max-width: 760px) { .demo { position: static; margin: 0 auto 8px; width: fit-content; } }
+
+/* ---------- light mode: every run of the theme colour gets its own small bordered box ----------
+   #CCFF00 is the theme colour in both modes and does not change. On a light page it measures 1.02:1
+   against the paper, so instead of touching the colour, each place that uses it as text is boxed: a
+   1px rule with the ink behind it. That is the same pairing the colour has in dark mode, so it reads
+   at 17.9:1, and only the runs actually using #CCFF00 are affected. */
+[data-theme="invert"] :is(.specs .sub .hl, .fine a, .credits .by a, .wallet.on b, .eyebrow) {
+  /* A real stroke, painted behind the fill so the letterform stays open — eight stacked shadows clogged
+     the counters at body size. The colour itself is untouched; it just gets an edge to sit against. */
+  -webkit-text-stroke: 3.5px var(--ink);
+  paint-order: stroke fill;
+}
+
+/* ---------- the nav: one menu, same on a desk and a phone ---------- */
+.burger { --home-bg: var(--paper); --home-fg: var(--ink); padding: 8px 9px; line-height: 0; }
+.burger svg { display: block; }
+.menu { position: absolute; z-index: 20; top: 100%; right: 16px; margin-top: 8px; display: grid; gap: 8px;
+  padding: 10px; min-width: 260px; background: rgba(var(--veil), .62); backdrop-filter: blur(2px);
+  border: var(--rule); box-shadow: var(--raised-lg); }
+.menu .btn { width: 100%; justify-content: center; font-size: 14px; letter-spacing: .1em; padding: 12px; }
+.menu .wallet { font-size: 14px; letter-spacing: .1em; padding: 12px; }
+@media (max-width: 560px) { .menu { right: 12px; left: 12px; min-width: 0; } }
+
+/* ---------- the application sheet: a project asking to join ---------- */
+.sheet { width: min(560px, calc(100vw - 32px)); padding: 0; border: var(--rule); box-shadow: var(--raised-lg);
+  background: var(--paper); color: var(--ink); }
+.sheet::backdrop { background: rgba(0, 0, 0, .62); }
+.sheet form { display: grid; gap: 0; }
+.sheet .head { display: flex; align-items: baseline; gap: 10px; padding: 16px; border-bottom: 1px solid var(--line); }
+.sheet .head h2 { margin: 0; font-family: var(--display); font-weight: 400; font-size: 15px; letter-spacing: .1em; }
+.sheet .head p { margin: 0; font-size: 14px; color: var(--dim); }
+.sheet .rows { display: grid; gap: 14px; padding: 16px; max-height: min(58vh, 460px); overflow-y: auto; }
+.sheet label { display: grid; gap: 5px; font-family: var(--display); font-size: 11px; letter-spacing: .1em; color: var(--dim); }
+.sheet input, .sheet select, .sheet textarea { font-family: var(--mono); font-size: 15px; color: var(--ink);
+  background: transparent; border: var(--rule); padding: 9px 10px; width: 100%; border-radius: 0; }
+.sheet textarea { resize: vertical; min-height: 64px; }
+.sheet input:focus, .sheet select:focus, .sheet textarea:focus { outline: 2px solid var(--signal); outline-offset: -2px; }
+.sheet .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.sheet .pick { display: flex; gap: 8px; }
+.sheet .pick button { flex: 1; font-family: var(--display); font-size: 12px; letter-spacing: .08em; padding: 9px;
+  border: var(--rule); background: transparent; color: var(--ink); cursor: pointer; }
+.sheet .pick button[aria-pressed="true"] { background: var(--signal); color: var(--on-signal); }
+.sheet .foot { display: flex; gap: 8px; justify-content: flex-end; padding: 14px 16px; border-top: 1px solid var(--line); }
+.sheet .foot .btn { font-size: 12px; letter-spacing: .08em; padding: 10px 12px; }
+.sheet .send { --home-bg: var(--signal); --home-fg: var(--on-signal); }
+.sheet .shut { --home-bg: var(--paper); --home-fg: var(--ink); }
+.sheet .note { margin: 0; padding: 0 16px 14px; font-size: 13px; color: var(--dim); }
+.sheet .trap { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+.sheet .fail { margin: 0; padding: 0 16px 14px; font-size: 13px; color: #ff6b80; }
+.sheet .done { padding: 26px 16px; display: grid; gap: 10px; justify-items: center; text-align: center; }
+.sheet .done b { font-family: var(--display); font-weight: 400; font-size: 14px; letter-spacing: .1em; color: var(--signal-ink); }
+.sheet .done p { margin: 0; font-size: 14px; color: var(--dim); max-width: 42ch; }
+@media (max-width: 560px) { .sheet .pair { grid-template-columns: 1fr; } }
+
+/* ---------- phone: last, so these win over everything above ---------- */
+@media (max-width: 760px) {
+  /* A phone holds one screen and no more: the estate fills what is left between the header and the
+     footer, the title sits over the top of it, and the readings and the way in sit over the bottom. */
+  .hero { position: relative; flex: 1; min-height: 0; overflow: hidden; background: var(--paper); }
+  .hero > iframe { position: absolute; inset: auto 0 0 0; top: -9%; height: 109%; }
+  .hero::before { inset: 0; background: linear-gradient(0deg, rgba(var(--veil), .92) 0%, rgba(var(--veil), .55) 38%, rgba(var(--veil), .15) 62%, rgba(var(--veil), .5) 100%); }
+  .over { position: absolute; inset: auto 0 0 0; grid-template-columns: 1fr; align-items: end;
+    padding: 0 12px max(10px, env(safe-area-inset-bottom)); }
+  .side { gap: 10px; }
+  .pitch { gap: 10px; }
+  /* the readings, sized for a phone rather than a desk */
+  .specs .row { padding: 8px 11px; gap: 2px; }
+  .specs .k { font-size: 11px; letter-spacing: .09em; }
+  .specs .v { font-size: 22px; }
+  .specs .sub { font-size: 13px; line-height: 1.35; }
+  .specs .meter { height: 3px; }
+  .cta { font-size: 15px; letter-spacing: .1em; padding: 12px 16px; min-width: 0; width: 100%; }
+  .fine.v1 { font-size: 12px; line-height: 1.35; }
+  .credits { font-size: 10px; padding: 8px 12px calc(8px + env(safe-area-inset-bottom, 0px)); }
+  header { padding-left: 12px; padding-right: 12px; }
+  .brand span { display: none; }
+  /* phone: one row, like the desk — the name, then the theme and the wallet hard right */
+  header { gap: 6px 8px; flex-wrap: nowrap; }
+  .brand { flex: 0 1 auto; font-size: 15px; letter-spacing: .06em; min-width: 0; }
+  header .sp { flex: 1 1 auto; min-width: 0; }
+  .credits { gap: 6px 8px; font-size: 9px; }
+  .credits .by { justify-content: center; gap: 5px; }
+      .theme { padding: 7px 8px; }
+  .wallet { font-size: 12px; padding: 7px 9px; white-space: nowrap; }
+}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><i></i>RARE FIENDS</div>
+  <span class="sp"></span>
+  <button class="btn theme" id="theme" type="button" aria-label="switch between light and dark"></button>
+  <button class="btn burger" id="burger" type="button" aria-expanded="false" aria-controls="menu" aria-label="menu"></button>
+  <nav class="menu" id="menu" hidden>
+    <a class="btn" href="faq.html">FAQ</a>
+    <a class="btn" href="#" data-apply>APPLY</a>
+    <a class="btn" href="bridge.html">BRIDGE YOUR DOOPIES</a>
+    <button class="btn wallet" id="wallet" type="button">CONNECT</button>
+  </nav>
+</header>
+<dialog class="sheet" id="apply" aria-labelledby="applyTitle">
+  <form method="dialog" id="applyForm">
+    <div class="head">
+      <h2 id="applyTitle">BRING YOUR PROJECT</h2>
+      <p>What we need to map a collection onto the map.</p>
+    </div>
+    <div class="rows">
+      <label>PROJECT NAME
+        <input name="name" required placeholder="Doopies" autocomplete="off">
+      </label>
+      <div class="pair">
+        <label>CHAIN
+          <select name="chain" required>
+            <option value="">choose one</option>
+            <option>Solana</option><option>Ethereum</option><option>Base</option>
+            <option>Robinhood Chain</option><option>Bitcoin</option><option>Other</option>
+          </select>
+        </label>
+        <label>SUPPLY
+          <input name="supply" required inputmode="numeric" placeholder="10000" autocomplete="off">
+        </label>
+      </div>
+      <label>IS THE ART ON CHAIN TODAY?
+        <span class="pick" role="group" aria-label="is the art on chain today">
+          <button type="button" data-onchain="yes" aria-pressed="false">YES</button>
+          <button type="button" data-onchain="no" aria-pressed="false">NO</button>
+        </span>
+      </label>
+      <label>CONTRACT OR MINT ADDRESS
+        <input name="contract" required placeholder="0x... or a Solana mint" autocomplete="off">
+      </label>
+      <label>DOES IT HAVE TRAITS WE CAN MAP TO TIER AND CLASS?
+        <textarea name="traits" required placeholder="Which traits mark a rare one, and which read as a class or a role."></textarea>
+      </label>
+      <div class="pair">
+        <label>WHERE WE CAN SEE IT
+          <input name="link" required type="url" placeholder="https://" autocomplete="off">
+        </label>
+        <label>HOW WE REACH YOU
+          <input name="contact" required placeholder="@handle" autocomplete="off">
+        </label>
+      </div>
+    </div>
+    <label class="trap" aria-hidden="true"><span>Website</span><input name="website" tabindex="-1" autocomplete="off"></label>
+    <p class="note">We read every one of these. Expect a reply on the handle you leave.</p>
+    <div class="foot">
+      <button class="btn shut" type="button" id="applyShut">CANCEL</button>
+      <button class="btn send" type="submit">SEND</button>
+    </div>
+  </form>
+  <div class="done" id="applyDone" hidden>
+    <b>THAT IS EVERYTHING WE NEED</b>
+    <p>In the finished thing this would reach us and we would come back to you with a charter: how your
+       traits map to tier, class, toughness, terrain and a perk.</p>
+    <button class="btn shut" type="button" id="applyClose">CLOSE</button>
+  </div>
+</dialog>
+<main class="hero">
+  <div class="wordmark"><iframe src="rarefiends-title.html?bare=1" title="RARE FIENDS" aria-label="RARE FRIENDS becoming RARE FIENDS" tabindex="-1" scrolling="no"></iframe></div>
+  <div class="over">
+    <div class="side">
+      <aside class="specs idle" id="specs" aria-label="the game"></aside>
+      <section class="pitch" aria-live="polite">
+        <div class="eyebrow" hidden><i class="dot idle" id="dot"></i><span id="eyebrow"></span></div>
+        <h1 id="title" hidden></h1>
+        <p class="lede" id="lede" hidden></p>
+        <button class="btn cta" id="cta" type="button">LET'S FUCKING GO</button>
+        <div class="fine" id="fine" hidden></div>
+        <p class="fine v1" id="v1">V1 is to test gaming dynamics; V2 will move on-chain.</p>
+      </section>
+    </div>
+  </div>
+  <div class="demo" id="demo" role="group" aria-label="demo controls" hidden>
+    <span>DEMO · GAME</span>
+    <button type="button" data-era="none" aria-pressed="true">NOT STARTED</button>
+    <button type="button" data-era="open">STARTED BY SOMEONE</button>
+    <button type="button" id="skip">SKIP TO THE LOCK</button>
+    <button type="button" id="reset">RESET</button>
+  </div>
+</main>
+
+<footer class="credits">
+  <a class="mark" href="https://x.com/rarefiends" target="_blank" rel="noopener" aria-label="Rare Fiends on X"><img src="icon-192.png" alt="" width="20" height="20"></a>
+  <span class="by">POWERED BY <a href="https://x.com/intelstrata" target="_blank" rel="noopener">@INTELSTRATA</a>
+  AND <a href="https://rarefriends.com" target="_blank" rel="noopener"><img src="token.svg" alt="" width="18" height="18"> RAREFRIENDS</a></span>
+</footer>
+<script>
+(() => {
+  'use strict';
+  // The era: someone starts it, then players have a window to join before it locks, and the game
+  // starts a little after that. DECIDED: joining is open 24 h, then a 1 h gap before the game
+  // starts. The gap is a parameter the deployer can change - one home, here, read by economy.html.
+  const JOIN_WINDOW = 24 * 3600e3, START_AFTER_LOCK = 1 * 3600e3;
+  // The date the countdown on the readings runs to, while nothing has been started yet. Written out in
+  // full so there is one place to change it, and read as local time so it lands on the same evening
+  // wherever you are. Friday 2 October 2026, 18:00.
+  const OPENS = new Date(2026, 9, 2, 18, 0, 0);
+  // DECIDED: an era needs at least this many players when joining closes; with fewer, the join clock starts again
+  const MIN_PLAYERS = 2;
+  const S = { wallet: null, era: null };            // era: { startedAt, lockAt, startAt, players, by, joined }
+  const $ = (id) => document.getElementById(id);
+
+  // Nothing in the game is live yet. Rather than dead buttons or a line of small print, pressing one
+  // tears for a moment and comes back: you can see it is refusing rather than broken. One flag opens
+  // everything up when the game is ready.
+  const LIVE = false;
+  const refuse = (el) => {
+    el.classList.remove('nope');
+    void el.offsetWidth;                                             // let the animation start again
+    el.classList.add('nope');
+    setTimeout(() => el.classList.remove('nope'), 620);
+  };
+
+  // Light and dark, the way rarefriends.com does it: one attribute on <html> swaps the tokens. The voxel
+  // title is a separate document drawing its own letters, so it has to be told too — white letters on a
+  // light page are nothing at all — and it takes the ink as a query, which means reloading the frame.
+  // Silkscreen has no sun or moon, and a font fallback for one glyph is how the ETH symbol went wrong —
+  // so these are drawn, not typed. Feather's sun and crescent, inheriting the button's own colour.
+  const SUN = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 1.8v2.4M12 19.8v2.4M4.22 4.22l1.7 1.7M18.08 18.08l1.7 1.7M1.8 12h2.4M19.8 12h2.4M4.22 19.78l1.7-1.7M18.08 5.92l1.7-1.7"/></svg>';
+  const MOON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.5 14.4A8.6 8.6 0 1 1 9.6 3.5a6.9 6.9 0 0 0 10.9 10.9z"/></svg>';
+  // A fresh visit opens dark; the choice then follows you from page to page for the rest of the visit,
+  // so going to the FAQ does not throw you back into dark. sessionStorage, not localStorage: closing the
+  // tab forgets it, which is what "dark by default" means.
+  const THEME_KEY = 'rf-theme';
+  const readTheme = () => { try { return sessionStorage.getItem(THEME_KEY) || 'dark'; } catch (_) { return 'dark'; } };
+  const saveTheme = (m) => { try { sessionStorage.setItem(THEME_KEY, m); } catch (_) {} };
+  function applyTheme(mode, reload) {
+    const light = mode === 'light';
+    document.documentElement.setAttribute('data-theme', light ? 'invert' : 'dark');
+    const b = $('theme');
+    if (b) { b.innerHTML = light ? MOON : SUN; b.title = light ? 'Switch to dark' : 'Switch to light'; }
+    const f = document.querySelector('.wordmark iframe');
+    if (f && reload) {
+      f.classList.remove('ready');                     // hidden until the new ink has drawn a frame
+      f.src = 'rarefiends-title.html?bare=1' + (light ? '&ink=dark' : '');
+      armTitle();
+    }
+    // The map draws its own greens, so it is reloaded with the palette that matches the flip. It is
+    // hidden first: left visible, you watch the estate page build itself, which is the flash you get
+    // when switching theme.
+    const bg = document.querySelector('.hero > iframe');
+    if (bg && reload) {
+      bg.classList.remove('on');
+      bg.src = 'hero.html?hero=1' + (light ? '&ink=light' : '');
+      bg.addEventListener('load', () => setTimeout(() => bg.classList.add('on'), 450), { once: true });
+    }
+    saveTheme(mode);
+  }
+  let theme = readTheme();
+  applyTheme(theme, theme === 'light');
+  $('theme').onclick = () => { theme = theme === 'light' ? 'dark' : 'light'; applyTheme(theme, true); };
+
+// One menu holds the way in and the way on: FAQ, CONNECT, then the bridge. Silkscreen has no menu glyph,
+  // so the bars are drawn, the same as the sun and the moon.
+  const BURGER = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M3.5 7h17M3.5 12h17M3.5 17h17"/></svg>';
+  const CLOSE  = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M5.5 5.5l13 13M18.5 5.5l-13 13"/></svg>';
+  const burger = document.getElementById('burger'), menu = document.getElementById('menu');
+  function setMenu(open) {
+    menu.hidden = !open;
+    burger.innerHTML = open ? CLOSE : BURGER;
+    burger.setAttribute('aria-expanded', String(open));
+  }
+  setMenu(false);
+  burger.onclick = (e) => { e.stopPropagation(); setMenu(menu.hidden); };
+  document.addEventListener('click', (e) => { if (!menu.hidden && !menu.contains(e.target)) setMenu(false); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') setMenu(false); });
+
+// The application sheet. Nothing leaves the page: this is a mockup of the form, so SEND only shows what
+  // the finished thing would say back.
+  (function applySheet() {
+    const dlg = document.getElementById('apply');
+    if (!dlg) return;
+    const form = document.getElementById('applyForm');
+    const done = document.getElementById('applyDone');
+    let onchain = null;
+    dlg.querySelectorAll('[data-onchain]').forEach((b) => {
+      b.onclick = () => {
+        onchain = b.dataset.onchain;
+        dlg.querySelectorAll('[data-onchain]').forEach((o) => o.setAttribute('aria-pressed', String(o === b)));
+      };
+    });
+    const open = () => { form.hidden = false; done.hidden = true; dlg.showModal(); };
+    document.querySelectorAll('[data-apply]').forEach((a) => {
+      a.addEventListener('click', (e) => { e.preventDefault(); setMenu(false); open(); });
+    });
+    document.getElementById('applyShut').onclick = () => dlg.close();
+    document.getElementById('applyClose').onclick = () => dlg.close();
+    form.addEventListener('submit', (e) => {
+      if (!onchain) {                                   // the one field a browser cannot require for us
+        e.preventDefault();
+        dlg.querySelector('[data-onchain]').focus();
+        return;
+      }
+      e.preventDefault();
+      const send = form.querySelector('.send');
+      const say = (m) => { let n = form.querySelector('.fail');
+        if (!n) { n = document.createElement('p'); n.className = 'fail'; form.querySelector('.foot').before(n); }
+        n.textContent = m; };
+      const body = { onchain };
+      new FormData(form).forEach((v, k) => { body[k] = String(v); });
+      send.disabled = true; send.textContent = 'SENDING';
+      fetch('apply.php', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+        .then((r) => r.json().catch(() => ({ ok: false })).then((j) => ({ r, j })))
+        .then(({ r, j }) => {
+          if (r.ok && j.ok) { form.hidden = true; done.hidden = false; return; }
+          say(r.status === 429 ? 'That is several already. Try again in an hour, or DM @rarefiends.'
+                               : 'That did not send. Try again, or DM @rarefiends.');
+        })
+        .catch(() => say('That did not send. Try again, or DM @rarefiends.'))
+        .finally(() => { send.disabled = false; send.textContent = 'SEND'; });
+    });
+  })();
+
+  const pad = (n) => String(n).padStart(2, '0');
+  function left(ms) {
+    if (ms <= 0) return { txt: '00:00:00', d: 0 };
+    const s = Math.floor(ms / 1000), d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60), x = s % 60;
+    return { txt: (d ? d + 'd ' : '') + pad(h) + ':' + pad(m) + ':' + pad(x), d };
+  }
+
+  // no wallet is contacted in the mockup: connecting just marks you as the demo holder
+  function connect() {
+    return new Promise(res => {
+      if (S.wallet) return res();
+      const w = $('wallet'); w.disabled = true; w.textContent = 'CONNECTING…';
+      setTimeout(() => { S.wallet = { label: 'GENESIS #4' }; w.disabled = false; render(); res(); }, 700);
+    });
+  }
+
+  function startEra(by, players) {
+    const now = Date.now();
+    S.era = { by, startedAt: now, lockAt: now + JOIN_WINDOW, startAt: now + JOIN_WINDOW + START_AFTER_LOCK,
+              players, joined: by === 'you' };
+  }
+
+  let drew = false;                                    // has the title EVER drawn (the island waits on this)
+  let armTitle = () => {};                             // re-arms the watcher after the frame is reloaded
+  (function titleFrame() {
+    const f = document.querySelector('.wordmark iframe');
+    if (!f) return;
+    const CSS = 'html,body{background:transparent!important}' +
+      'body>div{min-height:0!important;height:100%!important;padding:0!important;gap:0!important;justify-content:center!important}' +
+      'body>div>*:not(#stage){display:none!important}' +
+      '#stage{width:100%!important;height:100%!important;aspect-ratio:auto!important}';
+    const dress = () => {
+      const d = f.contentDocument;
+      if (!d || !d.head) return false;
+      if (!d.getElementById('rf-embed')) {
+        const st = d.createElement('style');
+        st.id = 'rf-embed';
+        st.textContent = CSS;
+        d.head.appendChild(st);
+      }
+      // not when the document exists, but when it has actually drawn: the clock only ticks once
+      // three.js is up and the first frame is rendered
+      const tv = d.getElementById('tval');
+      if (tv && parseFloat(tv.textContent) > 0) { f.classList.add('ready'); drew = true; }
+      return !!d.body;
+    };
+    // Watch until the frame is actually showing, and keep a handle so it can be started again. Changing
+    // the theme reloads this frame with a different ink, which strips 'ready' off it; without re-arming,
+    // the loop had already stopped for good and the title never came back in either mode.
+    let run = 0;
+    armTitle = () => {
+      const mine = ++run;                              // only the newest loop survives a quick double toggle
+      (function watch() {
+        if (mine !== run) return;
+        dress();
+        if (!f.classList.contains('ready')) requestAnimationFrame(watch);
+      })();
+    };
+    armTitle();
+    f.addEventListener('load', () => { dress(); armTitle(); });
+  })();
+
+  function render() {
+    const w = $('wallet');
+    w.className = 'btn wallet' + (S.wallet ? ' on' : '');
+    w.innerHTML = S.wallet ? '<b>●</b> ' + S.wallet.label + ' · DEMO' : 'CONNECT';
+
+    const e = S.era, cta = $('cta');
+    $('dot').className = 'dot' + (e ? '' : ' idle');
+    if (!e) {
+      $('eyebrow').textContent = 'NOTHING RUNNING YET';
+      $('title').innerHTML = 'GET READY';
+      $('lede').textContent = 'Nothing is running yet. Start it and the clock begins: players get a window to join, then the land locks and the game begins.';
+      cta.textContent = "LET'S FUCKING GO";
+      cta.className = 'btn cta'; cta.disabled = false;
+      $('fine').innerHTML = 'Joining stays open <b>24 h</b> after the start; the game begins <b>1 h</b> after it locks.<br>It needs at least <b>' + MIN_PLAYERS + ' players</b> when joining closes, or the clock starts again.';
+    } else if (!e.joined) {
+      $('eyebrow').textContent = 'A GAME IS OPEN';
+      $('title').innerHTML = 'JOIN';
+      $('lede').textContent = 'A game has started. Join before it locks to claim your base on the map; once it locks, no one else gets in.';
+      cta.textContent = S.wallet ? 'JOIN' : 'CONNECT & JOIN';
+      cta.className = 'btn cta'; cta.disabled = false;
+      $('fine').innerHTML = '';
+    } else {
+      $('eyebrow').textContent = e.by === 'you' ? 'YOU STARTED THE GAME' : 'YOU ARE IN';
+      $('title').innerHTML = 'YOU\'RE<br>IN';
+      $('lede').textContent = 'Your base is claimed. Build while you wait: the game starts when the clock on the right runs out.';
+      cta.textContent = 'JOINED · PLAYER ' + e.players;
+      cta.className = 'btn cta in'; cta.disabled = true;
+      $('fine').innerHTML = '<a href="base.html">GO TO YOUR BASE →</a>';
+    }
+    renderSpecs();
+    document.querySelectorAll('[data-era]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.era === (e && e.by !== 'you' ? 'open' : e ? '' : 'none'))));
+  }
+
+  // the specs: players in, and the two clocks, each with how much of its run is used up
+  function renderSpecs() {
+    const e = S.era, sp = $('specs'), now = Date.now();
+    sp.className = 'specs' + (e ? '' : ' idle');
+    if (!e) {
+      const to = OPENS.getTime() - now, open = to <= 0;
+      const when = OPENS.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' });
+      sp.innerHTML =
+        '<div class="row"><span class="k"><span>' + (open ? 'OPEN' : 'OPENS IN') + '</span></span>' +
+          '<span class="v" id="openT">' + (open ? 'NOW' : left(to).txt) + '</span>' +
+          '<div class="meter"><i style="width:' + (open ? 100 : (100 - Math.min(100, to / (14 * 86400e3) * 100))).toFixed(2) + '%"></i></div>' +
+          '<span class="sub">' + (open ? 'the first <b class="hl">game</b> can be started' : when) + '</span></div>' +
+        '<div class="row"><span class="k"><span>PLAYERS JOINED</span></span><span class="v">—</span><span class="sub">no <b class="hl">game</b> yet</span></div>' +
+        '<div class="row"><span class="k"><span>GAME STARTS IN</span></span><span class="v">—</span><span class="sub">after the <b class="hl">game</b> locks</span></div>';
+      return;
+    }
+    // joining closes: with too few players the join window simply starts again
+    if (now >= e.lockAt && e.players < MIN_PLAYERS) {
+      e.startedAt = now; e.lockAt = now + JOIN_WINDOW; e.startAt = e.lockAt + START_AFTER_LOCK; e.restarts = (e.restarts || 0) + 1;
+    }
+    const locked = now >= e.lockAt;
+    const lock = left(e.lockAt - now), start = left(e.startAt - now);
+    const lockUsed = Math.min(1, (now - e.startedAt) / (e.lockAt - e.startedAt));
+    const startUsed = Math.min(1, (now - e.startedAt) / (e.startAt - e.startedAt));
+    const at = (t) => new Date(t).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+    sp.innerHTML =
+      '<div class="row"><span class="k"><span>PLAYERS JOINED</span>' + (e.by === 'you' ? '' : '<span class="ph">SAMPLE</span>') + '</span>' +
+        '<span class="v" id="players">' + e.players + '</span><span class="sub">' + (e.joined ? 'you are player ' + e.players : 'and counting') +
+        (e.players < MIN_PLAYERS ? ' · needs ' + MIN_PLAYERS + ' to go ahead' : '') + '</span></div>' +
+      '<div class="row"><span class="k"><span>LOCKS IN</span><span>NO NEW PLAYERS AFTER</span></span>' +
+        '<span class="v" id="lockT">' + (locked ? 'LOCKED' : lock.txt) + '</span><div class="meter"><i style="width:' + (lockUsed * 100).toFixed(2) + '%"></i></div>' +
+        '<span class="sub" id="lockSub">' + (e.restarts ? 'fewer than ' + MIN_PLAYERS + ' players: the clock restarted' + (e.restarts > 1 ? ' (×' + e.restarts + ')' : '') + ' · ' : '') +
+          (locked ? 'locked ' : 'locks ') + at(e.lockAt) + '</span></div>' +
+      '<div class="row"><span class="k"><span>GAME STARTS IN</span></span>' +
+        '<span class="v" id="startT">' + start.txt + '</span><div class="meter"><i style="width:' + (startUsed * 100).toFixed(2) + '%"></i></div>' +
+        '<span class="sub">starts ' + at(e.startAt) + '</span></div>';
+  }
+
+  $('wallet').onclick = () => { if (!LIVE) { refuse($('wallet')); return; } connect(); };
+  // the bridge is not open either: the link says so the same way the button does
+  document.querySelectorAll('nav a[href="bridge.html"]').forEach((a) => {
+    a.addEventListener('click', (e) => { if (LIVE) return; e.preventDefault(); refuse(a); });
+  });
+  $('cta').onclick = async () => {
+    if ($('cta').disabled) return;
+    if (!LIVE) { refuse($('cta')); return; }
+    await connect();
+    if (!S.era) startEra('you', 1);                                  // you start it: you are player 1
+    else if (!S.era.joined) { S.era.players += 1; S.era.joined = true; }
+    render();
+  };
+  window.startDemo = { join: async () => { await connect();
+    if (!S.era) startEra('you', 1); else if (!S.era.joined) { S.era.players += 1; S.era.joined = true; }
+    render(); } };
+  document.querySelectorAll('[data-era]').forEach(b => b.onclick = () => {
+    if (b.dataset.era === 'none') S.era = null;
+    // someone else started it earlier: a sample head start, so the clocks are part-way down
+    else { startEra('someone', 37); const ago = 7 * 3600e3 + 23 * 60e3; S.era.startedAt -= ago; S.era.lockAt -= ago; S.era.startAt -= ago; }
+    render();
+  });
+  $('reset').onclick = () => { S.era = null; S.wallet = null; render(); };
+  $('skip').onclick = () => { const e = S.era; if (!e) return; const d = e.lockAt - Date.now() - 1500;   // the lock in 1.5 s
+    e.startedAt -= d; e.lockAt -= d; e.startAt -= d; renderSpecs(); };
+
+  const q = new URLSearchParams(location.search);
+  // The island runs behind the page everywhere now. hero.html is the estate's renderer with hero mode
+  // forced on when it is published, so it can only ever draw the reel.
+  (function island() {
+    // It is created straight away so its own download runs alongside the title's - holding the element
+    // back held back the request too, which put two independent downloads end to end and pushed the
+    // finished page out by seconds. Only the REVEAL waits, so the order still reads title, then island.
+    const bg = document.createElement('iframe');
+    bg.src = 'hero.html?hero=1' + (document.documentElement.dataset.theme === 'invert' ? '&ink=light' : '');
+    bg.tabIndex = -1; bg.title = ''; bg.setAttribute('aria-hidden', 'true');
+    document.querySelector('.hero').prepend(bg);
+    const show = () => bg.classList.add('on');
+    const cap = setTimeout(show, 4000);                 // never hang on a title that failed to draw
+    (function wait() { if (drew) { clearTimeout(cap); setTimeout(show, 200); } else requestAnimationFrame(wait); })();
+  })();
+  // The staging controls (start it / someone else started it / skip / reset) are a tool for driving the
+  // mockup by hand, not part of the page. They only appear when asked for with ?demo=1 — opening the
+  // page locally is not asking for them.
+  if (q.get('demo') === '1') $('demo').hidden = false;
+  if (q.get('era') === 'open') document.querySelector('[data-era=open]').click(); else render();
+  setInterval(renderSpecs, 1000);                                     // the clocks tick
+  window.era = { S, JOIN_WINDOW, START_AFTER_LOCK, MIN_PLAYERS };                  // a handle for the checks
+})();
+</script>
+</body>
+</html>

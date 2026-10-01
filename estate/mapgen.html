@@ -1,0 +1,704 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Rare Fiends — map generator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Silkscreen:wght@400;700&family=Sometype+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --ink: #FFFFFF; --paper: #000000; --signal: #CCFF00;
+  --dim: rgba(255,255,255,.62); --faint: rgba(255,255,255,.28);
+  --display: Silkscreen, monospace; --mono: "Sometype Mono", ui-monospace, monospace;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; height: 100%; background: #090B09; color: var(--ink); }
+body { font-family: var(--mono); font-size: 20px; display: flex; flex-direction: column; min-height: 100dvh; }
+button, input { font: inherit; color: inherit; }
+header { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid rgba(204,255,0,.4); background: #000;
+  padding-top: max(10px, env(safe-area-inset-top)); flex-wrap: wrap; }
+.brand { display: flex; align-items: center; gap: 9px; font-family: var(--display); font-size: 19px; letter-spacing: .12em; }
+.brand i { width: 8px; height: 8px; background: var(--signal); border-radius: 50%; }
+.brand span { color: var(--dim); }
+header nav { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; }
+header nav a { font-family: var(--display); font-size: 14px; letter-spacing: .1em; color: #fff; text-decoration: none; border: 1px solid var(--faint); padding: 5px 7px; }
+
+.app { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 320px; }
+@media (max-width: 860px) { .app { grid-template-columns: 1fr; grid-template-rows: 62dvh auto; } }
+.view { position: relative; min-height: 0; overflow: hidden; background: #050605; }
+.view canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
+.view canvas.drag { cursor: grabbing; }
+.zoom { position: absolute; right: 10px; top: calc(10px + var(--mmh, 120px) + 8px); display: grid; gap: 4px; z-index: 2; }
+.mini { position: absolute; right: 10px; top: 10px; z-index: 2; width: 200px; background: rgba(0,0,0,.85); border: 1px solid rgba(255,255,255,.55);
+  touch-action: none; cursor: pointer; }
+.mini canvas { position: static; display: block; width: 100%; height: auto; cursor: pointer; }
+.mini span { position: absolute; left: 6px; top: 4px; font-family: var(--display); font-size: 12px; letter-spacing: .1em; color: var(--dim); pointer-events: none; }
+@media (max-width: 860px) { .mini { width: 130px; } .hint { right: calc(130px + 20px); } }
+.turnlab { position: absolute; right: 52px; top: calc(10px + var(--mmh, 120px) + 8px); z-index: 2; font-family: var(--display); font-size: 12px; letter-spacing: .1em; color: var(--dim); background: rgba(0,0,0,.7); padding: 3px 5px; }
+.modes { position: absolute; left: 10px; bottom: 50px; z-index: 2; display: flex; }
+.modes button { font-family: var(--display); font-size: 15px; letter-spacing: .1em; background: rgba(0,0,0,.8); border: 1px solid rgba(255,255,255,.5); padding: 7px 10px; cursor: pointer; }
+.modes button + button { border-left: 0; }
+.modes button[aria-pressed="true"] { background: var(--signal); color: #000; border-color: var(--signal); }
+.lod { position: absolute; left: 10px; top: 32px; z-index: 2; font-family: var(--display); font-size: 13px; letter-spacing: .1em; color: var(--signal);
+  background: rgba(0,0,0,.7); padding: 4px 6px; }
+.zoom button { width: 34px; height: 34px; font-family: var(--display); font-size: 20px; background: rgba(0,0,0,.8); border: 1px solid rgba(255,255,255,.5); cursor: pointer; }
+.zoom button.fit { font-size: 14px; letter-spacing: .06em; }
+.hud { position: absolute; left: 10px; bottom: 10px; right: 56px; z-index: 2; font-size: 20px; color: rgba(255,255,255,.85);
+  background: rgba(0,0,0,.78); border: 1px solid var(--faint); padding: 6px 9px; pointer-events: none; min-height: 30px; }
+.hud b { color: #fff; font-weight: 500; }
+.hud .g { color: var(--signal); }
+.busy { position: absolute; inset: 0; display: grid; place-items: center; z-index: 3; background: rgba(0,0,0,.55);
+  font-family: var(--display); font-size: 19px; letter-spacing: .14em; color: var(--signal); }
+.hint { position: absolute; left: 10px; top: 10px; right: calc(200px + 20px); z-index: 2; font-family: var(--display); font-size: 13px; letter-spacing: .1em; color: var(--dim);
+  background: rgba(0,0,0,.7); padding: 4px 6px; }
+
+.side { border-left: 1px solid var(--faint); background: #000; overflow: auto; padding: 14px; display: grid; gap: 14px; align-content: start; }
+@media (max-width: 860px) { .side { border-left: 0; border-top: 1px solid var(--faint); } }
+.go { width: 100%; font-family: var(--display); font-size: 19px; letter-spacing: .12em; background: var(--signal); color: #000; border: 0; padding: 14px; cursor: pointer; }
+.lab { font-family: var(--display); font-size: 14px; letter-spacing: .12em; color: var(--dim); display: block; margin-bottom: 6px; }
+.row { display: flex; gap: 6px; }
+.row input { flex: 1; min-width: 0; background: #0b0d0b; border: 1px solid rgba(255,255,255,.4); padding: 8px; font-family: var(--mono); font-size: 20px; }
+.row button, .pills button { font-family: var(--display); font-size: 15px; letter-spacing: .08em; background: none; border: 1px solid rgba(255,255,255,.5); padding: 7px 9px; cursor: pointer; }
+.pills { display: flex; flex-wrap: wrap; gap: 5px; }
+.pills button[aria-pressed="true"] { background: var(--signal); color: #000; border-color: var(--signal); }
+.stats { display: grid; grid-template-columns: 1fr auto; gap: 5px 10px; font-size: 21px; }
+.stats .k { color: var(--dim); }
+.stats .v { text-align: right; font-variant-numeric: tabular-nums; }
+.stats .v.g { color: var(--signal); }
+.legend { display: grid; gap: 5px; font-size: 20px; color: rgba(255,255,255,.8); }
+.legend i { display: inline-block; width: 12px; height: 12px; margin-right: 7px; vertical-align: -2px; border: 1px solid #000; }
+details { border-top: 1px solid var(--faint); padding-top: 10px; }
+summary { font-family: var(--display); font-size: 15px; letter-spacing: .12em; cursor: pointer; color: #fff; }
+ol { margin: 10px 0 0; padding-left: 18px; font-size: 21px; line-height: 1.55; color: rgba(255,255,255,.8); }
+ol b { color: #fff; font-weight: 500; }
+.tag { font-family: var(--display); font-size: 12px; letter-spacing: .1em; padding: 1px 4px; border: 1px solid rgba(255,255,255,.6); }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><i></i>RARE FIENDS<span>· MAP GENERATOR</span></div>
+  <nav><a href="base.html">BASE</a><a href="economy.html">ECONOMY</a><a href="start.html">START</a></nav>
+</header>
+<div class="app">
+  <div class="view" id="view">
+    <canvas id="cv" aria-label="the generated island"></canvas>
+    <div class="hint">DRAG TO TURN (OR MOVE) · RIGHT-DRAG OR SHIFT FOR THE OTHER · WHEEL OR PINCH TO ZOOM · TWIST TO TURN</div>
+    <div class="mini" id="mini" aria-label="mini map: tap to jump there"><canvas id="mm"></canvas><span>MAP</span></div>
+    <div class="lod" id="lod" hidden>TILE VIEW</div>
+    <div class="zoom"><button type="button" id="zin" aria-label="zoom in">+</button><button type="button" id="zout" aria-label="zoom out">−</button><button type="button" class="fit" id="zfit">FIT</button><button type="button" id="rl" aria-label="turn left">⟲</button><button type="button" id="rr" aria-label="turn right">⟳</button><button type="button" class="fit" id="north" aria-label="north up">N</button></div>
+    <div class="turnlab" id="turnLabel">NORTH 0°</div>
+    <div class="modes" role="group" aria-label="what a drag does"><button type="button" data-mode="turn" aria-pressed="true">TURN</button><button type="button" data-mode="move" aria-pressed="false">MOVE</button></div>
+    <div class="hud" id="hud">Point at the island for details.</div>
+    <div class="busy" id="busy">GENERATING…</div>
+  </div>
+  <aside class="side">
+    <button class="go" type="button" id="gen">GENERATE A NEW ISLAND</button>
+    <div><span class="lab">SEED · THE SAME SEED ALWAYS MAKES THE SAME ISLAND</span>
+      <div class="row"><input id="seed" inputmode="numeric" aria-label="seed"><button type="button" id="useSeed">MAKE</button></div></div>
+    <div><span class="lab">PLAYERS · THE ISLAND GROWS WITH THEM</span>
+      <div class="row"><input id="players" type="number" min="2" max="200" value="100" aria-label="players"><button type="button" id="usePlayers">MAKE</button></div></div>
+    <div><span class="lab">SHOW</span><div class="pills" id="layers"></div></div>
+    <div><span class="lab">THIS ISLAND</span><div class="stats" id="stats"></div></div>
+    <div><span class="lab">KEY</span><div class="legend" id="legend"></div></div>
+    <details><summary>HOW THE GENERATOR WORKS</summary><ol>
+      <li><b>Size</b> from the players: each needs a base (36 tiles) plus frontier, about 170 land tiles each.</li>
+      <li><b>The island</b>: fractal noise with a warped edge for bays and headlands. The sea level leaves about half the square as land; stray islets sink, and inland water becomes lakes.</li>
+      <li><b>Height</b>: land is ranked into shore, lowland, plain, hill, high ground and peak, with ridged noise making the hills.</li>
+      <li><b>Rivers</b> run from the high ground down to the sea and carve valleys either side.</li>
+      <li><b>Bases</b>: one plot per player, the standard base shape, spread out, on buildable ground, clear of the core.</li>
+      <li><b>Creeks</b>: every base gets running water. A creek rises just uphill and runs down through it (the generator needs it).</li>
+      <li><b>Forests</b> grow where a second noise field (moisture) is high, on low ground and hills.</li>
+      <li><b>Ruins</b> are scarce (about one per 14 players), far from bases, each with glitching terminals for later levels.</li>
+      <li><b>Turning</b>: drag across to turn it freely, like the base (the MOVE / TURN switch picks what a plain drag does; right-drag or Shift does the other); ⟲ ⟳ turn 45°, N points north up, a two-finger twist turns it on a phone.</li>
+      <li><b>Stepped access</b>: a rise of two or more levels is a cliff Friends can't climb. Every raised area must have a way up in steps of one; any that doesn't gets a staircase cut into its side.</li>
+    </ol><p style="font-size:19px;color:var(--dim);margin:8px 0 0">The algorithm is <code>estate/mapgen.js</code>: the same file a new game will call with its seed. Trees and terminals are the FriendSDK's props (Apache-2.0).</p></details>
+  </aside>
+</div>
+<iframe id="econProbe" src="base.html?econ=1" style="position:absolute;width:1px;height:1px;left:-10px;top:-10px;border:0;visibility:hidden" tabindex="-1" aria-hidden="true" title=""></iframe>
+<script src="mapgen.js"></script>
+<script>
+(() => {
+  'use strict';
+  const $ = (id) => document.getElementById(id);
+  const G = window.MapGen, WT = G.WATER;
+  const cv = $('cv'), ctx = cv.getContext('2d');
+  // The island turns freely, like the estate. A world point (x, y) is turned about the island's centre by
+  // the yaw, then projected: picture = ((rx − ry)·A, (rx + ry)·B − z); screen = picture · zoom + offset.
+  // Zoomed out it is painted straight into pixels (fast enough to turn it smoothly); close in, every
+  // visible tile is drawn in full, the way the estate draws its own.
+  const A = 8, B = 4, LH = 4, SEA_Z = -3, LAKE_Z = -2;          // tile half-width, half-height, a level's height
+  const TOP = ['#5b5e57', '#2b2f2b', '#353a35', '#454a45', '#5a5f5a', '#7c817c'];   // shore … peak
+  const LAYERS = { height: true, forest: true, crystals: true, water: true, plots: true, ruins: true, core: true, cliffs: false };
+  const LNAMES = { height: 'HEIGHT', forest: 'FOREST', crystals: 'CRYSTALS', water: 'WATER', plots: 'BASES', ruins: 'RUINS', core: 'CORE', cliffs: 'CLIFFS' };
+  let M = null, C0 = 0;                                         // the map, and its centre (the island is square)
+  const cam = { z: 1, x: 0, y: 0 };
+  let yaw = 0, cs = 1, sn = 0;
+  const DPR = () => Math.min(2, window.devicePixelRatio || 1);
+  const hsh = (x, y, s2) => { let h = x * 374761393 + y * 668265263 + s2 * 1442695041; h = (h ^ (h >>> 13)) * 1274126177; return ((h ^ (h >>> 16)) >>> 0) / 4294967296; };
+
+  // ---------- the projection, and which sides of a tile face the camera at this angle ----------
+  // a tile's four edges, each with the neighbour beyond it and its outward direction
+  const EDGES = [{ a: [0, 0], b: [1, 0], n: [0, -1] }, { a: [1, 0], b: [1, 1], n: [1, 0] }, { a: [1, 1], b: [0, 1], n: [0, 1] }, { a: [0, 1], b: [0, 0], n: [-1, 0] }];
+  let FACES = [];                                               // the (at most two) edges whose side we can see, and whether it is lit
+  function setYaw(v) {
+    yaw = Math.atan2(Math.sin(v), Math.cos(v)); cs = Math.cos(yaw); sn = Math.sin(yaw);
+    FACES = EDGES.map((e, k) => { const rx = e.n[0] * cs - e.n[1] * sn, ry = e.n[0] * sn + e.n[1] * cs; return { k, vis: rx + ry > 1e-6, lit: rx - ry > 0 }; }).filter(f => f.vis);
+    dirty = true;
+  }
+  const P = (x, y, z) => { const dx = x - C0, dy = y - C0, rx = dx * cs - dy * sn, ry = dx * sn + dy * cs; return [(rx - ry) * A, (rx + ry) * B - z]; };
+  const depth = (x, y) => { const dx = x - C0, dy = y - C0; return (dx * cs - dy * sn) + (dx * sn + dy * cs); };
+  const S = (x, y, z) => { const p = P(x, y, z); return [cam.x + p[0] * cam.z, cam.y + p[1] * cam.z]; };
+  function unP(px, py, z) {                                    // picture point at height z → world point
+    const u = px / A, v = (py + z) / B, rx = (u + v) / 2, ry = (v - u) / 2;
+    return [C0 + rx * cs + ry * sn, C0 - rx * sn + ry * cs];
+  }
+  const unS = (sx, sy, z) => unP((sx - cam.x) / cam.z, (sy - cam.y) / cam.z, z);
+  const zOf = (i) => M.water[i] === WT.SEA ? SEA_Z : M.water[i] === WT.LAKE ? LAKE_Z : (LAYERS.height ? M.level[i] * LH : 0);
+  // Running water is a lane down the middle of its tile, as on the estate (narrow for a creek, wider for a
+  // river), reaching out to each neighbouring water tile so it runs straight through and turns at corners.
+  const laneHalf = (i) => M.water[i] === WT.RIVER ? 0.18 : 0.12;     // the estate's stream is 0.24 of a tile wide; a river a little wider
+  function lane(x, y, i) {                                     // the lane's pieces, as world-space quads (z added by the caller)
+    const h = laneHalf(i), cx = x + 0.5, cy = y + 0.5, out = [[[cx - h, cy - h], [cx + h, cy - h], [cx + h, cy + h], [cx - h, cy + h]]];
+    for (let k = 0; k < 4; k++) { const j = neighbour(x, y, k); if (j < 0 || !M.water[j]) continue;
+      if (k === 0) out.push([[cx - h, y], [cx + h, y], [cx + h, cy], [cx - h, cy]]);
+      if (k === 1) out.push([[cx, cy - h], [x + 1, cy - h], [x + 1, cy + h], [cx, cy + h]]);
+      if (k === 2) out.push([[cx - h, cy], [cx + h, cy], [cx + h, y + 1], [cx - h, y + 1]]);
+      if (k === 3) out.push([[x, cy - h], [cx, cy - h], [cx, cy + h], [x, cy + h]]); }
+    return out;
+  }
+  const running = (i) => M.water[i] === WT.RIVER || M.water[i] === WT.CREEK;
+  // a side of a running-water tile is a waterfall where the water goes over it: into lower water beside it
+  const pours = (i, j, z, zN) => running(i) && j >= 0 && M.water[j] && zN < z;
+  const neighbour = (x, y, k) => { const e = EDGES[k].n, xx = x + e[0], yy = y + e[1]; return xx < 0 || yy < 0 || xx >= M.W || yy >= M.H ? -1 : yy * M.W + xx; };
+
+  // the tiles that can be on screen, back to front at this angle
+  function visible(skipSea) {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const [sx, sy] of [[0, 0], [cv.width, 0], [0, cv.height], [cv.width, cv.height]]) for (const z of [SEA_Z - 8, 5 * LH + 24]) {
+      const [x, y] = unS(sx, sy, z); x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y);
+    }
+    x0 = Math.max(0, Math.floor(x0) - 2); y0 = Math.max(0, Math.floor(y0) - 2); x1 = Math.min(M.W - 1, Math.ceil(x1) + 2); y1 = Math.min(M.H - 1, Math.ceil(y1) + 2);
+    const list = [];
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) { const i = y * M.W + x; if (skipSea && M.water[i] === WT.SEA) continue; list.push(i); }
+    const d = new Float32Array(M.W * M.H);
+    for (const i of list) d[i] = depth(i % M.W + 0.5, ((i / M.W) | 0) + 0.5);
+    list.sort((a, b) => d[a] - d[b]);
+    return list;
+  }
+
+  // ---------- zoomed out: paint the island into pixels, fast enough to turn it by hand ----------
+  const pack = (hex) => { const n = parseInt(hex.slice(1), 16); return (255 << 24) | ((n & 255) << 16) | (((n >> 8) & 255) << 8) | (n >> 16); };
+  const shade = (hex, k) => { const n = parseInt(hex.slice(1), 16), f = (c) => Math.max(0, Math.min(255, Math.round(c * k)));
+    return (255 << 24) | (f(n & 255) << 16) | (f((n >> 8) & 255) << 8) | f(n >> 16); };
+  const COL = { sea: pack('#0b0d0b'), lake: pack('#1c201c'), run: pack('#141614'), ruin: pack('#1b1b1b'), white: pack('#ffffff'), grey: pack('#9d9d9d'),
+    dark: pack('#111111'), green: pack('#CCFF00'), gdark: pack('#6f8c00'), gshade: pack('#7a9600'), fall: pack('#6f7372'), top: TOP.map(pack), lit: TOP.map(h => shade(h, 0.78)), dim: TOP.map(h => shade(h, 0.58)),
+    wlit: TOP.map(h => shade(h, 0.55)), wdim: TOP.map(h => shade(h, 0.4)) };
+  let rast = null, rctx = null, rimg = null, buf = null, RW = 0, RH = 0, dirty = true;
+  function fillPoly(pts, col) {                                // a convex polygon, one scanline at a time
+    let y0 = Infinity, y1 = -Infinity; for (const p of pts) { if (p[1] < y0) y0 = p[1]; if (p[1] > y1) y1 = p[1]; }
+    y0 = Math.max(0, Math.ceil(y0 - 0.5)); y1 = Math.min(RH - 1, Math.floor(y1 - 0.5));
+    const n = pts.length;
+    for (let y = y0; y <= y1; y++) {
+      const yc = y + 0.5; let xa = Infinity, xb = -Infinity;
+      for (let k = 0; k < n; k++) { const p = pts[k], q = pts[(k + 1) % n];
+        if ((p[1] <= yc && q[1] > yc) || (q[1] <= yc && p[1] > yc)) { const x = p[0] + (yc - p[1]) / (q[1] - p[1]) * (q[0] - p[0]); if (x < xa) xa = x; if (x > xb) xb = x; } }
+      if (xa > xb) continue;
+      const a = Math.max(0, Math.ceil(xa - 0.5)), b = Math.min(RW - 1, Math.floor(xb - 0.5));
+      if (b >= a) buf.fill(col, y * RW + a, y * RW + b + 1);
+    }
+  }
+  function linePx(a, b, col) {
+    const n = Math.max(1, Math.ceil(Math.max(Math.abs(b[0] - a[0]), Math.abs(b[1] - a[1]))));
+    for (let k = 0; k <= n; k++) { const x = Math.round(a[0] + (b[0] - a[0]) * k / n), y = Math.round(a[1] + (b[1] - a[1]) * k / n);
+      if (x >= 0 && y >= 0 && x < RW && y < RH) buf[y * RW + x] = col; }
+  }
+  function raster() {
+    if (!rast || RW !== cv.width || RH !== cv.height) { RW = cv.width; RH = cv.height; rast = document.createElement('canvas'); rast.width = RW; rast.height = RH;
+      rctx = rast.getContext('2d'); rimg = rctx.createImageData(RW, RH); buf = new Uint32Array(rimg.data.buffer); }
+    buf.fill(COL.sea);
+    const W = M.W, tpx = A * 2 * cam.z;                         // how wide a tile is on screen
+    for (const i of visible(true)) {
+      const x = i % W, y = (i / W) | 0, w = M.water[i], z = zOf(i), lv = M.level[i];
+      const c = [S(x, y, z), S(x + 1, y, z), S(x + 1, y + 1, z), S(x, y + 1, z)];
+      for (const f of FACES) {                                  // the sides we can see, down to what is beside them
+        const j = neighbour(x, y, f.k), zN = j < 0 ? SEA_Z - 6 : zOf(j); if (zN >= z) continue;
+        const e = EDGES[f.k], pa = c[[0, 1, 2, 3][f.k]], pb = c[(f.k + 1) % 4], d2 = (z - zN) * cam.z;
+        const face = [pa, pb, [pb[0], pb[1] + d2], [pa[0], pa[1] + d2]];
+        if (LAYERS.water && pours(i, j, z, zN)) {                // the bank, and the lane's width of it pouring over: pale water, white streaks
+          fillPoly(face, f.lit ? COL.lit[lv] : COL.dim[lv]);
+          const h = laneHalf(i), f0 = 0.5 - h, f1 = 0.5 + h, at = (f) => [pa[0] + (pb[0] - pa[0]) * f, pa[1] + (pb[1] - pa[1]) * f];
+          const a0 = at(f0), a1 = at(f1); fillPoly([a0, a1, [a1[0], a1[1] + d2], [a0[0], a0[1] + d2]], COL.fall);
+          const m2 = at(0.5); linePx(m2, [m2[0], m2[1] + d2], COL.white);
+        } else fillPoly(face, w === WT.SEA || w === WT.LAKE ? (f.lit ? COL.wlit[lv] : COL.wdim[lv]) : (f.lit ? COL.lit[lv] : COL.dim[lv]));   // a bank is ground
+        void e;
+      }
+      const lanes = LAYERS.water && (w === WT.RIVER || w === WT.CREEK);
+      fillPoly(c, w === WT.LAKE ? COL.lake : (LAYERS.ruins && M.ruin[i]) ? COL.ruin : COL.top[lv]);
+      if (lanes) lane(x, y, i).forEach(q => fillPoly(q.map(([qx, qy]) => S(qx, qy, z)), COL.run));
+      const ctr = S(x + 0.5, y + 0.5, z);
+      if (LAYERS.water && (w === WT.RIVER || w === WT.CREEK) && tpx > 5) {           // the current, as a white dash along the flow
+        const d = M.N8[M.flowDir[i]] || [1, 0], a = S(x + 0.5 - d[0] * 0.18, y + 0.5 - d[1] * 0.18, z), b = S(x + 0.5 + d[0] * 0.18, y + 0.5 + d[1] * 0.18, z);
+        linePx(a, b, COL.white);
+      }
+      if (LAYERS.cliffs && !w) for (let k = 0; k < 4; k++) { const j = neighbour(x, y, k);
+        if (j >= 0 && !M.water[j] && Math.abs(M.level[j] - lv) >= 2) linePx(c[k], c[(k + 1) % 4], COL.green); }
+      if (LAYERS.plots && M.plotAt[i] && tpx > 3) for (let k = 0; k < 4; k++) { const j = neighbour(x, y, k);
+        if (j < 0 || M.plotAt[j] !== M.plotAt[i]) linePx(c[k], c[(k + 1) % 4], COL.white); }
+      if (LAYERS.ruins && M.ruin[i] && tpx > 4) for (let k = 0; k < 3; k++) if (hsh(x, y, 20 + k) < 0.6) {
+        const p = S(x + 0.2 + hsh(x, y, 30 + k) * 0.6, y + 0.2 + hsh(x, y, 40 + k) * 0.6, z); const px = Math.round(p[0]), py = Math.round(p[1]);
+        if (px >= 0 && py >= 0 && px < RW && py < RH) buf[py * RW + px] = COL.white; }
+      if (LAYERS.crystals && M.seamAt[i]) {                       // a crystal bed: little shards across the whole tile
+        const q = M.seams[M.seamAt[i] - 1], col = q.wild ? COL.gdark : COL.green, sh = COL.gshade;
+        const bed = G.crystalBed(x, y, M.seamDepth && M.seamDepth[i]), step = tpx > 18 ? 1 : tpx > 9 ? 2 : 4;
+        for (let k = 0; k < bed.length; k += step) { const c = bed[k], m = S(x + c.dx, y + c.dy, z), h = Math.max(2, c.h * tpx), wd = Math.max(1, c.w * tpx);
+          fillPoly([[m[0] - wd, m[1]], [m[0] + c.lean * tpx, m[1] - h], [m[0], m[1]]], col);
+          fillPoly([[m[0], m[1]], [m[0] + c.lean * tpx, m[1] - h], [m[0] + wd, m[1]]], sh); }
+      }
+      if (LAYERS.forest && M.forest[i] && !w) {                   // trees: a two-tone crown on a dark trunk, one to three
+        const n = tpx > 14 ? (M.trees[i] || 1) : 1, h = Math.max(4, tpx * 0.85), wd = h * 0.38;
+        for (let k = 0; k < n; k++) {
+          const p = n === 1 ? ctr : S(x + 0.25 + hsh(x, y, 60 + k) * 0.5, y + 0.25 + hsh(x, y, 70 + k) * 0.5, z);
+          fillPoly([[p[0] - wd, p[1] - h * 0.25], [p[0], p[1] - h], [p[0], p[1] - h * 0.25]], COL.white);
+          fillPoly([[p[0], p[1] - h], [p[0] + wd, p[1] - h * 0.25], [p[0], p[1] - h * 0.25]], COL.grey);
+          fillPoly([[p[0] - 0.6, p[1] - h * 0.25], [p[0] + 0.6, p[1] - h * 0.25], [p[0] + 0.6, p[1]], [p[0] - 0.6, p[1]]], COL.dark);
+        }
+      }
+    }
+    rctx.putImageData(rimg, 0, 0);
+    dirty = false;
+  }
+
+  // ---------- close in: every visible tile in full, like the estate ----------
+  const imgCache = new Map();
+  function sprite(src, px) {                                   // an SDK prop, rasterised once per size
+    px = Math.max(6, Math.round(px / 4) * 4);
+    const key = src + px; if (imgCache.has(key)) return imgCache.get(key);
+    const im = sprite.img[src] || (sprite.img[src] = Object.assign(new Image(), { src }));
+    if (!im.complete || !im.naturalWidth) return null;
+    const c = document.createElement('canvas'); c.width = c.height = px; c.getContext('2d').drawImage(im, 0, 0, px, px);
+    imgCache.set(key, c); return c;
+  }
+  sprite.img = {}; ['sprites/tree.svg'].forEach(src => sprite(src, 8));
+  // one faceted crystal, as the estate draws it: a pointed hexagonal prism, a shaded right side, a spine highlight
+  function shardAt(cx, cy, w, tall, lean, col, lw) {
+    if (w < 0.05) return;
+    const foot = w * 0.45, tipX = cx + lean, tipY = cy - tall;
+    const sL = [cx - w * 0.92, cy - tall * 0.42], sR = [cx + w * 0.92, cy - tall * 0.42], bL = [cx - w, cy], bR = [cx + w, cy], kL = [cx - w * 0.5, cy + foot], kR = [cx + w * 0.5, cy + foot];
+    ctx.beginPath(); ctx.moveTo(tipX, tipY); [sR, bR, kR, kL, bL, sL].forEach(p2 => ctx.lineTo(p2[0], p2[1])); ctx.closePath();
+    ctx.fillStyle = col; ctx.fill(); ctx.strokeStyle = '#000'; ctx.lineWidth = lw; ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(tipX, tipY); [sR, bR, kR, [cx, cy + foot], [cx, cy]].forEach(p2 => ctx.lineTo(p2[0], p2[1])); ctx.closePath();
+    ctx.fillStyle = 'rgba(0,0,0,.34)'; ctx.fill();
+    ctx.beginPath(); ctx.moveTo(tipX, tipY); ctx.lineTo(cx, cy); ctx.strokeStyle = 'rgba(255,255,255,.65)'; ctx.lineWidth = lw; ctx.stroke();
+  }
+  function drawTiles(t) {
+    const W = M.W, lw = 1 / cam.z, px1 = Math.max(1, cam.z / GAME_Z) / cam.z, streak = 5 * px1;
+    ctx.setTransform(cam.z, 0, 0, cam.z, cam.x, cam.y);
+    const quad = (pts, fill, stroke) => { ctx.beginPath(); pts.forEach((q, k) => k ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1])); ctx.closePath();
+      ctx.fillStyle = fill; ctx.fill(); if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = lw; ctx.stroke(); } };
+    const line = (a, b, col, w) => { ctx.strokeStyle = col; ctx.lineWidth = (w || 1) * lw; ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke(); };
+    // the foot of a fall: the estate's foam, four white flecks jumping where the sheet lands. Drawn by the
+    // tile it lands on, after that tile's water, or the lower tile paints straight over it
+    const splash = (x, y, z) => { for (let k = 0; k < 4; k++) {
+      const j = neighbour(x, y, k); if (j < 0 || !running(j) || zOf(j) <= z) continue;
+      const ex = (j % W) - x, ey = ((j / W) | 0) - y, hL = laneHalf(j);
+      ctx.fillStyle = '#ffffff';
+      for (let k2 = 0; k2 < 4; k2++) { const f2 = (k2 + 0.5) / 4 - 0.5, u = ((t / 300) + k2 * 0.4) % 1;
+        const m = P(x + 0.5 + ex * 0.46 - ey * f2 * 2 * hL, y + 0.5 + ey * 0.46 + ex * f2 * 2 * hL, z);
+        ctx.globalAlpha = 1 - u; ctx.fillRect(m[0] + Math.sin(k2 * 2 + u * 6) * 3 * px1, m[1] - u * 5 * px1, 2 * px1, 2 * px1); }
+      ctx.globalAlpha = 1; } };
+    // where a stream rises: the estate's spring, a round pool with rings spreading out of it
+    const spring = (x, y, z) => {
+      const r = 0.13, ring = (rr) => { ctx.beginPath(); for (let a = 0; a <= 24; a++) { const q = P(x + 0.5 + Math.cos(a / 24 * 6.2832) * rr, y + 0.5 + Math.sin(a / 24 * 6.2832) * rr, z); a ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1]); } };
+      ring(r * 1.3); ctx.fillStyle = '#2b2b2b'; ctx.fill(); ctx.strokeStyle = '#000'; ctx.lineWidth = px1; ctx.stroke();
+      ctx.strokeStyle = '#ffffff';
+      for (let k = 0; k < 2; k++) { const u = ((t / 1600) + k / 2) % 1; ctx.globalAlpha = 1 - u; ring(r * 1.3 * Math.max(0.05, u)); ctx.stroke(); }
+      ctx.globalAlpha = 1; };
+    const risesHere = (x, y) => [0, 1, 2, 3].every(k => { const j = neighbour(x, y, k); if (j < 0) return true;
+      if (M.water[j] === WT.SEA || M.water[j] === WT.LAKE) return false;         // a ford in a lake, not a source
+      return !(running(j) && M.flowDir[j] >= 0 && (j % W) + M.N8[M.flowDir[j]][0] === x && ((j / W) | 0) + M.N8[M.flowDir[j]][1] === y); });
+    for (const i of visible(false)) {
+      const x = i % W, y = (i / W) | 0, w = M.water[i], z = zOf(i), lv = M.level[i];
+      const c = [P(x, y, z), P(x + 1, y, z), P(x + 1, y + 1, z), P(x, y + 1, z)];
+      for (const f of FACES) {                                  // sides toward the camera: white where lit, grey in shade
+        const j = neighbour(x, y, f.k), zN = j < 0 ? SEA_Z - 6 : zOf(j); if (zN >= z) continue;
+        const pa = c[f.k], pb = c[(f.k + 1) % 4], d2 = z - zN;
+        if (LAYERS.water && pours(i, j, z, zN)) {                  // the bank, and the lane's width of it pouring over: a sheet, falling streaks, foam
+          quad([pa, pb, [pb[0], pb[1] + d2], [pa[0], pa[1] + d2]], f.lit ? '#ffffff' : '#c4c4c4', '#000');
+          const hL = laneHalf(i), at = (fr) => [pa[0] + (pb[0] - pa[0]) * fr, pa[1] + (pb[1] - pa[1]) * fr];
+          const pa0 = pa, pb0 = pb; const la = at(0.5 - hL), lb = at(0.5 + hL);
+          void pa0; void pb0;
+          // the estate's waterfall: a #3a3a3a sheet, five columns of short white streaks falling, foam where it lands
+          ctx.beginPath(); ctx.moveTo(la[0], la[1]); ctx.lineTo(lb[0], lb[1]); ctx.lineTo(lb[0], lb[1] + d2); ctx.lineTo(la[0], la[1] + d2); ctx.closePath();
+          ctx.fillStyle = '#3a3a3a'; ctx.fill(); ctx.strokeStyle = '#000'; ctx.lineWidth = px1; ctx.stroke();
+          ctx.save(); ctx.clip();
+          ctx.strokeStyle = 'rgba(255,255,255,.85)'; ctx.lineWidth = px1;
+          for (let k2 = 0; k2 < 5; k2++) { const f2 = (k2 + 0.5) / 5, tx = la[0] + (lb[0] - la[0]) * f2, ty = la[1] + (lb[1] - la[1]) * f2;
+            for (let m2 = 0; m2 < 3; m2++) { const u = ((t / 420) + k2 * 0.23 + m2 / 3) % 1, yy = ty + u * d2; ctx.beginPath(); ctx.moveTo(tx, yy); ctx.lineTo(tx, yy + streak); ctx.stroke(); } }
+          ctx.restore();                                         // the foam is drawn by the tile it lands on, over its water
+        } else quad([pa, pb, [pb[0], pb[1] + d2], [pa[0], pa[1] + d2]], (w === WT.SEA || w === WT.LAKE) ? (f.lit ? '#3a3a3a' : '#2a2a2a') : (f.lit ? '#ffffff' : '#c4c4c4'), '#000');   // a bank is ground
+      }
+      if (w === WT.SEA || w === WT.LAKE) {                        // still water: ripples drifting across it
+        quad(c, w === WT.SEA ? '#0b0d0b' : '#16191b');
+        const u = ((t / 2600) + hsh(x, y, 2)) % 1, a = P(x + 0.25 + u * 0.3, y + 0.5, z), b = P(x + 0.55 + u * 0.3, y + 0.5, z);
+        ctx.globalAlpha = 0.35 * Math.sin(u * Math.PI); line(a, b, '#fff'); ctx.globalAlpha = 1;
+        if (LAYERS.water) splash(x, y, z);
+        continue;
+      }
+      if (LAYERS.water && (w === WT.RIVER || w === WT.CREEK)) {  // running water: a lane down the middle, the current moving the way it flows
+        const g0 = 0x1a + lv * 5;
+        quad(c, 'rgb(' + g0 + ',' + (g0 + 3) + ',' + g0 + ')', 'rgba(255,255,255,.13)');
+        const pieces = lane(x, y, i);
+        pieces.forEach(q => quad(q.map(([qx, qy]) => P(qx, qy, z)), '#2b2b2b'));   // the estate's stream: #2b2b2b, a black edge, thin white current
+        ctx.save(); ctx.beginPath(); pieces.forEach(q => { const pp = q.map(([qx, qy]) => P(qx, qy, z)); pp.forEach((a, k) => k ? ctx.lineTo(a[0], a[1]) : ctx.moveTo(a[0], a[1])); ctx.closePath(); }); ctx.clip();
+        // the current follows the lane: in from each upstream edge to the middle, then out by the downstream
+        // edge, so an L tile carries it round the bend instead of leaving its first half still
+        const hL = laneHalf(i), out = M.N8[M.flowDir[i]] || [1, 0];
+        const ins = [0, 1, 2, 3].filter(k => { const j = neighbour(x, y, k); return j >= 0 && (M.water[j] === WT.RIVER || M.water[j] === WT.CREEK) &&
+          M.flowDir[j] >= 0 && (j % M.W) + M.N8[M.flowDir[j]][0] === x && ((j / M.W) | 0) + M.N8[M.flowDir[j]][1] === y; })
+          .map(k => { const j = neighbour(x, y, k), d = M.N8[M.flowDir[j]]; return d; });
+        const source = !ins.length && risesHere(x, y);                  // a spring: the current starts at the pool
+        if (!ins.length && !source) ins.push(out);
+        const halves = ins.map(d => ({ d, from: -0.5, to: 0 })).concat([{ d: out, from: 0, to: 0.5 }]);
+        ctx.strokeStyle = 'rgba(255,255,255,.75)'; ctx.lineWidth = px1;
+        halves.forEach(({ d: [dx, dy], from, to }) => {
+          for (let k = 0; k < 7; k++) {                                 // seven dashes a tile, staggered across the stream, as on the estate
+            const u = ((t / 1400) + k / 7) % 1 - 0.5, s0 = Math.max(u, from), s1 = Math.min(u + 0.12, to);
+            if (s1 <= s0) continue;                                     // each dash stays in its own half: no cross at the bend
+            const across = (((k * 0.37) % 1) - 0.5) * (2 * hL - 0.08), ox = x + 0.5 - dy * across, oy = y + 0.5 + dx * across;
+            const a = P(ox + dx * s0, oy + dy * s0, z), b = P(ox + dx * s1, oy + dy * s1, z);
+            ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
+          }
+        });
+        ctx.restore();
+        // the banks: a light edge along each side of the lane
+        const h = laneHalf(i), cx0 = x + 0.5, cy0 = y + 0.5, wet = [0, 1, 2, 3].map(k => { const j = neighbour(x, y, k); return j >= 0 && !!M.water[j]; });
+        const bank = (a, b) => { ctx.strokeStyle = '#000'; ctx.lineWidth = px1; const p1 = P(a[0], a[1], z), p2 = P(b[0], b[1], z); ctx.beginPath(); ctx.moveTo(p1[0], p1[1]); ctx.lineTo(p2[0], p2[1]); ctx.stroke(); };
+        if (!wet[0]) bank([cx0 - h, cy0 - h], [cx0 + h, cy0 - h]); else { bank([cx0 - h, y], [cx0 - h, cy0 - h]); bank([cx0 + h, y], [cx0 + h, cy0 - h]); }
+        if (!wet[1]) bank([cx0 + h, cy0 - h], [cx0 + h, cy0 + h]); else { bank([cx0 + h, cy0 - h], [x + 1, cy0 - h]); bank([cx0 + h, cy0 + h], [x + 1, cy0 + h]); }
+        if (!wet[2]) bank([cx0 - h, cy0 + h], [cx0 + h, cy0 + h]); else { bank([cx0 - h, cy0 + h], [cx0 - h, y + 1]); bank([cx0 + h, cy0 + h], [cx0 + h, y + 1]); }
+        if (!wet[3]) bank([cx0 - h, cy0 - h], [cx0 - h, cy0 + h]); else { bank([x, cy0 - h], [cx0 - h, cy0 - h]); bank([x, cy0 + h], [cx0 - h, cy0 + h]); }
+        if (source) spring(x, y, z);                                  // over the banks, so the pool reads as round
+        splash(x, y, z);
+      } else {
+        const g = 0x1a + lv * 5;
+        quad(c, LAYERS.ruins && M.ruin[i] ? '#141414' : 'rgb(' + g + ',' + (g + 3) + ',' + g + ')', 'rgba(255,255,255,.13)');
+        const m = P(x + 0.5, y + 0.5, z); ctx.fillStyle = 'rgba(255,255,255,.4)'; ctx.fillRect(m[0], m[1], lw, lw);
+      }
+      if (LAYERS.cliffs && !w) for (let k = 0; k < 4; k++) { const j = neighbour(x, y, k); if (j >= 0 && !M.water[j] && Math.abs(M.level[j] - lv) >= 2) line(c[k], c[(k + 1) % 4], '#CCFF00', 2); }
+      if (LAYERS.plots && M.plotAt[i]) for (let k = 0; k < 4; k++) { const j = neighbour(x, y, k); if (j < 0 || M.plotAt[j] !== M.plotAt[i]) line(c[k], c[(k + 1) % 4], '#fff', 1.5); }
+      if (LAYERS.ruins && M.ruin[i]) for (let k = 0; k < 3; k++) if (hsh(x, y, 20 + k) < 0.7) {   // broken stones
+        const m = P(x + 0.2 + hsh(x, y, 30 + k) * 0.6, y + 0.2 + hsh(x, y, 40 + k) * 0.6, z), s2 = A * 0.14;
+        quad([[m[0] - s2, m[1] - s2 * 1.2], [m[0] + s2, m[1] - s2 * 1.2], [m[0] + s2, m[1]], [m[0] - s2, m[1]]], k ? '#9a9a9a' : '#d0d0d0', '#000');
+      }
+      if (LAYERS.crystals && M.seamAt[i]) {                       // a crystal bed, filling its tile as it grows through the four stages
+        const q = M.seams[M.seamAt[i] - 1], cyc = M.econ.growMs, age = ((t - q.t0) % cyc + cyc) % cyc, k = age / cyc, ripe = k >= 0.75;
+        if (ripe) { const m = P(x + 0.5, y + 0.5, z); ctx.globalAlpha = 0.28 + 0.18 * Math.sin(t / 180); ctx.fillStyle = '#CCFF00';
+          ctx.beginPath(); ctx.ellipse(m[0], m[1], A * 0.95, B * 0.95, 0, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1; }
+        const tw = 2 * A;                                          // a tile's width in the picture: shard sizes are shares of it
+        G.crystalBed(x, y, M.seamDepth && M.seamDepth[i]).map(c => ({ c, d: depth(x + c.dx, y + c.dy) })).sort((a2, b2) => a2.d - b2.d).forEach(({ c }) => {
+          if (k < c.from) return;
+          const g2 = Math.min(1, (k - c.from) / 0.35);              // it breaks ground as a nub, then climbs
+          const w2 = c.w * tw * Math.min(1, g2 * 1.7), tall = c.h * tw * g2;
+          const m = P(x + c.dx, y + c.dy, z);
+          shardAt(m[0], m[1], w2, tall, c.lean * tw, q.wild ? '#6f8c00' : ripe ? '#CCFF00' : '#9fc400', lw);
+        });
+      }
+      if (LAYERS.forest && M.forest[i] && !w) {                   // the SDK's trees, one to three a tile
+        const size = A * 2.4, img = sprite('sprites/tree.svg', size * cam.z * DPR());
+        const ks = [...Array(M.trees[i] || 1).keys()].map(k => [x + 0.25 + hsh(x, y, 60 + k) * 0.5, y + 0.25 + hsh(x, y, 70 + k) * 0.5])
+          .sort((a, b) => depth(a[0], a[1]) - depth(b[0], b[1]));   // the tree behind is drawn first, at every angle
+        if (img) ks.forEach(([tx, ty]) => { const m = P(tx, ty, z); ctx.drawImage(img, m[0] - size / 2, m[1] - size * 0.75, size, size); });
+      }
+    }
+  }
+
+  // ---------- the camera ----------
+  function resize() {
+    const r = cv.getBoundingClientRect(), k = DPR();
+    cv.width = Math.max(1, Math.round(r.width * k)); cv.height = Math.max(1, Math.round(r.height * k)); dirty = true;
+  }
+  function islandBox() {                                        // the island's extent in the picture at this angle
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (let i = 0; i < M.W * M.H; i += 3) { if (M.water[i] === WT.SEA) continue; const p = P(i % M.W + 0.5, ((i / M.W) | 0) + 0.5, zOf(i));
+      if (p[0] < x0) x0 = p[0]; if (p[0] > x1) x1 = p[0]; if (p[1] < y0) y0 = p[1]; if (p[1] > y1) y1 = p[1]; }
+    return { x0: x0 - A * 2, y0: y0 - 14, x1: x1 + A * 2, y1: y1 + 10 };
+  }
+  function fit() {
+    if (!M) return;
+    const b = islandBox(), k = Math.min(cv.width / (b.x1 - b.x0), cv.height / (b.y1 - b.y0)) * 0.94;
+    cam.z = k; cam.x = cv.width / 2 - (b.x0 + b.x1) / 2 * k; cam.y = cv.height / 2 - (b.y0 + b.y1) / 2 * k; dirty = true;
+  }
+  function focus(x, y, z) {
+    const i = Math.floor(y) * M.W + Math.floor(x), p = P(x, y, zOf(i));
+    cam.z = z; cam.x = cv.width / 2 - p[0] * z; cam.y = cv.height / 2 - p[1] * z; dirty = true;
+  }
+  const GAME_Z = 52 * 0.8660254 * 1.5 / A;                    // the estate's tile size
+  const DETAIL_Z = 2.2;                                        // past this, the tile view
+  const clampZ = (z) => Math.max(0.12, Math.min(GAME_Z * 4, z));   // four times the estate's tile size at most
+  function zoomAt(f, sx, sy) {
+    const nz = clampZ(cam.z * f), px = (sx - cam.x) / cam.z, py = (sy - cam.y) / cam.z;
+    cam.z = nz; cam.x = sx - px * nz; cam.y = sy - py * nz; dirty = true;
+  }
+  // turning: about whatever is in the middle of the screen, so it stays there
+  function turnTo(v) {
+    if (!M) return;
+    const i0 = tileAt(cv.width / 2, cv.height / 2);
+    const [wx, wy] = i0 >= 0 ? [i0 % M.W + 0.5, ((i0 / M.W) | 0) + 0.5] : unS(cv.width / 2, cv.height / 2, 0);
+    const z0 = i0 >= 0 ? zOf(i0) : 0;
+    setYaw(v);
+    const p = P(wx, wy, z0); cam.x = cv.width / 2 - p[0] * cam.z; cam.y = cv.height / 2 - p[1] * cam.z;
+    const deg = Math.round(((-yaw * 180 / Math.PI) % 360 + 360) % 360);
+    $('turnLabel').textContent = 'NORTH ' + deg + '°';
+  }
+  let spinTo = null;                                           // a gentle turn to a set angle (buttons, keys, the compass)
+  const turnBy = (deg) => { spinTo = (spinTo === null ? yaw : spinTo) + deg * Math.PI / 180; };
+
+  // pointer: one finger or the left button does what the MOVE / TURN switch says; right-drag or Shift does
+  // the other; the wheel zooms; two fingers pinch to zoom, twist to turn and move together to pan
+  let mode = 'turn';
+  const pts = new Map(); let pinch = null, dragFrom = null;
+  const local = (e) => { const r = cv.getBoundingClientRect(), k = DPR(); return [(e.clientX - r.left) * k, (e.clientY - r.top) * k]; };
+  cv.addEventListener('contextmenu', (e) => e.preventDefault());
+  cv.addEventListener('pointerdown', (e) => {
+    cv.setPointerCapture(e.pointerId); pts.set(e.pointerId, local(e)); cv.classList.add('drag');
+    const other = e.button === 2 || e.shiftKey;
+    if (pts.size === 1) dragFrom = { p: local(e), x: cam.x, y: cam.y, yaw, act: other ? (mode === 'turn' ? 'move' : 'turn') : mode };
+    if (pts.size === 2) { const [a, b] = [...pts.values()]; pinch = { d: Math.hypot(a[0] - b[0], a[1] - b[1]), z: cam.z, mid: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2],
+      x: cam.x, y: cam.y, ang: Math.atan2(b[1] - a[1], b[0] - a[0]), yaw }; dragFrom = null; }
+  });
+  cv.addEventListener('pointermove', (e) => {
+    const p = local(e);
+    if (pts.has(e.pointerId)) pts.set(e.pointerId, p);
+    if (pinch && pts.size >= 2) {
+      const [a, b] = [...pts.values()], d = Math.hypot(a[0] - b[0], a[1] - b[1]), mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+      const nz = clampZ(pinch.z * d / Math.max(1, pinch.d)), px = (pinch.mid[0] - pinch.x) / pinch.z, py = (pinch.mid[1] - pinch.y) / pinch.z;
+      cam.z = nz; cam.x = mid[0] - px * nz; cam.y = mid[1] - py * nz;
+      const da = Math.atan2(b[1] - a[1], b[0] - a[0]) - pinch.ang;
+      if (Math.abs(da) > 0.02) { spinTo = null; turnTo(pinch.yaw - da); pinch.x = cam.x - (mid[0] - pinch.mid[0]); pinch.y = cam.y - (mid[1] - pinch.mid[1]); pinch.z = cam.z; pinch.d = d; pinch.ang = Math.atan2(b[1] - a[1], b[0] - a[0]); pinch.yaw = yaw; pinch.mid = mid; }
+      dirty = true;
+    } else if (dragFrom && pts.size === 1) {
+      if (dragFrom.act === 'turn') { spinTo = null; turnTo(dragFrom.yaw - (p[0] - dragFrom.p[0]) / (200 * DPR())); }   // like the estate: drag across to turn
+      else { cam.x = dragFrom.x + p[0] - dragFrom.p[0]; cam.y = dragFrom.y + p[1] - dragFrom.p[1]; dirty = true; }
+    } else hover(p);
+  });
+  const up = (e) => { pts.delete(e.pointerId); if (pts.size < 2) pinch = null;
+    if (!pts.size) { dragFrom = null; cv.classList.remove('drag'); }
+    else if (pts.size === 1) { const p = [...pts.values()][0]; dragFrom = { p, x: cam.x, y: cam.y, yaw, act: mode }; } };
+  cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
+  cv.addEventListener('wheel', (e) => { e.preventDefault(); const [sx, sy] = local(e); zoomAt(Math.exp(-e.deltaY * 0.0015), sx, sy); }, { passive: false });
+  $('zin').onclick = () => zoomAt(1.4, cv.width / 2, cv.height / 2);
+  $('zout').onclick = () => zoomAt(1 / 1.4, cv.width / 2, cv.height / 2);
+  $('zfit').onclick = fit;
+  $('rl').onclick = () => turnBy(-45); $('rr').onclick = () => turnBy(45);
+  $('north').onclick = () => { spinTo = Math.round(yaw / (2 * Math.PI)) * 2 * Math.PI; };
+  document.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => { mode = b.dataset.mode;
+    document.querySelectorAll('[data-mode]').forEach(x => x.setAttribute('aria-pressed', String(x.dataset.mode === mode))); });
+  window.addEventListener('keydown', (e) => { if (e.target.tagName === 'INPUT') return;
+    if (e.key === 'q' || e.key === 'Q' || e.key === '[') turnBy(-15); if (e.key === 'e' || e.key === 'E' || e.key === ']') turnBy(15); });
+
+  // ---------- what is under the pointer: the front-most tile whose top is drawn there ----------
+  let hot = -1;
+  function tileAt(sx, sy) {
+    if (!M) return -1;
+    let best = -1, bestD = -Infinity;
+    for (const z of [5 * LH, 4 * LH, 3 * LH, 2 * LH, LH, 0, LAKE_Z, SEA_Z]) {
+      const [wx, wy] = unS(sx, sy, z), x = Math.floor(wx), y = Math.floor(wy);
+      if (x < 0 || y < 0 || x >= M.W || y >= M.H) continue;
+      const i = y * M.W + x; if (zOf(i) !== z) continue;
+      const d = depth(x + 0.5, y + 0.5); if (d > bestD) { bestD = d; best = i; }
+    }
+    return best;
+  }
+  function hover(p) {
+    hot = tileAt(p[0], p[1]);
+    if (hot < 0) { $('hud').textContent = 'Point at the island for details.'; return; }
+    const x = hot % M.W, y = (hot / M.W) | 0, w = M.water[hot];
+    const what = w === WT.SEA ? 'sea' : w === WT.LAKE ? 'lake' : w === WT.RIVER ? 'river' : w === WT.CREEK ? 'creek' : G.LEVELS[M.level[hot]];
+    const bits = ['<b>' + x + ', ' + y + '</b>', what + (w ? '' : ' · level ' + M.level[hot])];
+    if (M.forest[hot]) bits.push((M.trees[hot] || 1) + ' tree' + ((M.trees[hot] || 1) > 1 ? 's' : ''));
+    if (M.seamAt[hot]) bits.push('<span class="g">' + (M.seams[M.seamAt[hot] - 1].wild ? 'wild crystal seam' : 'crystal seam') + '</span>');
+    if (M.plotAt[hot]) { const pl = M.plots[M.plotAt[hot] - 1]; bits.push('<span class="g">base ' + pl.id + '</span>' + (pl.creek ? ' · a creek runs through it' : '')); }
+    if (M.ruin[hot]) { const r = M.ruins.find(r => Math.hypot(r.x - x, r.y - y) <= r.r + 0.5); bits.push('<span class="g">ruin ' + (r ? r.id : '') + '</span>' + (r ? ' · ' + r.terminals.length + ' terminal' + (r.terminals.length > 1 ? 's' : '') : '')); }
+    if (!w) { const n = [0, 1, 2, 3].filter(k => { const j = neighbour(x, y, k); return j >= 0 && !M.water[j] && Math.abs(M.level[j] - M.level[hot]) >= 2; }).length;
+      if (n) bits.push('cliff on ' + n + ' side' + (n > 1 ? 's' : '')); }
+    $('hud').innerHTML = bits.join(' · ');
+  }
+
+  // ---------- the mini map: the island from above, north up; a box for what the view shows ----------
+  const mm = $('mm'), mctx = mm.getContext('2d');
+  let mini = null;
+  function buildMini() {
+    if (!M) return;
+    const box = $('mini').getBoundingClientRect(), k = DPR();
+    mm.width = Math.round(box.width * k); mm.height = mm.width;
+    $('view').style.setProperty('--mmh', Math.round(mm.height / k) + 'px');
+    const t = document.createElement('canvas'); t.width = M.W; t.height = M.H;
+    const tc = t.getContext('2d'), im = tc.createImageData(M.W, M.H), b32 = new Uint32Array(im.data.buffer);
+    for (let i = 0; i < M.W * M.H; i++) { const w = M.water[i];
+      b32[i] = w === WT.SEA ? COL.sea : w === WT.LAKE ? COL.lake : (w === WT.RIVER || w === WT.CREEK) ? pack('#d8d8d8') : M.plotAt[i] ? pack('#bfc4bf') : M.forest[i] ? pack('#6e746e') : COL.top[M.level[i]]; }
+    tc.putImageData(im, 0, 0);
+    mini = document.createElement('canvas'); mini.width = mm.width; mini.height = mm.height;
+    const m = mini.getContext('2d'); m.imageSmoothingEnabled = false; m.drawImage(t, 0, 0, mm.width, mm.height);
+  }
+  function drawMini() {
+    if (!mini) return;
+    mctx.setTransform(1, 0, 0, 1, 0, 0); mctx.drawImage(mini, 0, 0);
+    const k = mm.width / M.W;
+    const corners = [[0, 0], [cv.width, 0], [cv.width, cv.height], [0, cv.height]].map(([sx, sy]) => unS(sx, sy, 0));   // the view, on the ground
+    const inside = corners.some(([x, y]) => x > 0 && y > 0 && x < M.W && y < M.H);   // the whole island in view: no box needed
+    if (inside) { mctx.strokeStyle = '#CCFF00'; mctx.lineWidth = Math.max(1.5, DPR());
+      mctx.beginPath(); corners.forEach(([x, y], n) => n ? mctx.lineTo(x * k, y * k) : mctx.moveTo(x * k, y * k)); mctx.closePath(); mctx.stroke(); }
+    // which way the camera looks: an arrow from the middle of the view toward the top of the screen
+    const [cx, cy] = unS(cv.width / 2, cv.height / 2, 0), [tx, ty] = unS(cv.width / 2, cv.height / 2 - 60 * DPR(), 0);
+    const L = Math.hypot(tx - cx, ty - cy) || 1, ux = (tx - cx) / L, uy = (ty - cy) / L;
+    mctx.fillStyle = '#CCFF00'; mctx.beginPath();
+    mctx.moveTo(cx * k + ux * 9 * DPR(), cy * k + uy * 9 * DPR()); mctx.lineTo(cx * k - uy * 4 * DPR(), cy * k + ux * 4 * DPR()); mctx.lineTo(cx * k + uy * 4 * DPR(), cy * k - ux * 4 * DPR()); mctx.fill();
+    mctx.fillStyle = '#fff'; mctx.font = (8 * DPR()) + 'px Silkscreen, monospace'; mctx.fillText('N', mm.width / 2 - 3 * DPR(), 9 * DPR());
+  }
+  function miniJump(e) {
+    const box = mm.getBoundingClientRect(), x = (e.clientX - box.left) / box.width * M.W, y = (e.clientY - box.top) / box.height * M.H;
+    const i = Math.max(0, Math.min(M.W * M.H - 1, Math.floor(y) * M.W + Math.floor(x))), p = P(x, y, zOf(i));
+    cam.x = cv.width / 2 - p[0] * cam.z; cam.y = cv.height / 2 - p[1] * cam.z; dirty = true;
+  }
+  let miniDrag = false;
+  $('mini').addEventListener('pointerdown', (e) => { miniDrag = true; $('mini').setPointerCapture(e.pointerId); miniJump(e); e.stopPropagation(); });
+  $('mini').addEventListener('pointermove', (e) => { if (miniDrag) miniJump(e); });
+  $('mini').addEventListener('pointerup', () => { miniDrag = false; });
+  $('mini').addEventListener('pointercancel', () => { miniDrag = false; });
+
+  // ---------- every frame ----------
+  // the terminal, rendered at exactly the size it is drawn (no stretching), and its green ghost at that size
+  sprite('sprites/terminal.svg', 8);
+  const ghostCache = new Map();
+  function ghostOf(face) {
+    if (ghostCache.has(face)) return ghostCache.get(face);
+    const c = document.createElement('canvas'); c.width = face.width; c.height = face.height;
+    const g = c.getContext('2d'); g.drawImage(face, 0, 0); g.globalCompositeOperation = 'source-in'; g.fillStyle = '#CCFF00'; g.fillRect(0, 0, c.width, c.height);
+    ghostCache.set(face, c); return c;
+  }
+  const TERM = A * 2.2;                                         // as tall as a tree or a crystal
+  const glitch = new Map();
+  let lastCam = '';
+  const perf = { raster: 0, tiles: 0 };
+  function frame(t) {
+    requestAnimationFrame(frame);
+    if (!M) return;
+    if (spinTo !== null) { const d = spinTo - yaw, dd = Math.atan2(Math.sin(d), Math.cos(d)); if (Math.abs(dd) < 0.004) { turnTo(spinTo); spinTo = null; } else turnTo(yaw + dd * 0.18); }
+    const key = cam.x.toFixed(1) + cam.y.toFixed(1) + cam.z.toFixed(4) + yaw.toFixed(5) + cv.width + cv.height;
+    if (key !== lastCam) { dirty = true; lastCam = key; }
+    const detail = cam.z >= DETAIL_Z;
+    $('lod').hidden = !detail;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    if (detail) { ctx.fillStyle = '#0b0d0b'; ctx.fillRect(0, 0, cv.width, cv.height); const t0 = performance.now(); drawTiles(t); perf.tiles = performance.now() - t0; }
+    else { if (dirty) { const t0 = performance.now(); raster(); perf.raster = performance.now() - t0; } ctx.drawImage(rast, 0, 0); }
+    ctx.setTransform(cam.z, 0, 0, cam.z, cam.x, cam.y);
+    if (LAYERS.core) {                                          // the core, proposed: nobody's land (a circle stays a circle as it turns)
+      const c = M.core, m = P(c.x + 0.5, c.y + 0.5, M.level[c.y * M.W + c.x] * LH);
+      ctx.save(); ctx.setLineDash([4, 4]); ctx.strokeStyle = 'rgba(255,255,255,.8)'; ctx.lineWidth = 1.2 / cam.z;
+      ctx.beginPath(); ctx.ellipse(m[0], m[1], c.r * Math.SQRT2 * A, c.r * Math.SQRT2 * B, 0, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
+      ctx.font = (9 / cam.z) + 'px Silkscreen, monospace'; ctx.textAlign = 'center'; ctx.fillStyle = '#fff';
+      ctx.fillText('THE CORE · PROPOSED', m[0], m[1] - c.r * Math.SQRT2 * B - 4 / cam.z); ctx.textAlign = 'left';
+    }
+    if (LAYERS.plots && cam.z > 1.1) {                          // base numbers once there is room to read them
+      ctx.font = (8 / cam.z) + 'px Silkscreen, monospace'; ctx.textAlign = 'center';
+      M.plots.forEach(pl => { const i = Math.floor(pl.cy) * M.W + Math.floor(pl.cx), m = P(pl.cx, pl.cy, zOf(i));
+        ctx.fillStyle = 'rgba(0,0,0,.7)'; ctx.fillRect(m[0] - 9 / cam.z, m[1] - 14 / cam.z, 18 / cam.z, 10 / cam.z); ctx.fillStyle = '#fff'; ctx.fillText(String(pl.id), m[0], m[1] - 6 / cam.z); });
+      ctx.textAlign = 'left';
+    }
+    if (LAYERS.ruins) {                                         // the terminals, glitching hard (in whole pixels, crisp)
+      const CALM = matchMedia('(prefers-reduced-motion: reduce)').matches;
+      M.ruins.forEach(r => r.terminals.forEach((tm, k) => {
+        const gk = r.id + ':' + k; let g = glitch.get(gk);
+        if (!g) { g = { next: t + Math.random() * 800, until: 0 }; glitch.set(gk, g); }
+        if (!CALM && t > g.next) { g.until = t + 120 + Math.random() * 260; g.next = t + 300 + Math.random() * 900; }
+        const on = !CALM && t < g.until, m = P(tm.x + 0.5, tm.y + 0.5, zOf(tm.y * M.W + tm.x));
+        const face = sprite('sprites/terminal.svg', TERM * cam.z * DPR()); if (!face) return;
+        // draw in screen pixels, 1:1 with the rendered image, so it stays sharp
+        const px = face.width, sx = Math.round(cam.x + m[0] * cam.z - px / 2), sy = Math.round(cam.y + m[1] * cam.z - px * 0.75);
+        ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.imageSmoothingEnabled = false;
+        if (!on) { ctx.drawImage(face, sx, sy); ctx.restore(); return; }
+        const step = Math.max(1, Math.round(px / 24));             // one of the art's own pixels, on screen
+        ctx.drawImage(ghostOf(face), sx + (Math.random() < 0.5 ? -2 : 2) * step, sy);   // the green ghost, split off
+        const bands = 5, bh = Math.ceil(px / bands);
+        for (let b = 0; b < bands; b++) { const dx = Math.random() < 0.55 ? Math.round((Math.random() - 0.5) * 6) * step : 0;   // slices knocked sideways
+          ctx.drawImage(face, 0, b * bh, px, Math.min(bh, px - b * bh), sx + dx, sy + b * bh, px, Math.min(bh, px - b * bh)); }
+        ctx.restore();
+      }));
+    }
+    if (hot >= 0) {                                             // the tile under the pointer
+      const x = hot % M.W, y = (hot / M.W) | 0, z = zOf(hot), q = [P(x, y, z), P(x + 1, y, z), P(x + 1, y + 1, z), P(x, y + 1, z)];
+      ctx.strokeStyle = '#CCFF00'; ctx.lineWidth = 1.5 / cam.z; ctx.beginPath(); q.forEach((a, k) => k ? ctx.lineTo(a[0], a[1]) : ctx.moveTo(a[0], a[1])); ctx.closePath(); ctx.stroke();
+    }
+    drawMini();
+  }
+
+  // ---------- make an island ----------
+  function stats() {
+    const s = M.stats, row = (k, v, g) => '<span class="k">' + k + '</span><span class="v' + (g ? ' g' : '') + '">' + v + '</span>';
+    const pct = (v) => Math.round(v * 100) + '%';
+    $('stats').innerHTML =
+      row('Seed', M.seed) + row('Players', M.players) + row('Map', s.side + ' × ' + s.side + ' tiles') +
+      row('Land', s.land.toLocaleString('en-US') + ' tiles') + row('Land per player', Math.round(s.landPerPlayer) + ' tiles') +
+      row('Bases placed', s.plots + ' of ' + M.players, s.plots === M.players) +
+      row('Bases with a creek', s.plotsWithCreek + ' of ' + s.plots, s.plotsWithCreek === s.plots) +
+      row('Forest', pct(s.forest)) + row('Hills and above', pct(s.hills)) +
+      row('Rivers', M.rivers.length) + row('Creeks', M.creeks.length) + row('Lakes', s.lakes ? s.lakes + ' tiles' : 'none') +
+      row('Ruins', s.ruins + ' · ' + s.terminals + ' terminals') +
+      '<span class="k" style="grid-column:1/-1;margin-top:6px;font-family:var(--display);font-size:13px;letter-spacing:.1em">RESOURCES · PER BASE FROM ' + econFrom.toUpperCase() + '</span>' +
+      row('Per base', M.econ.homeSeams + ' seams + ' + M.econ.wildSeams + ' wild · ' + M.econ.groves + ' groves × ' + M.econ.treesPerGrove) +
+      row('Crystal seams', s.homeSeams + ' at bases + ' + s.wildSeams + ' wild', s.homeSeams === M.players * M.econ.homeSeams && s.wildSeams === M.players * M.econ.wildSeams) +
+      row('Crystals at most', Math.round(s.crystalsPerHour).toLocaleString('en-US') + ' / hour (home seams, by hand)') +
+      row('Trees', s.trees.toLocaleString('en-US') + ' (' + s.groveTrees.toLocaleString('en-US') + ' in base groves)', s.groveTrees === M.players * M.econ.groves * M.econ.treesPerGrove) +
+      row('Wood standing', s.wood.toLocaleString('en-US') + ' · regrows in ' + (M.econ.regrowMs / 1000) + ' s') +
+      row('Stairs cut', s.stairs) + row('Unreachable high ground', s.stranded ? s.stranded + ' tiles' : 'none', !s.stranded) +
+      row('Made in', Math.round(s.ms) + ' ms');
+  }
+  function make(seed, players) {
+    $('busy').hidden = false;
+    setTimeout(() => {
+      M = G.generate({ seed, players, econ: ECON || undefined }); C0 = M.W / 2;
+      setYaw(yaw); resize(); fit(); stats(); buildMini(); turnTo(yaw);
+      $('seed').value = M.seed; $('players').value = M.players;
+      history.replaceState(null, '', '?seed=' + M.seed + '&players=' + M.players);
+      $('busy').hidden = true;
+      window.mapgen = { get ECON() { return ECON; }, econFrom: () => econFrom, get M() { return M; }, get yaw() { return yaw; }, turnTo, turnBy,
+        get spinning() { return spinTo !== null; }, get mode() { return mode; }, cam, fit, zoomAt, tileAt, focus, GAME_Z, DETAIL_Z, perf, raster,
+        get detail() { return cam.z >= DETAIL_Z; },
+        falls: () => { let n = 0; for (let i = 0; i < M.W * M.H; i++) { const x = i % M.W, y = (i / M.W) | 0; for (let k = 0; k < 4; k++) { const j = neighbour(x, y, k); if (j >= 0 && pours(i, j, zOf(i), zOf(j))) n++; } } return n; } };
+    }, 30);
+  }
+  // what an estate starts with, read from the game (base.ECON); if the game can't be read, the generator's defaults (the same numbers)
+  let ECON = null, econFrom = 'the generator\'s defaults';
+  function readEcon() {
+    try { const E = $('econProbe').contentWindow.base.ECON;
+      if (E) { ECON = { homeSeams: E.seams.filter(q => !q.wild).length, wildSeams: E.seams.filter(q => q.wild).length, groves: E.groves,
+        treesPerGrove: E.treesPerGrove, treeWood: E.treeWood, growMs: E.growMs, regrowMs: E.regrowMs }; econFrom = 'the game (base.ECON)'; } } catch (e) { /* opened from a file */ }
+    return !!ECON;
+  }
+  const newSeed = () => { const a = new Uint32Array(1); crypto.getRandomValues(a); return a[0] % 1000000000; };
+  $('gen').onclick = () => make(newSeed(), +$('players').value || 100);
+  $('useSeed').onclick = () => make(+$('seed').value >>> 0, +$('players').value || 100);
+  $('usePlayers').onclick = () => make(M ? M.seed : newSeed(), Math.max(2, Math.min(200, +$('players').value || 100)));
+  $('seed').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('useSeed').click(); });
+  $('layers').innerHTML = Object.keys(LAYERS).map(k => '<button type="button" data-l="' + k + '" aria-pressed="' + LAYERS[k] + '">' + LNAMES[k] + '</button>').join('');
+  $('layers').querySelectorAll('[data-l]').forEach(b => b.onclick = () => { LAYERS[b.dataset.l] = !LAYERS[b.dataset.l]; b.setAttribute('aria-pressed', LAYERS[b.dataset.l]); dirty = true; });
+  const sw = (c, t) => '<div><i style="background:' + c + '"></i>' + t + '</div>';
+  $('legend').innerHTML = sw(TOP[1], 'lowland and valleys') + sw(TOP[2], 'plain') + sw(TOP[3], 'hill') + sw(TOP[4], 'high ground') + sw(TOP[5], 'peak') +
+    sw(TOP[0], 'shore') + '<div><i style="background:#141614;border-color:#fff"></i>river and creek: dark water, white current</div>' + sw('#1c201c', 'lake') + sw('#0b0d0b', 'sea') +
+    '<div><i style="background:none;border:1px solid #fff"></i>a base (36 tiles, like your own)</div>' +
+    '<div><i style="background:#9fc400"></i>crystal bed at a base (darker: wild, in the frontier)</div>' +
+    '<div><i style="background:#1b1b1b"></i>ruins: glitching terminals</div>' + '<div><i style="background:none;border:1px solid #CCFF00"></i>CLIFFS: a rise Friends can\'t climb</div>';
+  window.addEventListener('resize', () => { resize(); if (M) { fit(); buildMini(); } });
+  const q = new URLSearchParams(location.search);
+  setYaw(0); resize();
+  const first = () => make(q.get('seed') ? +q.get('seed') >>> 0 : newSeed(), q.get('players') ? +q.get('players') : 100);
+  let waited = 0;
+  (function waitEcon() { if (readEcon() || waited > 40) { $('econProbe').remove(); first(); return; } waited++; setTimeout(waitEcon, 100); })();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

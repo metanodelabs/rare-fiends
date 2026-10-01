@@ -1,0 +1,19 @@
+{
+  "what": "What actually happened in every game that has been played, so the cost model on costs.html runs on counts instead of typed-in estimates. M18 item 10.",
+  "rule": "No number is put in this file by hand. Every figure here is a count written by the game, and a count of something that happened. An empty list is not a zero: while `games` is empty, costs.html keeps its ESTIMATE tags and shows the counters as NOT COUNTED. It switches to MEASURED the moment this file holds a game.",
+  "shape": {
+    "game": "the game's number, 1 upward",
+    "players": "how many paid to enter",
+    "days": "how long it ran, after joining closed",
+    "fights": "attacks started, counted over the whole game - not per player",
+    "challenges": "one-on-one matches settled, counted over the whole game",
+    "randomNumbers": "Entropy requests the game paid for",
+    "writes": "transactions the game sent on players' behalf, counted - not worked out from the two above",
+    "endedAt": "ISO 8601, when the game ended"
+  },
+  "owed": {
+    "the fight counter": "M13, where fighting is built",
+    "the write counter": "M6, where writing to the chain is built"
+  },
+  "games": []
+}

@@ -1,0 +1,555 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Rare Fiends — the bridge</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Silkscreen:wght@400;700&family=Sometype+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --ink: #FFFFFF; --paper: #000000; --signal: #CCFF00;
+  --dim: rgba(255,255,255,.62); --faint: rgba(255,255,255,.28);
+  --display: Silkscreen, monospace; --mono: "Sometype Mono", ui-monospace, monospace;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; background: #090B09; color: var(--ink); }
+body { font-family: var(--mono); font-size: 21px; line-height: 1.55; height: 100vh; height: 100dvh; display: flex; flex-direction: column; }
+a { color: var(--signal); }
+header { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid rgba(204,255,0,.4); background: #000; flex-wrap: wrap; }
+.brand { display: flex; align-items: center; gap: 9px; font-family: var(--display); font-size: 19px; letter-spacing: .12em; }
+.brand i { width: 8px; height: 8px; background: var(--signal); border-radius: 50%; }
+.brand span { color: var(--dim); }
+.localfork { font-family: var(--mono, monospace); font-size: 10px; letter-spacing: .1em; padding: 2px 6px; border: 1px solid var(--signal); color: var(--signal); border-radius: 3px; flex: none; }
+.localfork[hidden] { display: none; }
+header nav { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; }
+header nav a { font-family: var(--display); font-size: 14px; letter-spacing: .1em; color: #fff; text-decoration: none; border: 1px solid var(--faint); padding: 5px 7px; }
+header nav a:hover { border-color: var(--signal); color: var(--signal); }
+main { flex: 1; width: 100%; max-width: 900px; margin: 0 auto; padding: 18px 16px 24px; display: flex; flex-direction: column; min-height: 0; }
+
+/* the shelf: what Doopies are for sale right now, drifting past so you can see what a wallet holds.
+   The cards carry the same readings a marketplace card does — art, name, price, what that is in dollars —
+   drawn our way. Everything in them is read live; nothing here is typed in. */
+.shelf { border: 1px solid var(--faint); background: #000; }
+.shelfhead { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; padding: 7px 10px; border-bottom: 1px solid var(--faint); }
+.shelfhead .k { font-family: var(--display); font-size: 14px; letter-spacing: .12em; color: var(--signal); }
+.shelfhead .v { font-family: var(--mono); font-size: 19px; color: var(--dim); }
+.marquee { overflow: hidden; position: relative; }
+.marquee::before, .marquee::after { content: ""; position: absolute; top: 0; bottom: 0; width: 42px; z-index: 2; pointer-events: none; }
+.marquee::before { left: 0; background: linear-gradient(90deg, #000, transparent); }
+.marquee::after { right: 0; background: linear-gradient(270deg, #000, transparent); }
+.lane { display: flex; gap: 10px; width: max-content; padding: 10px; animation: drift 110s linear infinite; }
+.marquee:hover .lane, .marquee:focus-within .lane { animation-play-state: paused; }
+@keyframes drift { from { transform: translateX(0); } to { transform: translateX(calc(-50% - 5px)); } }
+@media (prefers-reduced-motion: reduce) { .lane { animation: none; } .marquee { overflow-x: auto; } }
+.dcard { flex: 0 0 auto; width: clamp(62px, calc(100dvh - 620px), 132px); border: 1px solid var(--faint); background: #000; }
+.dcard .art { aspect-ratio: 1; background: #0e0e0e; display: block; }
+.dcard .art img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.dcard .nm { font-family: var(--display); font-size: 14px; letter-spacing: .06em; padding: 7px 8px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dcard .ln { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; padding: 3px 8px; }
+.dcard .ln .k { font-family: var(--display); font-size: 12px; letter-spacing: .1em; color: var(--faint); }
+.dcard .sol { font-family: var(--mono); font-size: 21px; color: var(--signal); }
+.dcard .usd { font-family: var(--mono); font-size: 18px; color: var(--dim); }
+.dcard .tr { font-family: var(--mono); font-size: 16px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* the rarest thing in the collection, and until now the one thing the badge got wrong */
+.dcard .tr.one, .traits span.one { color: var(--signal); border-color: var(--signal); }
+.dcard .ln:last-child { padding-bottom: 8px; }
+
+/* the walk: one step at a time, the next rolling in from the right */
+.rail { display: flex; gap: 6px; margin: 0 0 14px; }
+.rail i { flex: 1; height: 3px; background: rgba(255,255,255,.14); }
+.rail i.done { background: rgba(204,255,0,.45); }
+.rail i.now { background: var(--signal); }
+.stage { position: relative; overflow: hidden; flex: 1; min-height: 0; }
+.track { display: flex; height: 100%; transition: transform .45s cubic-bezier(.22,.7,.3,1); }
+.slide { flex: 0 0 100%; min-width: 100%; padding: 2px; display: flex; flex-direction: column; gap: 12px; overflow: auto; }
+.slide[aria-hidden="true"] { visibility: hidden; }
+/* the body of a step takes what is left between the heading and the buttons, and it is what gives way:
+   the buttons are never pushed below the screen. The shelf (step 1) and the art card (step 3) are then
+   sized off the screen's height so that at every size they fit whole and nothing scrolls. */
+.slide > [data-body] { flex: 1 1 auto; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 12px; }
+.slide > [data-body]:empty { display: none; }
+.step { font-family: var(--display); font-size: 14px; letter-spacing: .12em; color: var(--signal); }
+h2 { font-family: var(--display); font-weight: 400; font-size: clamp(24px, 3vw, 28px); letter-spacing: .04em; margin: 0; line-height: 1.35; }
+p { margin: 0; color: rgba(255,255,255,.78); max-width: 640px; }
+p.sub { font-size: 19px; color: var(--dim); }
+.acts { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: auto; padding-top: 10px; }
+.btn { font-family: var(--display); font-size: 16px; letter-spacing: .08em; background: none; color: #fff; border: 1px solid rgba(255,255,255,.5); padding: 10px 12px; cursor: pointer; }
+.btn:hover { border-color: #fff; }
+.btn.go { background: var(--signal); color: #000; border-color: var(--signal); }
+.btn.back { border: 0; color: var(--dim); padding-left: 0; }
+.btn[disabled] { opacity: .4; cursor: default; }
+input.txt { width: 100%; background: #000; color: #fff; border: 1px solid var(--faint); font: 20px var(--mono); padding: 10px 11px; }
+input.txt:focus { outline: none; border-color: var(--signal); }
+.say { font-family: var(--display); font-size: 14px; letter-spacing: .1em; color: var(--dim); min-height: 12px; padding-top: 8px; }
+.say.bad { color: #fff; }
+
+/* the Doopies */
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
+.pick { border: 1px solid var(--faint); background: none; color: inherit; padding: 6px; display: grid; gap: 6px; cursor: pointer; text-align: left; font: inherit; }
+.pick img { width: 100%; aspect-ratio: 1; display: block; background: #000; }
+.pick[aria-pressed="true"] { border-color: var(--signal); box-shadow: inset 0 0 0 1px var(--signal); }
+.pick .nm { font-family: var(--display); font-size: 13px; letter-spacing: .06em; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pair { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; width: min(100%, calc(2 * clamp(84px, calc(100dvh - 560px), 280px) + 6px)); }
+.pair img, .pair .model { width: 100%; aspect-ratio: 1; display: block; background: #000; border: 1px solid var(--faint); }
+.pair .model { background: #15171a; position: relative; cursor: grab; touch-action: none; overflow: hidden; }
+.pair .model:active { cursor: grabbing; }
+.pair .model canvas { width: 100% !important; height: 100% !important; display: block; }
+.pair .model .wait { position: absolute; inset: 0; display: grid; place-items: center; font-family: var(--display); font-size: 9px; letter-spacing: .1em; color: var(--dim); }
+.two { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+.card { border: 1px solid var(--faint); padding: 10px; display: grid; gap: 8px; }
+.traits { display: flex; flex-wrap: wrap; gap: 4px; }
+.traits span { font-family: var(--display); font-size: 12px; letter-spacing: .06em; border: 1px solid var(--faint); padding: 2px 4px; color: var(--dim); }
+.styles { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-family: var(--display); font-size: 13px; letter-spacing: .08em; color: var(--dim); }
+.styles button { font: inherit; background: none; color: #fff; border: 1px solid var(--faint); padding: 3px 6px; cursor: pointer; }
+.styles button[aria-pressed="true"] { background: var(--signal); color: #000; border-color: var(--signal); }
+.hexy { font-family: var(--mono); font-size: 18px; color: var(--dim); }
+.mono { font-family: var(--mono); font-size: 20px; color: var(--dim); overflow-wrap: anywhere; }
+.mono b { color: #fff; font-weight: 500; }
+.box { border: 1px solid var(--faint); padding: 10px 12px; display: grid; gap: 6px; }
+.box.warn { border-color: rgba(204,255,0,.55); }
+.fees { display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); gap: 8px; }
+.fee { border: 1px solid var(--faint); padding: 8px 10px; display: grid; gap: 2px; }
+.fee .k { font-family: var(--display); font-size: 13px; letter-spacing: .1em; color: var(--dim); }
+.fee .v { font-family: var(--display); font-size: 20px; }
+pre.msg { margin: 0; background: #000; border: 1px solid var(--faint); border-left: 3px solid var(--signal); padding: 9px 11px; font: 20px/1.6 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; color: #ddd; max-height: 180px; overflow: auto; }
+.tag { display: inline-block; font-family: var(--display); font-size: 13px; letter-spacing: .1em; padding: 2px 5px; }
+.tag.open { border: 1px dashed var(--faint); color: var(--dim); }
+/* a phone: the page is bounded to the screen (body height, not min-height), so each step has to fit in
+   what is left under the header - most of all step 6, whose fee, "You pay the mint gas." and buttons must
+   all be in view at 375x667. Last in the sheet so it wins over everything above. */
+@media (max-width: 600px) {
+  header { padding: 8px 16px; flex-wrap: nowrap; gap: 8px; }
+  .brand { font-size: 14px; gap: 7px; white-space: nowrap; min-width: 0; }
+  header nav a { font-size: 12px; padding: 4px 6px; }
+  main { padding: 10px 16px 8px; }
+  .rail { margin-bottom: 10px; }
+  .slide { gap: 8px; }
+  h2 { font-size: 20px; }
+  .step { font-size: 12px; }
+  .mono { font-size: 15px; line-height: 1.45; }
+  .box { padding: 8px 10px; }
+  .fees { grid-template-columns: 1fr 1fr; gap: 6px; }
+  .fee { padding: 5px 8px; gap: 0; }
+  .fee .k { font-size: 11px; letter-spacing: .06em; line-height: 1.35; }
+  .fee .v { font-size: 16px; }
+  .acts { padding-top: 6px; }
+  .say { padding-top: 4px; }
+}
+/* a short screen, phone or laptop: the shelf's cards and the art card's words tighten so step 1's address
+   field and step 3's card stay in view above the buttons. Last, so it wins. */
+@media (max-height: 760px), (max-width: 600px) {
+  .shelfhead { padding: 4px 8px; }
+  .shelfhead .k { font-size: 12px; } .shelfhead .v { font-size: 15px; }
+  .lane { padding: 6px; gap: 6px; }
+  .dcard .nm { font-size: 11px; padding: 4px 6px 0; }
+  .dcard .ln { padding: 1px 6px; }
+  .dcard .ln .k { font-size: 10px; } .dcard .sol { font-size: 15px; } .dcard .usd, .dcard .tr { font-size: 13px; }
+  .dcard .ln:last-child { padding-bottom: 4px; }
+  .box { padding: 6px 10px; gap: 4px; }
+  input.txt { font-size: 17px; padding: 6px 9px; }
+  .card { padding: 8px; gap: 5px; }
+  .styles { font-size: 11px; }
+  .hexy { font-size: 14px; }
+  .slide p.sub { font-size: 15px; line-height: 1.4; }
+  .slide > [data-body] { gap: 8px; }
+}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><i></i>RARE FIENDS<span>· THE BRIDGE</span><b class="localfork" id="localfork" hidden title="RPC is a local Anvil fork at 127.0.0.1:8599, not mainnet">LOCAL FORK</b></div>
+  <nav><a href="start.html">START</a></nav>
+</header>
+<main>
+  <div class="rail" id="rail"></div>
+  <div class="stage"><div class="track" id="track"></div></div>
+  <div class="say" id="say"></div>
+</main>
+<script src="vendor/three.min.js"></script>
+<script type="module">
+  import { buildVoxelMesh } from "./doopie-mesh.mjs";       // the converter's own mesh builder
+  import { pack } from "./doopie-pack.mjs";                  // and what the chain keeps of it
+  // the bytes that mark a one-of-one, from the one file that holds them - the same file the attestor reads,
+  // so the badge on a card and the trait inside a signature can never say two different things
+  import { badge, ONE_OF_ONE } from "./doopie-trait.mjs";
+  window.buildVoxelMesh = buildVoxelMesh; window.packSprite = pack;
+  window.doopieBadge = badge; window.DOOPIE_ONE_OF_ONE = ONE_OF_ONE;
+</script>
+<script src="chance.js"></script>
+<!-- No doopie.js here: the art is converted by the converter itself (doopies_converter/tools/doopie.mjs,
+     run by the local server behind api/convert), never in the page — the client cannot be trusted to
+     decide what a Doopie is. What the page does hold of it is the two modules imported above. -->
+<script src="chainlive.js"></script>
+<script>if (window.ChainLive && ChainLive.LOCAL) document.getElementById('localfork').hidden = false;</script>
+<script>
+(() => {
+  'use strict';
+  const $ = (id) => document.getElementById(id);
+  // Doopies on Solana (opensea.io/collection/doopies-solana). Another collection is another entry here.
+  const COLLECTION = { symbol: 'doopies', name: 'Doopies', updateAuthority: '7ifrcfFwVLBUKCo8smEK44npokR1xK8KHopRV98Moj8f' };
+  const CHAIN = { id: Chance.CHAIN_ID, hex: '0x' + Chance.CHAIN_ID.toString(16), name: 'Robinhood Chain', rpc: ChainLive.RPC[0],
+    coin: { name: 'Ether', symbol: 'ETH', decimals: 18 } };
+  const S = { sol: '', nfts: [], chosen: [], evm: '', signature: '', message: '', contract: null, gas: null, live: null };
+
+  // one card of work per step; the next rolls in from the right when the one before is done
+  const STEPS = [
+    { key: 'connect', title: 'Connect the Solana wallet holding your Doopies',
+      sub: 'Nothing is signed or spent here. The bridge only reads what the wallet holds.' },
+    { key: 'choose', title: 'Choose the Doopies to bring over' },
+    { key: 'confirm', title: 'Check the art before anything is minted',
+      sub: 'The last look. What you approve here is exactly what the shadow will carry.' },
+    { key: 'address', title: 'Where should the shadows live on Robinhood Chain?' },
+    { key: 'sign', title: 'Sign to confirm that address is yours',
+      sub: 'A message, not a transaction: it proves the Solana wallet and the Robinhood address belong together.' },
+    { key: 'mint', title: 'Mint the shadows' },
+  ];
+  let step = 0;
+
+  function frame() {
+    $('rail').innerHTML = STEPS.map((_, i) => '<i class="' + (i < step ? 'done' : i === step ? 'now' : '') + '"></i>').join('');
+    $('track').innerHTML = STEPS.map((s, i) =>
+      '<section class="slide" data-slide="' + i + '" aria-hidden="' + (i === step ? 'false' : 'true') + '">' +
+        '<div class="step">STEP ' + (i + 1) + ' OF ' + STEPS.length + '</div>' +
+        '<h2>' + s.title + '</h2>' + (s.sub ? '<p class="sub">' + s.sub + '</p>' : '') +
+        '<div data-body="' + i + '"></div><div class="acts" data-acts="' + i + '"></div></section>').join('');
+    STEPS.forEach((s, i) => body[s.key](document.querySelector('[data-body="' + i + '"]'), document.querySelector('[data-acts="' + i + '"]')));
+    $('track').style.transform = 'translateX(' + (-step * 100) + '%)';
+  }
+  const go = (n) => { step = Math.max(0, Math.min(STEPS.length - 1, n)); say(''); frame(); };
+  const say = (m, bad) => { $('say').textContent = m; $('say').classList.toggle('bad', !!bad); };
+  const back = (acts) => { const b = document.createElement('button'); b.className = 'btn back'; b.type = 'button'; b.textContent = '< BACK';
+    b.onclick = () => go(step - 1); acts.appendChild(b); };
+  const btn = (acts, label, fn, cls) => { const b = document.createElement('button'); b.className = 'btn ' + (cls || ''); b.type = 'button';
+    b.textContent = label; b.onclick = fn; acts.appendChild(b); return b; };
+  const short = (a) => a ? a.slice(0, 6) + '…' + a.slice(-4) : '';
+  const phantom = () => (window.phantom && window.phantom.solana) || (window.solana && window.solana.isPhantom ? window.solana : null);
+  const fee = (k, v, s) => '<div class="fee"><span class="k">' + k + '</span><span class="v">' + v + '</span><span class="k">' + (s || '') + '</span></div>';
+
+  const body = {
+    // 1 ---------------------------------------------------------------- the Solana wallet
+    connect(el, acts) {
+      el.innerHTML = '<div class="shelf" id="shelf" hidden><div class="shelfhead"><span class="k">ON SALE NOW</span>' +
+        '<span class="v" id="shelfstat">reading the market…</span></div>' +
+        '<div class="marquee"><div class="lane" id="lane"></div></div></div>' +
+        '<div class="box"><div class="mono">Collection: <b>' + COLLECTION.name + '</b> on Solana</div>' +
+        '<input class="txt" id="sol" spellcheck="false" placeholder="or paste your Solana address" value="' + (S.sol || '') + '"></div>';
+      btn(acts, 'CONNECT PHANTOM', async () => {
+        const p = phantom();
+        if (!p) { say('No Phantom in this browser — paste the address instead.', true); return; }
+        try { const r = await p.connect(); S.sol = r.publicKey.toString(); $('sol').value = S.sol; find(); }
+        catch (e) { say('Phantom said no.', true); }
+      }, 'go');
+      btn(acts, 'USE THIS ADDRESS', () => { S.sol = ($('sol').value || '').trim(); find(); });
+      shelf();
+    },
+    // 2 ---------------------------------------------------------------- which ones
+    choose(el, acts) {
+      if (!S.nfts.length) { el.innerHTML = '<p class="sub">Nothing read yet.</p>'; back(acts); return; }
+      el.innerHTML = '<p class="sub">' + S.nfts.length + ' in ' + short(S.sol) + '. Tap the ones to bring over.</p><div class="grid">' +
+        S.nfts.map((n, i) => '<button class="pick" type="button" data-n="' + i + '" aria-pressed="' + S.chosen.includes(i) + '">' +
+          '<img alt="" data-img="' + i + '" src="' + artSrc(n.image) + '"><span class="nm">' + (n.name || 'Doopie') + '</span></button>').join('') + '</div>';
+      el.querySelectorAll('[data-n]').forEach(b => b.onclick = () => {
+        const i = +b.dataset.n;
+        S.chosen = S.chosen.includes(i) ? S.chosen.filter(k => k !== i) : S.chosen.concat(i).sort((x, y) => x - y);
+        b.setAttribute('aria-pressed', String(S.chosen.includes(i)));
+        count();
+      });
+      back(acts);
+      const g = btn(acts, 'CONVERT THESE', () => { if (!S.chosen.length) { say('Pick at least one.', true); return; } go(2); }, 'go');
+      const count = () => { g.textContent = S.chosen.length ? 'CONVERT ' + S.chosen.length + (S.chosen.length === 1 ? ' DOOPIE' : ' DOOPIES') : 'CONVERT THESE'; };
+      count();
+    },
+    // 3 ---------------------------------------------------------------- the last look
+    confirm(el, acts) {
+      if (!S.chosen.length) { el.innerHTML = '<p class="sub">Nothing chosen.</p>'; back(acts); return; }
+      el.innerHTML = '<div class="styles"><span>THE CHARACTER THE GAME WILL DRAW</span>' +
+          '<span>· drag to turn it · pinch or scroll to zoom</span></div>' +
+        '<div class="two">' + S.chosen.map(i => { const n = S.nfts[i];
+          return '<div class="card"><div class="pair"><img alt="" data-shot="' + i + '" src="' + artSrc(n.image) + '">' +
+            '<div class="model" data-cv="' + i + '" role="img" aria-label="the 3D model"></div></div>' +
+            '<div class="mono"><b>' + (n.name || 'Doopie') + '</b></div>' +
+            '<div class="traits">' + (n.attributes || []).map(a => '<span' +
+              (String(a.value) === window.DOOPIE_ONE_OF_ONE ? ' class="one"' : '') + '>' +
+              String(a.value).toUpperCase() + '</span>').join('') + '</div>' +
+            '<div class="hexy" data-hex="' + i + '">converting…</div></div>'; }).join('') + '</div>' +
+        '<p class="sub">The name, the mint it came from and every trait cross over with the art. The stencil is the shadow: ' +
+        'it is what goes on chain and what the base draws.</p>';
+      el.querySelectorAll('[data-style]').forEach(b => b.onclick = () => { S.style = b.dataset.style; S.chosen.forEach(paint); frame(); });
+      S.chosen.forEach(paint);
+      back(acts);
+      btn(acts, 'THE ART IS GOOD', () => go(3), 'go');
+    },
+    // 4 ---------------------------------------------------------------- the Robinhood address
+    address(el, acts) {
+      el.innerHTML = '<div class="box"><input class="txt" id="evm" spellcheck="false" placeholder="0x…" value="' + (S.evm || '') + '">' +
+        '<div class="mono">' + CHAIN.name + ' · chain ' + CHAIN.id + '. A shadow is bound to this address: it cannot be sold or sent on.</div></div>';
+      back(acts);
+      btn(acts, 'CONNECT WALLET', async () => {
+        const e = window.ethereum;
+        if (!e || !e.request) { say('No wallet in this browser — paste the address instead.', true); return; }
+        try {
+          const a = await e.request({ method: 'eth_requestAccounts' });
+          S.evm = a[0]; $('evm').value = S.evm;
+          try { await e.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: CHAIN.hex }] }); }
+          catch (err) {
+            if (err && err.code === 4902) await e.request({ method: 'wallet_addEthereumChain',
+              params: [{ chainId: CHAIN.hex, chainName: CHAIN.name, nativeCurrency: CHAIN.coin, rpcUrls: [CHAIN.rpc] }] });
+          }
+          say('Wallet on ' + CHAIN.name + '.'); go(4);
+        } catch (err) { say('The wallet said no.', true); }
+      }, 'go');
+      btn(acts, 'USE THIS ADDRESS', () => {
+        S.evm = ($('evm').value || '').trim();
+        if (!/^0x[0-9a-fA-F]{40}$/.test(S.evm)) { say('That is not a Robinhood Chain address.', true); return; }
+        go(4);
+      });
+    },
+    // 5 ---------------------------------------------------------------- the signature that ties them together
+    sign(el, acts) {
+      S.message = message();
+      el.innerHTML = '<pre class="msg">' + S.message.replace(/</g, '&lt;') + '</pre>' +
+        (S.signature ? '<div class="box"><div class="mono">Signed: <b>' + short(S.signature) + '</b></div></div>' : '');
+      back(acts);
+      btn(acts, S.signature ? 'SIGN AGAIN' : 'SIGN WITH PHANTOM', async () => {
+        const p = phantom();
+        if (!p || !p.signMessage) { say('No Phantom here to sign with.', true); return; }
+        try {
+          const sig = await p.signMessage(new TextEncoder().encode(S.message), 'utf8');
+          S.signature = Chance.hex(sig.signature || sig);
+          say('Signed.'); go(5);
+        } catch (e) { say('The wallet said no.', true); }
+      }, 'go');
+      if (S.signature) btn(acts, 'NEXT', () => go(5), 'go');
+    },
+    // 6 ---------------------------------------------------------------- the mint, and what it costs
+    mint(el, acts) {
+      const n = S.chosen.length, g = S.gas, L = S.live;
+      const each = g && g.shadowClaim ? g.shadowClaim + ChainLive.TX_BASE : null;
+      const eth = each && L && L.gasPrice ? each * n * L.gasPrice * 1e-9 : null;
+      el.innerHTML =
+        '<div class="fees">' +
+          fee('SHADOWS', String(n), n === 1 ? 'Doopie chosen' : 'Doopies chosen') +
+          fee('GAS EACH', each ? each.toLocaleString('en-US') : '—', 'measured from the contract') +
+          fee('GAS PRICE', L && L.gasPrice ? L.gasPrice.toFixed(4) + ' gwei' : '—', 'read from the chain') +
+          fee('THE FEE', eth ? (eth < 0.0001 ? eth.toExponential(2) : eth.toFixed(6)) + ' ETH' : '—',
+            eth && L && L.ethUsd ? 'about $' + (eth * L.ethUsd).toFixed(3) + ' in all' : 'paid to the chain, not to us') +
+        '</div>' +
+        '<p class="mono">You pay the mint gas.</p>' +
+        (S.contract
+          ? '<div class="box"><div class="mono">Minted by <b>' + short(S.contract) + '</b>, and yours at <b>' + short(S.evm) + '</b>. Your wallet will ask you to approve ' +
+            (n === 1 ? 'one transaction' : n + ' transactions') + '.</div></div>'
+          : '<div class="box warn"><div class="mono"><b>The contract is not deployed yet.</b> Everything up to here is real: your wallet, your Doopies, the art and the signature. ' +
+            'This last step needs <b>ShadowFriends.sol</b> on ' + CHAIN.name + ' and an attestor to sign the claim. <span class="tag open">NOT DEPLOYED</span></div></div>');
+      back(acts);
+      btn(acts, n === 1 ? 'MINT THE SHADOW' : 'MINT THE ' + n + ' SHADOWS', mintNow, 'go').disabled = !S.contract;
+    },
+  };
+
+  // ---------- the work behind the steps ----------
+  // the art comes through this site (Arweave redirects, which a canvas cannot follow); a picture already in
+  // hand, such as one drawn in the page, is used as it is
+  const artSrc = (u) => (u || '').startsWith('data:') ? u : 'api/art?u=' + encodeURIComponent(u || '');
+
+  // ---------- the shelf ----------
+  // What is listed right now, read from the marketplace, with the price in dollars from the live SOL rate.
+  // Read once per visit and kept in S, because the slide is rebuilt every time the carousel moves.
+  const SOL = '◎';
+  const money = (n) => n >= 1000 ? '$' + Math.round(n).toLocaleString() : '$' + n.toFixed(2);
+  async function shelfData() {
+    if (S.listings) return S.listings;
+    const get = async (u) => { const r = await fetch(u, { cache: 'no-store' }); if (!r.ok) throw new Error(u); return r.json(); };
+    const [list, stats, spot] = await Promise.all([
+      get('api/listings?collection=' + COLLECTION.symbol + '&limit=100'),
+      get('api/collection?collection=' + COLLECTION.symbol).catch(() => null),
+      get('api/spot?pair=SOL-USD').catch(() => null),
+    ]);
+    const usd = spot && spot.data ? parseFloat(spot.data.amount) : null;
+    S.listings = { list: Array.isArray(list) ? list : [], stats, usd };
+    return S.listings;
+  }
+  async function shelf() {
+    const box = $('shelf'), lane = $('lane');
+    if (!box || !lane) return;
+    let d;
+    try { d = await shelfData(); } catch (e) { box.hidden = true; return; }
+    if (!d.list.length) { box.hidden = true; return; }
+    const usd = d.usd, st = d.stats;
+    if (st) {
+      const floor = st.floorPrice / 1e9;
+      $('shelfstat').textContent = 'floor ' + SOL + floor.toFixed(3) + (usd ? ' · ' + money(floor * usd) : '') +
+        ' · ' + (st.listedCount || 0).toLocaleString() + ' listed · ' + COLLECTION.name + ' on Solana';
+    } else $('shelfstat').textContent = COLLECTION.name + ' on Solana';
+    // a different hand every visit, so the shelf is never the same two days running
+    const pick = d.list.slice().sort(() => Math.random() - 0.5).slice(0, 18);
+    const card = (n) => {
+      const t = n.token || {}, price = n.price || 0;
+      // The badge used to be `.find()` over /evolution|species/i, and SPECIES IS LISTED FIRST on every
+      // one-of-one - so the one token whose rarity you would most want shown was the only one showing
+      // something else. It now reads the `Evolution` trait by its exact bytes, from doopie-trait.mjs, and
+      // falls back to the species only when the metadata has no evolution at all.
+      const b = window.doopieBadge ? window.doopieBadge(t.attributes) : { text: '', rare: false };
+      return '<article class="dcard"><div class="art"><img alt="" decoding="async" src="' + artSrc(t.image || (n.extra || {}).img) + '"></div>' +
+        '<div class="nm">' + (t.name || 'Doopie') + '</div>' +
+        '<div class="ln"><span class="k">PRICE</span><span class="sol">' + SOL + price.toFixed(3) + '</span></div>' +
+        '<div class="ln"><span class="usd">' + (usd ? money(price * usd) : '') + '</span>' +
+        '<span class="tr' + (b.rare ? ' one' : '') + '">' + b.text + '</span></div></article>';
+    };
+    // the row is laid down twice, so when the first copy has walked past, the second is already in its place
+    lane.innerHTML = pick.map(card).join('') + pick.map(card).join('');
+    box.hidden = false;
+  }
+  async function find() {
+    if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(S.sol)) { say('That is not a Solana address.', true); return; }
+    say('Reading Solana…');
+    try {
+      const r = await fetch('api/nfts?owner=' + encodeURIComponent(S.sol) + '&collection=' + COLLECTION.symbol, { cache: 'no-store' });
+      const list = await r.json();
+      S.nfts = (Array.isArray(list) ? list : []).filter(n => n.collection === COLLECTION.symbol);
+      S.chosen = [];
+      if (!S.nfts.length) { say('No ' + COLLECTION.name + ' in that wallet.', true); return; }
+      say(S.nfts.length + ' found.');
+      go(1);
+    } catch (e) { say('Could not read Solana: ' + e.message, true); }
+  }
+  // the art is converted here, in front of the owner, before anything is signed
+  // ---------- the model ----------
+  // The conversion is the tool's, run on the server (tools/doopie.mjs); the page only draws what it sends
+  // back. The voxel model is built here from the colour sprite with the tool's own buildVoxelMesh, so the
+  // preview and the .glb it writes are the same geometry, and it turns under your finger.
+  const VIEWS = new Map();
+  async function convert(n) {
+    if (n.sprites) return n.sprites;
+    // POST: a full-size Doopie's data URL is ~73 KB and the server caps a GET request line at 64 KB (414)
+    const r = await fetch('api/convert', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image: n.image }), cache: 'no-store' });
+    const j = await r.json();
+    if (!j.ok) throw new Error(j.error || 'the converter refused');
+    // the converter answers ok with no files when it finds no character in the art; a missing sprite is a
+    // refusal, never a src of "undefined" (which the browser fetches as /undefined)
+    if (!j.files || !j.files['color-64']) throw new Error('the converter found no character');
+    n.sprites = j.files;
+    return n.sprites;
+  }
+  const loadImg = (src) => new Promise((ok, no) => { const im = new Image(); im.onload = () => ok(im); im.onerror = no; im.src = src; });
+
+  async function paint(i) {
+    const n = S.nfts[i], at = () => document.querySelector('[data-cv="' + i + '"]');
+    let host = at();
+    if (!host || VIEWS.has(host)) return;
+    host.innerHTML = '<span class="wait">CONVERTING…</span>';
+    let files;
+    try { files = await convert(n); } catch (e) { host = at(); if (host) host.innerHTML = '<span class="wait">COULD NOT CONVERT</span>'; say('That art could not be converted.', true); return; }
+    let im;
+    try { im = await loadImg(files['color-64']); } catch (e) { host = at(); if (host) host.innerHTML = '<span class="wait">COULD NOT CONVERT</span>'; say('That art could not be converted.', true); return; }
+    host = at();
+    if (!host || VIEWS.has(host)) return;
+    const S64 = im.naturalWidth, cv = document.createElement('canvas');
+    cv.width = cv.height = S64;
+    const c2 = cv.getContext('2d', { willReadFrequently: true });
+    c2.imageSmoothingEnabled = false; c2.drawImage(im, 0, 0);
+    const rgba = c2.getImageData(0, 0, S64, S64).data;
+    const mesh = window.buildVoxelMesh(rgba, S64, { size: 1, thickness: 0.08 });
+    n.tris = mesh.indices.length / 3;
+    // the sprite is what goes on chain; the model is made from it again whenever it is needed
+    n.chain = window.packSprite(rgba, S64);
+    show3d(host, mesh, files);
+    const hx = document.querySelector('[data-hex="' + i + '"]');
+    if (hx) hx.textContent = n.tris.toLocaleString() + ' tris, built from ' + n.chain.count + ' pixels · ' +
+      n.chain.words + ' words on chain';
+  }
+
+  function show3d(host, mesh, files) {
+    host.innerHTML = '';
+    const w = host.clientWidth || 200;
+    const r = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+    r.setPixelRatio(Math.min(2, devicePixelRatio || 1));
+    r.setSize(w, w, false);
+    if (r.outputColorSpace !== undefined) r.outputColorSpace = THREE.SRGBColorSpace;
+    host.appendChild(r.domElement);
+    const sc = new THREE.Scene(); sc.background = new THREE.Color(0x15171a);
+    const cam = new THREE.PerspectiveCamera(32, 1, 0.01, 100);
+    sc.add(new THREE.AmbientLight(0xffffff, 1.7));
+    const key = new THREE.DirectionalLight(0xffffff, 1.1); key.position.set(1.4, 2, 3); sc.add(key);
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(mesh.positions, 3));
+    g.setAttribute('normal', new THREE.BufferAttribute(mesh.normals, 3));
+    g.setAttribute('color', new THREE.BufferAttribute(mesh.colors, 3));
+    g.setIndex(new THREE.BufferAttribute(mesh.indices, 1));
+    const mat = new THREE.MeshStandardMaterial({ vertexColors: true, metalness: 0, roughness: .55, side: THREE.DoubleSide });
+    const obj = new THREE.Mesh(g, mat);
+    const pivot = new THREE.Group(); pivot.add(obj); sc.add(pivot);
+    g.computeBoundingBox();
+    const b = g.boundingBox, mid = new THREE.Vector3(); b.getCenter(mid);
+    obj.position.set(-mid.x, -mid.y, -mid.z);
+    const span = Math.max(b.max.x - b.min.x, b.max.y - b.min.y);
+    let dist = span * 2.6, yaw = 0.5, pitch = 0.18;
+    const place = () => { cam.position.set(Math.sin(yaw) * Math.cos(pitch) * dist, Math.sin(pitch) * dist, Math.cos(yaw) * Math.cos(pitch) * dist);
+      cam.lookAt(0, 0, 0); r.render(sc, cam); };
+    place();
+    // turn it with a finger or the mouse; pinch or scroll to come closer
+    let drag = null, pinch = 0;
+    const pt = (e) => ({ x: e.touches ? e.touches[0].clientX : e.clientX, y: e.touches ? e.touches[0].clientY : e.clientY });
+    const gap = (e) => Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+    const move = (e) => {
+      if (e.touches && e.touches.length === 2) { const d = gap(e); if (pinch) { dist = Math.min(span * 6, Math.max(span * 1.2, dist * pinch / d)); place(); } pinch = d; e.preventDefault(); return; }
+      if (!drag) return;
+      const p = pt(e);
+      yaw -= (p.x - drag.x) * 0.012;
+      pitch = Math.max(-1.2, Math.min(1.2, pitch + (p.y - drag.y) * 0.008));
+      drag = p; place(); e.preventDefault();
+    };
+    const up = () => { drag = null; pinch = 0; };
+    host.addEventListener('mousedown', (e) => { drag = pt(e); });
+    host.addEventListener('touchstart', (e) => { if (e.touches.length === 1) drag = pt(e); else pinch = gap(e); }, { passive: true });
+    addEventListener('mousemove', move); addEventListener('touchmove', move, { passive: false });
+    addEventListener('mouseup', up); addEventListener('touchend', up);
+    host.addEventListener('wheel', (e) => { dist = Math.min(span * 6, Math.max(span * 1.2, dist * (1 + Math.sign(e.deltaY) * 0.12))); place(); e.preventDefault(); }, { passive: false });
+    VIEWS.set(host, { renderer: r, files });
+  }
+
+  function message() {
+    return 'Rare Fiends Bridge\n' +
+      'I own these Doopies and want their shadows on ' + CHAIN.name + '.\n' +
+      'solana: ' + S.sol + '\n' +
+      'robinhood: ' + S.evm + '\n' +
+      'chain: ' + CHAIN.id + '\n' +
+      'art: the 64×64 sprite the converter makes, the character the game draws\n' +
+      S.chosen.map(i => { const n = S.nfts[i], c = n.chain;
+        return 'doopie: ' + (n.name || '') + ' · ' + n.mintAddress + ' · ' + (c ? c.count + 'px/' + c.colors + 'col/' + c.words + 'w' : '…'); }).join('\n');
+  }
+  async function mintNow() {
+    if (!S.contract) { say('The contract is not deployed yet — nothing was sent.', true); return; }
+    say('Asking the attestor…');
+    try {
+      const r = await fetch('api/claim', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ solana: S.sol, evm: S.evm, message: S.message, signature: S.signature,
+          art: S.chosen.map(i => { const c = S.nfts[i].chain;
+            return { mint: S.nfts[i].mintAddress, mask: c.mask, palette: c.palette, pixels: c.pixels, colors: c.colors, count: c.count }; }),
+          mints: S.chosen.map(i => S.nfts[i].mintAddress) }) });
+      const out = await r.json();
+      if (!out.ok) { say(out.error || 'The attestor refused.', true); return; }
+      say('Claim signed — your wallet will ask you to send it.');
+      for (const c of out.claims) {
+        await window.ethereum.request({ method: 'eth_sendTransaction', params: [{ from: S.evm, to: S.contract, data: c.data }] });
+      }
+      say('Minted. Your shadows are on ' + CHAIN.name + '.');
+    } catch (e) { say('The mint did not go through: ' + e.message, true); }
+  }
+
+  // what the page needs from the chain and from the contracts, read when it opens
+  (async () => {
+    try { S.contract = (await (await fetch(ChainLive.BRIDGE_CONFIG || 'bridge-config.json', { cache: 'no-store' })).json()).shadowFriends || null; } catch (e) { S.contract = null; }
+    try { S.live = await ChainLive.read(); S.gas = S.live.gas; } catch (e) { /* the fee then shows as — */ }
+    frame();
+  })();
+
+  frame();
+  // `shelf` is here so a check can seed S.listings and watch the real cards being built, rather than
+  // asserting on a copy of the badge rule that could drift from the one the page uses.
+  window.bridge = { S, STEPS, COLLECTION, go, frame, find, paint, shelf, get step() { return step; } };
+})();
+</script>
+</body>
+</html>

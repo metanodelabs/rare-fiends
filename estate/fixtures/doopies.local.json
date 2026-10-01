@@ -1,0 +1,55 @@
+{
+  "_": "LOCAL FORK FIXTURE. Real Doopies read once from mainnet Solana (getAccountInfo + their ar:// metadata) and cached here so api/nfts under `serve.py --local` can answer without Magic Eden. Nothing in `nfts` is invented. `localOwnerOverride` is a TEST-ONLY switch: honoured only when the attestor is started by `serve.py --local`, it replaces the Doopie's real Solana owner with the tester's key so a tester can sign the claim for a Doopie they do not hold. It bypasses the attestor's ownership check (attest -> not-owner) and nothing else; the Solana read still happens and the uri/traits are still the real ones.",
+  "readAt": "2026-10-01T00:25:17.612Z",
+  "localOwnerOverride": "A3ieFVeNqMLp7HoAfJ96Pty742wyHE4MJ8Hg9HKDJaim",
+  "nfts": [
+    {
+      "mintAddress": "BmAwHYEhSRetbEfSQoZQsrvnUgKBxu3vGNyZjzrru3Fb",
+      "name": "Doopies #24350",
+      "image": "ar://WRuad6Tx0-BE-ox7njNAMnYRZN_3dj_OeNzSmkaB1GE",
+      "collection": "doopies",
+      "attributes": [
+        {
+          "value": "Dallop",
+          "trait_type": "Species"
+        },
+        {
+          "value": "Dusk",
+          "trait_type": "Background"
+        },
+        {
+          "value": "1/1",
+          "trait_type": "Evolution"
+        }
+      ],
+      "uri": "ar://wmrI5TFLr7q5wCLzEygy7J3bZPPMVNwAztPbDSTe97s",
+      "realOwner": "1BWutmTvYPwDtmw9abTkS4Ssr8no61spGAvW1X6NDix"
+    },
+    {
+      "mintAddress": "Cnw7WimHfS1zipd1zWd7AQkkdmVyWqSwKPJH4hvfhHsK",
+      "name": "Doopies #15709",
+      "image": "ar://X1TiZPpspXlYLTfLgw6kKbdT9mBqSxkk21ZmUgussJo",
+      "collection": "doopies",
+      "attributes": [
+        {
+          "value": "Blue",
+          "trait_type": "Background"
+        },
+        {
+          "value": "Frae",
+          "trait_type": "Species"
+        },
+        {
+          "value": "Purple",
+          "trait_type": "Body"
+        },
+        {
+          "value": "Evolution 3",
+          "trait_type": "Evolution"
+        }
+      ],
+      "uri": "ar://wjOZ0E9fMB8kueUM2lsRlQ7JZsLkvX1SKsEDZihDDT4",
+      "realOwner": "1BWutmTvYPwDtmw9abTkS4Ssr8no61spGAvW1X6NDix"
+    }
+  ]
+}

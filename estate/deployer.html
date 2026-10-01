@@ -1,0 +1,1434 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Rare Fiends — the deployer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Silkscreen:wght@400;700&family=Sometype+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --ink: #FFFFFF; --paper: #000000; --signal: #CCFF00;
+  --dim: rgba(255,255,255,.62); --faint: rgba(255,255,255,.28);
+  --display: Silkscreen, monospace; --mono: "Sometype Mono", ui-monospace, monospace;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; background: #090B09; color: var(--ink); }
+body { font-family: var(--mono); font-size: 21px; line-height: 1.55; }
+a { color: var(--signal); }
+header { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid rgba(204,255,0,.4); background: #000;
+  position: sticky; top: 0; z-index: 5; padding-top: max(10px, env(safe-area-inset-top)); flex-wrap: wrap; }
+.brand { display: flex; align-items: center; gap: 9px; font-family: var(--display); font-size: 19px; letter-spacing: .12em; }
+.brand i { width: 8px; height: 8px; background: var(--signal); border-radius: 50%; }
+.brand span { color: var(--dim); }
+header nav { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; }
+header nav a { font-family: var(--display); font-size: 14px; letter-spacing: .1em; color: #fff; text-decoration: none; border: 1px solid var(--faint); padding: 5px 7px; }
+header nav a:hover { border-color: var(--signal); color: var(--signal); }
+main { max-width: 1040px; margin: 0 auto; padding: 24px 16px 60px; }
+h1 { font-family: var(--display); font-weight: 400; font-size: clamp(35px, 5vw, 60px); line-height: 1; margin: 6px 0 12px; letter-spacing: .02em; }
+.lede { color: rgba(255,255,255,.78); max-width: 800px; margin: 0 0 14px; }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; font-size: 19px; color: var(--dim); margin: 0 0 10px; }
+.tag { display: inline-block; font-family: var(--display); font-size: 13px; letter-spacing: .1em; padding: 2px 5px; vertical-align: middle; white-space: nowrap; }
+.tag.chain { background: var(--signal); color: #000; }
+.tag.map { border: 1px solid var(--signal); color: var(--signal); }
+.tag.client { border: 1px dashed rgba(255,255,255,.7); color: #fff; }
+.tag.nohome { border: 1px dashed var(--faint); color: var(--dim); }
+.tag.dec { border: 1px solid rgba(255,255,255,.7); color: #fff; }
+.tag.ph { border: 1px dashed var(--signal); color: var(--signal); }
+.tag.prop { border: 1px solid var(--faint); color: var(--dim); }
+.tag.open { border: 1px dashed var(--faint); color: var(--dim); }
+section { border-top: 1px solid var(--faint); padding: 26px 0 6px; scroll-margin-top: 62px; }
+h2 { font-family: var(--display); font-weight: 400; font-size: 22px; letter-spacing: .08em; margin: 0 0 4px; display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+h2 .n { color: var(--signal); }
+h2 .d { font-size: 13px; color: var(--dim); letter-spacing: .1em; }
+.q { color: var(--dim); font-size: 19px; margin: 0 0 14px; max-width: 820px; }
+h3 { font-family: var(--display); font-weight: 400; font-size: 18px; letter-spacing: .1em; color: var(--dim); margin: 18px 0 8px; }
+p { margin: 0 0 10px; max-width: 820px; }
+p b, li b, td b { color: #fff; font-weight: 500; }
+code { color: rgba(255,255,255,.85); }
+
+/* the guard, and the lock: the two things that make this a page with power rather than a form */
+.bar { border: 2px solid var(--signal); background: #000; padding: 14px 16px; margin: 0 0 12px; max-width: 900px; }
+.bar.off { border-color: rgba(255,255,255,.45); }
+.bar .hd { font-family: var(--display); font-size: clamp(20px, 2.6vw, 26px); line-height: 1.15; margin: 0 0 8px; letter-spacing: .04em; }
+.bar .hd b { color: var(--signal); font-weight: 400; }
+.bar p { font-size: 19px; margin: 0 0 8px; }
+.bar .src { font-size: 17px; color: var(--dim); }
+.btn { font-family: var(--display); font-size: 15px; letter-spacing: .08em; background: none; color: #fff; border: 1px solid rgba(255,255,255,.5); padding: 7px 10px; cursor: pointer; }
+.btn:hover:not(:disabled) { border-color: var(--signal); color: var(--signal); }
+.btn[aria-pressed="true"] { background: var(--signal); color: #000; border-color: var(--signal); }
+.btn:disabled { opacity: .38; cursor: not-allowed; }
+.btn.big { font-size: 17px; padding: 9px 13px; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 8px 0 0; }
+
+.params { display: grid; grid-template-columns: repeat(auto-fit, minmax(272px, 1fr)); gap: 8px; margin: 0 0 12px; }
+.p { border: 1px solid var(--faint); padding: 10px 12px; display: grid; gap: 6px; align-content: start; min-width: 0; }
+.p.dis { border-style: dashed; }
+.p .k { font-size: 20px; color: #fff; }
+.p .tags { display: flex; gap: 5px; flex-wrap: wrap; }
+.p .f { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.p input[type=number], .p input[type=text] { background: #000; color: #fff; border: 1px solid var(--faint); font: 21px var(--mono); padding: 5px 7px; width: 7.5em; max-width: 100%; }
+.p input:focus { outline: none; border-color: var(--signal); }
+.p input:disabled { color: var(--dim); border-style: dashed; }
+.p .u { font-size: 18px; color: var(--dim); }
+.p .rb { font-size: 17px; font-family: var(--display); letter-spacing: .06em; }
+.p .rb.ag { color: var(--signal); }
+.p .rb.no { color: #fff; }
+.p .rb.nr { color: var(--dim); }
+.p .s { font-size: 17px; color: var(--dim); }
+.p .s b { color: rgba(255,255,255,.9); }
+.p .warn { font-size: 18px; border-left: 3px solid var(--signal); padding-left: 8px; color: #fff; }
+/* A contract address is 42 unbreakable characters and a card is one column on a phone. Without this
+   the page scrolls sideways the moment a contract has an address on record - measured: the document
+   went 520px wide inside a 375px screen, which then shrinks the whole layout to fit. */
+.p .s, .p .rb, .p .k, .note, .bar p, .bar .shut { overflow-wrap: anywhere; }
+code { overflow-wrap: anywhere; }
+.p .refuse { font-size: 18px; color: #fff; border: 1px dashed var(--signal); padding: 4px 6px; }
+
+/* the challenge the wallet signs. It is shown below the buttons on purpose: the two controls a
+   deployer has to reach are what must be above the fold on a phone, not the text. */
+.bar pre.msg { font: 15px var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; border: 1px dashed var(--faint);
+  padding: 8px 10px; margin: 10px 0 0; color: rgba(255,255,255,.86); max-height: 34vh; overflow: auto; }
+.bar .shut { font-size: 19px; }
+.bar .shut b, .bar .shut code { color: #fff; }
+.note { border: 1px dashed var(--faint); padding: 10px 12px; margin: 0 0 12px; font-size: 19px; color: rgba(255,255,255,.8); max-width: 900px; }
+.note b { color: #fff; }
+.note.warn { border-color: rgba(204,255,0,.55); }
+.tw { overflow-x: auto; margin: 0 0 12px; border: 1px solid var(--faint); }
+table { border-collapse: collapse; width: 100%; font-size: 19px; font-variant-numeric: tabular-nums; }
+th, td { padding: 7px 10px; border-bottom: 1px solid rgba(255,255,255,.12); text-align: right; white-space: nowrap; }
+th { font-family: var(--display); font-weight: 400; font-size: 14px; letter-spacing: .1em; color: var(--dim); background: rgba(255,255,255,.03); }
+th:first-child, td:first-child { text-align: left; }
+tr:last-child td { border-bottom: 0; }
+td.sig { color: var(--signal); }
+td.wrap { white-space: normal; text-align: left; }
+.toc { display: flex; flex-wrap: wrap; gap: 6px; margin: 14px 0 6px; }
+.toc a { font-family: var(--display); font-size: 14px; letter-spacing: .08em; color: #fff; text-decoration: none; border: 1px solid var(--faint); padding: 5px 7px; }
+.toc a:hover { border-color: var(--signal); color: var(--signal); }
+#status { font-family: var(--display); font-size: 16px; letter-spacing: .1em; color: var(--dim); }
+.counts { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin: 0 0 12px; }
+.ct { border: 1px solid var(--faint); padding: 10px 12px; min-width: 0; }
+.ct .v { font-family: var(--display); font-size: 28px; letter-spacing: .02em; }
+.ct .k { font-family: var(--display); font-size: 13px; letter-spacing: .1em; color: var(--dim); }
+.ct.hi { border-color: var(--signal); } .ct.hi .v { color: var(--signal); }
+iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -10px; border: 0; visibility: hidden; }
+/* A phone holds one screen. The lock is what this page turns on, so at phone width the top of the
+   document gives way to it: less padding, a smaller title, and the lock's own explanation folded
+   behind WHY so the bar and its button both land above the fold. */
+@media (max-width: 460px) {
+  body { font-size: 20px; }
+  header nav a { font-size: 13px; padding: 4px 6px; }
+  main { padding-top: 12px; }
+  h1 { font-size: 32px; margin: 0 0 8px; }
+  .lede { margin: 0 0 10px; }
+  .params { grid-template-columns: 1fr; }
+  /* The lede is a subtitle and it costs 155px - a quarter of a 667-tall screen, measured. That
+     screen has to carry the GATE, and then the LOCK with its button, and those are the two controls
+     a deployer cannot get past this page without. Nothing in the lede is a claim made nowhere else:
+     "this page sets no values of its own" is the note under the legends. So it gives way, the way
+     the title and the padding above already do. */
+  .lede { display: none; }
+  .bar { padding: 12px 13px; }
+  .bar .hd { font-size: 19px; }
+  .bar p, .bar .shut { font-size: 18px; }
+  .bar pre.msg { font-size: 13px; max-height: 24vh; }
+}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><i></i>RARE FIENDS<span>· DEPLOYER</span></div>
+  <nav><a href="base.html">BASE</a><a href="economy.html">ECONOMY</a><a href="costs.html">COSTS</a><a href="attack_defense.html">ATTACK &amp; DEFENSE</a></nav>
+</header>
+<main>
+  <h1>DEPLOYER</h1>
+  <p class="lede">Every number the game is tuned by, with where it lives and whether a change reached the game. <b>This page sets no values of its own.</b></p>
+
+  <div class="bar" id="gate"></div>
+  <div id="sheet" hidden>
+  <div class="bar" id="lock"></div>
+  <div class="bar" id="confirm" hidden></div>
+  <div class="bar off" id="guard"></div>
+
+  <div class="legend">
+    <span>Where it lives:</span>
+    <span><span class="tag chain">ON CHAIN</span> the contract is the truth</span>
+    <span><span class="tag map">IN A SEED</span> frozen into a map, reproducible from it</span>
+    <span><span class="tag client">CLIENT BELIEF</span> the game believes it; nothing enforces it</span>
+    <span><span class="tag nohome">NO HOME</span> not in <code>schema.json</code> at all</span>
+  </div>
+  <div class="legend">
+    <span>What the value is:</span>
+    <span><span class="tag dec">DECIDED</span> settled in <code>DESIGN.md</code>, and cited</span>
+    <span><span class="tag ph">READ FROM THE CONTRACT</span> read off the chain, which is the only place that can verify it</span>
+    <span><span class="tag ph">READ FROM THE GAME</span> not typed here — read out of what runs, which is not the chain</span>
+    <span><span class="tag prop">PROPOSED</span> a proposal on another page, not a decision</span>
+    <span><span class="tag open">NOT DECIDED</span> empty, and it stays empty</span>
+  </div>
+  <div class="note">A number on this page is one of three things and never a fourth: a <b>decision cited from <code>DESIGN.md</code></b>,
+    a value <b>read live out of the game</b> and never typed into this file, or <b>blank</b> because nobody has decided it.
+    The homes are read out of <code>schema.json</code>, which is the one place a piece of state declares where it lives.</div>
+  <div id="status">READING THE GAME…</div>
+  <nav class="toc" id="toc"></nav>
+  <div id="out"></div>
+  </div>
+</main>
+<!-- The two probes carry no `src`. Nothing is read out of the game until the gate above is open:
+     a page that refuses to show a stranger its values should not be reading them either. -->
+<iframe class="probe" id="pBase" data-src="base.html?econ=1" tabindex="-1" aria-hidden="true" title=""></iframe>
+<iframe class="probe" id="pEra" data-src="start.html" tabindex="-1" aria-hidden="true" title=""></iframe>
+<script src="chance.js"></script>
+<script src="chainlive.js"></script>
+<script src="mapgen.js"></script>
+<script src="combat.js"></script>
+<script>
+(() => {
+  'use strict';
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+  // ---------------------------------------------------------------------------
+  // NO VALUE ON THIS PAGE IS INVENTED. There are exactly three ways a number
+  // gets onto this screen, and every card says which one it was:
+  //
+  //   DEC   a decision recorded in DESIGN.md. It is written here because this
+  //         page IS its home - M4 item 8 says the milestone "builds the fields,
+  //         ships 5% as the default". Each one carries the sentence it comes from.
+  //   READ  no decision exists, so the number is read live out of the game
+  //         (base.ECON through the probe, MapGen, start.html's era) and is never
+  //         typed into this file. If the game changes, this page changes.
+  //   OPEN  nobody has decided it. The field is empty and stays empty.
+  //
+  // The homes - on chain, in a map's seed, a client belief - are not typed here
+  // either: they are read out of estate/schema.json, which is the one place a
+  // piece of state declares its home. M4 item 2.
+  // ---------------------------------------------------------------------------
+  const DEC = {
+    length:       { v: 168, u: 'h', src: 'How long a game lasts: "The length\'s starting value is seven days", and it stays a parameter. 168 h.' },
+    joinWindow:   { v: 24,  u: 'h', src: 'DECIDED: "joining stays open 24 hours".' },
+    startAfter:   { v: 1,   u: 'h', src: 'DECIDED: "one hour, and it is a deployer parameter" - the gap between joining closing and the game starting.' },
+    cut:          { v: 5,   u: '%', src: 'DECIDED: "5% at the floor and 10% at the ceiling... 5% is also the starting value the page ships with".' },
+    cutFloor:     { v: 5,   u: '%', src: 'DECIDED: the cut\'s floor is 5%.' },
+    cutCeiling:   { v: 10,  u: '%', src: 'DECIDED: the cut\'s ceiling is 10%.' },
+    mktFee:       { v: 1.5, u: '%', src: 'The marketplace fee, "1.5% to start". It does not get the cut\'s freeze - the deployer\'s words were "no need".' },
+    roleDelay:    { v: 0,   u: 'h', src: 'DECIDED 2026-09-30: the role-change delay is ZERO for v1, and it is a deployer-page setting so it can change later without a redeploy.' },
+    maxFeeBps:    { v: 10,  u: '%', src: 'Ruling 1 (2026-09-30): the marketplace fee\'s ceiling is 10% (1000 basis points). A constructor argument, immutable once deployed.' },
+    partnerWait:  { v: 24,  u: 'h', src: 'Set the waiting period - how long a paused partnership has to agree new terms before it ends by itself. "24 hours to start".' },
+  };
+  // The two thresholds behind the game-length warning. M4 item 13, and both are decided.
+  const CAP_USEFUL = 96, CAP_BUILD = 64;
+  // DECIDED: one game year is a QUARTER of the length. The game carries its own copy (base.ECON.yearOf)
+  // and this page compares the two on the length card - it never takes the game's word for it.
+  const YEAR_OF = 1 / 4;
+  const PLACES_CAP = 10;      // "how many places pay out, capped at 10"
+
+  // ---------------------------------------------------------------------------
+  // THE PRIZE SPLIT IS A RULE, NOT A LIST OF FIELDS.
+  // Of the 95% that is not the cut: first takes 50, second 30, and the remaining
+  // 20 splits equally between the places after second - or between whoever exists
+  // if there are none after second. The page holds the count; this derives the rest.
+  //   1 -> 95         2 -> 60/40 of the 95      3 -> 50/30/20
+  //   4 -> 50/30/10/10            10 -> 50/30 then 2.5 each
+  // ---------------------------------------------------------------------------
+  const CUT_FREE = 95;                                  // the share of the pot the places divide
+  function shares(n) {
+    if (!(n >= 1) || n > PLACES_CAP) return null;
+    const base = [50, 30].slice(0, n);                  // only the places that exist take a named share
+    const left = 100 - base.reduce((a, b) => a + b, 0); // 50 with one place, 20 with two or more
+    const out = base.slice();
+    if (n > 2) { for (let i = 2; i < n; i++) out.push(left / (n - 2)); }
+    else { for (let i = 0; i < n; i++) out[i] += left / n; }
+    return out;                                         // shares OF THE 95%, in order
+  }
+
+  // ---------------------------------------------------------------------------
+  // What the game actually reads. Three probes, all read-only:
+  //   base.ECON     the rules table the game plays by (base.html)
+  //   MapGen        the generator's own defaults and its VERSION
+  //   era           the lifecycle: the join window, the gap, the fewest players
+  // ---------------------------------------------------------------------------
+  const MG = window.MapGen || null;
+  const gameWin = () => { try { const w = $('pBase').contentWindow.base; return (w && w.ECON) ? w : null; } catch (e) { return null; } };
+  const G = () => { const w = gameWin(); return w ? w.ECON : null; };
+  // the fight's rules as combat.js builds them from the game's tables with NO proposal passed - the defaults the fight runs on today
+  const CR = () => { const E = G(); if (!E || typeof Combat === 'undefined' || !Combat.rulesFrom) return null; try { return Combat.rulesFrom(E, {}); } catch (e) { return null; } };
+  const eraWin = () => { try { const e = $('pEra').contentWindow.era; return (e && e.S) ? e : null; } catch (e) { return null; } };
+
+  const secs = (ms) => (ms / 1000).toLocaleString('en-US', { maximumFractionDigits: 2 }) + ' s';
+  const list = (o) => Array.isArray(o) ? o.join(', ') : Object.entries(o).map(([k, v]) => k + ' ' + v).join(', ');
+
+  // ---------------------------------------------------------------------------
+  // Every number, with its schema address, what it is worth today, and whether a
+  // change here can reach the game at all.
+  //   read:  what the game reads right now. undefined means NOT READABLE.
+  //   put:   how a change is delivered. 'url' is the only real one today - the
+  //          switches and the starting purse are query parameters base.html
+  //          already honours, so a change reaches the game and can be read back.
+  // ---------------------------------------------------------------------------
+  const R = [
+    // ---- the map: M4 item 3 -------------------------------------------------
+    { g: 'map', id: 'groves', k: 'Groves of trees on a map', e: 'map', f: 'groves', u: 'groves',
+      read: () => MG && MG.ECON_DEFAULT.groves, where: 'MapGen.ECON_DEFAULT.groves' },
+    { g: 'map', id: 'treesPerGrove', k: 'Trees in a grove', e: 'map', f: 'groves', u: 'trees',
+      read: () => MG && MG.ECON_DEFAULT.treesPerGrove, where: 'MapGen.ECON_DEFAULT.treesPerGrove' },
+    { g: 'map', id: 'homeSeams', k: 'Crystal seams inside a base', e: 'map', f: 'seams', u: 'seams',
+      read: () => MG && MG.ECON_DEFAULT.homeSeams, where: 'MapGen.ECON_DEFAULT.homeSeams' },
+    { g: 'map', id: 'wildSeams', k: 'Crystal seams out in the frontier', e: 'map', f: 'seams', u: 'seams',
+      read: () => MG && MG.ECON_DEFAULT.wildSeams, where: 'MapGen.ECON_DEFAULT.wildSeams' },
+    { g: 'map', id: 'creeks', k: 'Creek density', e: 'map', f: 'baseSites', u: 'creeks per base', open: true,
+      read: () => undefined, where: 'nothing',
+      s: 'The generator gives every base exactly one creek and takes no option for it. There is no number to set until it does.' },
+    { g: 'map', id: 'landShare', k: 'How much of the square is land', e: 'map', f: 'width', u: '%', open: true,
+      read: () => undefined, where: 'nothing',
+      s: '<code>LAND_SHARE</code> is a constant inside <code>generate()</code> - not an option and not exported. The generator has to expose it before this page can read it or set it.' },
+    { g: 'map', id: 'players', k: 'Players on one map', e: 'map', f: 'baseSites', u: 'players', open: true,
+      read: () => undefined, where: 'nothing',
+      s: '<code>generate()</code> takes it as an argument with a default in its own signature. Nothing exports that default, so there is nothing to read back.' },
+    { g: 'map', id: 'tilesPerPlayer', k: 'Tiles per player', e: 'map', f: 'width', u: 'tiles', open: true,
+      read: () => undefined, where: 'nothing',
+      s: 'The same: an argument default, not an exported number.' },
+    { g: 'map', id: 'generatorVersion', k: 'Generator version', e: 'map', f: 'generatorVersion', u: '', ro: true,
+      read: () => MG && MG.VERSION, where: 'MapGen.VERSION',
+      s: 'Read only, and on this page for one reason: <b>a change to any number above has to bump it</b>, or an old map stops being reproducible from its seed.' },
+
+    // ---- the economy: M4 item 4 --------------------------------------------
+    { g: 'econ', id: 'startPurse', k: 'Crystals a player starts with', e: 'base', f: 'crystals', u: 'crystals', put: 'url',
+      read: () => { const w = gameWin(); return w ? w.crystals : undefined; }, where: 'base.crystals, the purse the game is playing with' },
+    { g: 'econ', id: 'startWood', k: 'Wood a player starts with', e: 'base', f: 'wood', u: 'logs',
+      read: () => { const g = G(); return g && g.startWood; }, where: 'base.ECON.startWood' },
+    { g: 'econ', id: 'treeWood', k: 'Wood a tree gives', u: 'logs',
+      read: () => { const g = G(); return g && g.treeWood; }, where: 'base.ECON.treeWood' },
+    { g: 'econ', id: 'chopMs', k: 'Time to cut one log', u: 's', scale: 1000,
+      read: () => { const g = G(); return g && g.chopMs / 1000; }, where: 'base.ECON.chopMs' },
+    { g: 'econ', id: 'regrowMs', k: 'Time for a tree to grow back', u: 's', scale: 1000,
+      read: () => { const g = G(); return g && g.regrowMs / 1000; }, where: 'base.ECON.regrowMs' },
+    { g: 'econ', id: 'handYield', k: 'What a harvester brings back in a load', u: 'crystals',
+      read: () => { const g = G(); return g && g.handYield; }, where: 'base.ECON.handYield',
+      s: 'One crystal per depot level today.' },
+    { g: 'econ', id: 'growMs', k: "A seam's full growth cycle", u: 's', scale: 1000,
+      read: () => { const g = G(); return g && g.growMs / 1000; }, where: 'base.ECON.growMs' },
+    { g: 'econ', id: 'harvCost', k: 'What a harvester costs', u: 'crystals',
+      read: () => { const g = G(); return g && g.harvCost; }, where: 'base.ECON.harvCost' },
+    { g: 'econ', id: 'seamStages', k: 'What a seam gives at each stage of its growth', u: 'crystals', open: true,
+      read: () => undefined, where: 'nothing',
+      s: 'The stages exist - a quarter of the growth cycle each - and <b>what each one gives is not decided</b>. Worth less when cut young is the rule; no number carries it.' },
+    { g: 'econ', id: 'depotCap', k: "The collection depot's cap", u: 'crystals', open: true,
+      read: () => undefined, where: 'nothing', s: 'No cap on the depot exists in the game.' },
+    { g: 'econ', id: 'siloCap', k: 'What a silo holds, by level', u: 'crystals', tab: true,
+      read: () => { const g = G(); return g && list(g.siloCap); }, where: 'base.ECON.siloCap',
+      s: 'Marked a placeholder in the game\'s own source.' },
+
+    // ---- the fight: M4 item 5 ----------------------------------------------
+    { g: 'fight', id: 'hp', k: "A Friend's hit points, by generation", e: 'rules', f: 'hp', tab: true,
+      read: () => { const g = G(); return g && list(g.hp); }, where: 'base.ECON.hp' },
+    { g: 'fight', id: 'wallHp', k: 'A wall section\'s hit points', e: 'rules', f: 'wallHp', u: 'HP',
+      read: () => { const g = G(); return g && g.wallHp; }, where: 'base.ECON.wallHp' },
+    { g: 'fight', id: 'hpCeiling', k: 'The most hit points a building can have', e: 'rules', f: 'hp', u: 'HP', open: true,
+      read: () => undefined, where: 'nothing', s: 'The deployer\'s table requires it. No number for it exists anywhere.' },
+    { g: 'fight', id: 'weapons', k: 'Weapon damage and range, by generation', e: 'rules', f: 'dmg', tab: true,
+      read: () => { const g = G(); return g && Object.entries(g.weapons).map(([k, w]) => 'gen ' + k + ' ' + w.n + ' ' + w.dmg + ' dmg / ' + w.rng + ' tiles').join(' · '); },
+      where: 'base.ECON.weapons' },
+    { g: 'fight', id: 'periodMs', k: 'How often a weapon fires', e: 'rules', f: 'period', tab: true,
+      read: () => { const g = G(); return g && Object.entries(g.combat.periodMs).map(([k, v]) => k + ' ' + secs(v)).join(', '); }, where: 'base.ECON.combat.periodMs' },
+    { g: 'fight', id: 'towerRange', k: 'What a watchtower adds to range', e: 'rules', f: 'towerReach', u: 'tiles',
+      read: () => { const g = G(); return g && g.combat.towerRange; }, where: 'base.ECON.combat.towerRange' },
+    { g: 'fight', id: 'landVsBuilding', k: 'What land damage does to a building', e: 'rules', f: 'landVsBuildingBps', u: 'bps',
+      read: () => { const g = G(); return g && g.combat.landVsBuildingBps; }, where: 'base.ECON.combat.landVsBuildingBps' },
+    // The four are PROPOSED TOGETHER (question 21): the corpus of measured fight lengths - 1v1 gen6 35.3 s, 3v3 50.2 s,
+    // 12v12 gen6 with 6 walls 53.1 s, 12v12 with 16 walls 81.9 s - was measured with speed 1, cover ÷2 and a 5-tile
+    // reach, and the clock is set FROM that corpus. Move one and the other three are measured against a fight that no
+    // longer exists. CURRENT is read out of combat.js (Combat.rulesFrom defaults), never typed here; PROPOSED is pv.
+    { g: 'fight', id: 'maxMs', k: "The fight's clock", e: 'rules', f: 'maxMs', u: 's', prop: true, tab: true, pv: 120,
+      read: () => { const R = CR(); return R && R.maxMs / 1000; }, where: 'Combat.rulesFrom default (combat.js) - the fight reads it, nothing sets it',
+      s: '<b>PROPOSED 120 s - keep.</b> The longest measured fight, the declared maximum (12v12, 16 walls), ends at 81.9 s, so 120 s (1.47× that) lets every measured fight end by force and none by clock. <b>Lower it</b> to 90 s and the wall-heavy fight sits 10% under the clock: a defence that builds walls starts winning by the clock instead of the fight. <b>Raise it</b> and the replay reference (gas.json fightMax, fought to the clock) grows with it; a v1 fight resolves on the server, so nothing on chain pays for the extra seconds. One of the five PROPOSED rules fields the schema says blocks freezing the table per game.' },
+    { g: 'fight', id: 'speed', k: 'Walking pace in a fight', e: 'rules', f: 'stepMs', u: 'tiles/s', prop: true, tab: true, pv: 1,
+      read: () => { const R = CR(); return R && 1000 / (2 * R.stepMs); }, where: 'Combat.rulesFrom default (combat.js), read back out of stepMs: a spot is half a tile',
+      s: '<b>PROPOSED 1 tile/s - keep.</b> It decides the free shots a longer weapon gets while the other closes: catapult (5 tiles) over club (0.5) is 4.5 s of walking, two siege shots at 3.2 s a shot; bow (3) over club is one shot. <b>Faster</b> and range stops mattering - a gen 6 club closes on a gen 2 crossbow before it fires twice, and the six generations collapse toward hit points alone. <b>Slower</b> and the three ranged generations kill melee before contact, and every fight in the corpus lengthens, so the clock has to move with it. Friends on the base ease toward each step; this is the only set pace in the game.' },
+    { g: 'fight', id: 'coverDiv', k: 'Cover behind a wall', e: 'rules', f: 'coverDiv', u: '÷', prop: true, tab: true, pv: 2,
+      read: () => { const R = CR(); return R && R.coverDiv; }, where: 'Combat.rulesFrom default (combat.js)',
+      s: '<b>PROPOSED ÷2 - keep.</b> An equal-generation shot lands 50% of the time (the hit-points ratio); behind a standing wall, 25%. Measured: going from 6 walls to 16 lengthened 12v12 from 53.1 s to 81.9 s (+54%), which is the wall earning its cost without deciding the fight. <b>÷3</b> and the same fight heads for the clock - see the clock\'s trade-off. <b>÷1</b> and a wall is only something to walk around and knock down, so the wall\'s 400 HP is the whole of what it buys.' },
+    { g: 'fight', id: 'defendReach', k: 'How far ENGAGE + DEFEND strays', e: 'rules', f: 'defendReach', u: 'tiles', prop: true, tab: true, pv: 5,
+      read: () => { const R = CR(); return R && R.defendReach / 2; }, where: 'Combat.rulesFrom default (combat.js), read back out of defendReach in spots',
+      s: '<b>PROPOSED 5 tiles - keep.</b> Five is the longest weapon range (catapult), so a DEFEND Friend can reach an attacker shelling its post from the far edge of any range in the game. <b>Below 5</b> a catapult stands off and shells a post its defender is not allowed to leave - DEFEND becomes HOLD with extra steps. <b>Above 5</b> DEFEND drifts into ENGAGE and the third standing order has no reason to exist. Not measured against a base\'s size, which the map decides; that comparison is owed.' },
+    { g: 'fight', id: 'splashFalloff', k: 'What splash loses with distance', e: 'rules', f: 'splashFalloff', open: true,
+      read: () => undefined, where: 'nothing', s: 'Named in DESIGN and <b>missing from the rules table altogether</b>.' },
+
+    // ---- the buildings: M4 item 6 ------------------------------------------
+    { g: 'build', id: 'costs', k: 'What each building costs', e: 'buildingType', f: 'crystalCost', tab: true,
+      read: () => { const g = G(); return g && Object.entries(g.kinds).map(([k, v]) => k + ' ' + (Array.isArray(v.cost) ? v.cost.join('/') : v.cost)).join(' · '); },
+      where: 'base.ECON.kinds' },
+    { g: 'build', id: 'buildMs', k: 'How long a building takes to raise', e: 'buildingType', f: 'buildMs', u: 's', scale: 1000,
+      read: () => { const g = G(); return g && g.buildMs / 1000; }, where: 'base.ECON.buildMs',
+      s: '<b>One number for every building and every level in the game today.</b> The deployer\'s table wants one per building per level.' },
+    { g: 'build', id: 'handsOff', k: 'What a second pair of hands takes off the time', u: '%', open: true,
+      read: () => undefined, where: 'nothing' },
+    { g: 'build', id: 'handsCap', k: 'The most Friends that can usefully work on one building', u: 'Friends', open: true,
+      read: () => undefined, where: 'nothing' },
+    { g: 'build', id: 'footprint', k: 'Tiles a building takes up', e: 'buildingType', f: 'footprint', open: true,
+      read: () => undefined, where: 'nothing', s: 'It has a home in the schema and no value in the game.' },
+    { g: 'build', id: 'energy', k: 'What energy each building draws', e: 'buildingType', f: 'capacity', u: 'P', open: true,
+      read: () => undefined, where: 'nothing' },
+    { g: 'build', id: 'cellReach', k: 'How far a cell reaches at each level', e: 'buildingType', f: 'reach', tab: true,
+      read: () => { const g = G(); return g && list(g.cellReach); }, where: 'base.ECON.cellReach',
+      doc: [2, 3, 4, 5], against: '2, 3, 4, 5 tiles to start',
+      s: 'The deployer\'s table says <b>2, 3, 4, 5 tiles to start</b>, and <b>the document is right</b> — that was ruled on when this page first found the game reading 0, 1.5, 2.5, 3.5, 4.5. Compare it with what the game reads.' },
+    { g: 'build', id: 'cellNeeds', k: 'The worst generation that can run a cell, by level', e: 'buildingType', f: 'levels', tab: true,
+      read: () => { const g = G(); return g && list(g.cellNeeds); }, where: 'base.ECON.cellNeeds' },
+
+    // ---- the switches: M4 item 7 - the four that are typed web addresses today
+    { g: 'sw', id: 'seams', k: 'Crystals on this map', e: 'map', f: 'seams', sw: true, put: 'url', q: 'seams',
+      read: () => { const g = G(); return g && (g.seamsOn ? 'on' : 'off'); }, where: 'base.ECON.seamsOn',
+      s: 'Off today, which is why there is no income. <code>?seams=1</code> is the web address this replaces.' },
+    { g: 'sw', id: 'doopies', k: 'The Doopie collection', sw: true, put: 'url', q: 'doopies',
+      read: () => { const w = gameWin(); return w ? (w.actors.some((a) => a.art === 'v1' || a.art === 'v2' || a.art === 'v3') ? 'on' : 'off') : undefined; },
+      where: 'the Doopies standing on the base, counted in base.actors',
+      s: 'A whole collection on or off. <code>?doopies=1</code> today.' },
+    { g: 'sw', id: 'fresh', k: 'An empty base', sw: true, put: 'url', q: 'fresh',
+      read: () => { const w = gameWin(); return w ? (w.buildings.length === 0 ? 'on' : 'off') : undefined; },
+      where: 'base.buildings.length', s: 'Start from bare ground. <code>?fresh=1</code> today.' },
+    { g: 'sw', id: 'world', k: 'The two-base test map', sw: true, put: 'url', q: 'world',
+      read: () => { const w = gameWin(); return w ? (w.BASES.length > 1 ? 'on' : 'off') : undefined; },
+      where: 'base.BASES.length', s: 'A generated map with more than one base on it. <code>?world=1</code> today.' },
+    { g: 'sw', id: 'seed', k: 'The seed the map is generated from', e: 'map', f: 'seed', put: 'url', q: 'seed', u: '',
+      read: () => undefined, where: 'nothing',
+      s: 'The generator is seeded and the game stores the seed; <b>the running map does not read its own seed back out</b>, so this one cannot be proved from the game. Delivered with the two-base switch.' },
+
+    // ---- the money and the clock: M4 items 8 and 13 ------------------------
+    { g: 'money', id: 'length', k: 'How long a game lasts', e: 'game', f: 'closesAt', u: 'h', dec: 'length', warn: true,
+      read: () => { const g = G(); return g && g.gameLength / 3600e3; }, where: 'base.ECON.gameLength (ms; the game takes ?length= in hours and defaults to the decided 168)',
+      s: 'Decided as a starting value and it stays a parameter. The game reads it for one thing today: <b>the game year is derived from it</b>, and the year opens the upgrades after the water mill. The lifecycle on the start screen still has a join window and a gap and no length.' },
+    { g: 'money', id: 'gameYear', k: 'One game year', e: 'game', f: 'closesAt', u: 'h', ro: true, exp: () => Number(DEC.length.v) * YEAR_OF,
+      read: () => { const g = G(); return g && g.gameYear / 3600e3; }, where: 'base.ECON.gameYear (derived in the game from gameLength × yearOf, never typed)',
+      s: 'Read only: <b>a quarter of the length</b>, DECIDED, so at 168 h it is 42 h. Not a field - it moves when the length moves. The quarter itself is compared on the length card above.' },
+    { g: 'money', id: 'joinWindow', k: 'How long joining stays open', e: 'game', f: 'joinClosesAt', u: 'h', dec: 'joinWindow',
+      read: () => { const e = eraWin(); return e && e.JOIN_WINDOW / 3600e3; }, where: "the start screen's JOIN_WINDOW" },
+    { g: 'money', id: 'startAfter', k: 'The gap between joining closing and the game starting', e: 'game', f: 'startsAt', u: 'h', dec: 'startAfter',
+      read: () => { const e = eraWin(); return e && e.START_AFTER_LOCK / 3600e3; }, where: "the start screen's START_AFTER_LOCK",
+      s: 'Held back from M18 to this page deliberately, so the field is built with its safety catch rather than without it.' },
+    { g: 'money', id: 'minPlayers', k: 'The fewest players a game needs', e: 'game', f: 'state', u: 'players',
+      read: () => { const e = eraWin(); return e && e.MIN_PLAYERS; }, where: "the start screen's MIN_PLAYERS" },
+    { g: 'money', id: 'cut', k: 'The cut', e: 'game', f: 'cutBps', u: '%', dec: 'cut', bound: true,
+      read: () => undefined, where: 'nothing',
+      s: 'The share of the pot that covers the game\'s fees. Set per game, frozen once the first player has paid, and <b>refused outside its floor and ceiling</b>.' },
+    { g: 'money', id: 'cutFloor', k: "The cut's floor", e: 'game', f: 'cutBps', u: '%', dec: 'cutFloor', read: () => undefined, where: 'nothing' },
+    { g: 'money', id: 'cutCeiling', k: "The cut's ceiling", e: 'game', f: 'cutBps', u: '%', dec: 'cutCeiling', read: () => undefined, where: 'nothing' },
+    { g: 'money', id: 'places', k: 'How many places pay out', e: 'game', f: 'placeShareBps', u: 'places', open: true, cap: PLACES_CAP,
+      read: () => undefined, where: 'nothing',
+      s: '<b>A count, with a ceiling of ' + PLACES_CAP + ' and no fixed value.</b> The split is not a field: it is a rule, and it is derived below.' },
+    { g: 'money', id: 'mktFee', k: 'The marketplace fee', e: 'listing', f: 'feeBps', u: '%', dec: 'mktFee', live: true,
+      read: () => undefined, where: 'RareMarket.feeBps — read back from the chain, never kept here',
+      s: '<b>The one number on this page that may be changed while a game runs.</b> The deployer\'s word was "no need" for the freeze: the cut comes out of money already handed over, the fee out of a sale nobody has agreed to yet. ' +
+        'Held by <code>RareMarket.feeBps</code> as chain state in basis points; the value shown is read from the contract once deployed and compared with the decided <b>1.5%</b> (150 bps). Changing it is <code>setFeeBps</code>, a transaction, refused above the ceiling below.' },
+    { g: 'money', id: 'maxFeeBps', k: "The marketplace fee's ceiling", e: 'listing', f: 'maxFeeBps', u: '%', dec: 'maxFeeBps', ro: true,
+      read: () => undefined, where: 'RareMarket.maxFeeBps — read back from the chain, never kept here',
+      s: '<b>10% (1000 bps), ruling 1 of 2026-09-30, and IMMUTABLE:</b> <code>RareMarket.maxFeeBps</code> is a constructor argument, so it is chosen once at deployment and <b>can never be changed afterwards</b>. No setter exists and this page offers none; the row is read-only and the read-back is compared with the decided 10%.' },
+    { g: 'money', id: 'partnerWait', k: 'The waiting period for a paused partnership', e: 'partnership', f: 'splitBps', u: 'h', dec: 'partnerWait',
+      read: () => undefined, where: 'nothing' },
+    { g: 'money', id: 'roleDelay', k: 'Role change delay', e: 'roles', f: 'roleChangeDelay', u: 'h', dec: 'roleDelay',
+      read: () => undefined, where: 'nothing',
+      s: '<b>Zero for v1</b>, decided 2026-09-30. Held by <code>RareRoles.roleChangeDelay</code> as chain state; the value shown is read from the contract when deployed and compared with the decided 0.' },
+    // ---- the launch whitelist: M4 item 15, ruling 21 (2026-09-30) --------------
+    { g: 'money', id: 'whitelistOpen', k: 'The launch whitelist: open to everyone', e: 'roles', f: 'whitelistOpen', sw: true, decSw: false,
+      read: () => undefined, where: 'RareRoles.whitelistOpen — read back from the chain, never kept here',
+      s: '<b>CLOSED at launch</b>, decided 2026-09-30 (ruling 21): only whitelisted Robinhood Chain addresses may play, enforced in <code>RareRoles.isAllowed</code> and checked by every player-facing verb. The switch shown beside the decided value is <b>read from the contract</b> once deployed. Turning it ON opens the gate to everyone; it is a transaction, root only.' },
+    { g: 'money', id: 'whitelistAdd', k: 'The launch whitelist: add addresses', e: 'roles', f: 'whitelisted', text: true, u: 'addresses',
+      read: () => undefined, where: 'RareRoles.whitelisted(address) — the first address typed is read back from the chain',
+      s: 'Comma-separated 0x addresses. Sent as one <code>setWhitelisted(address[], true)</code>, through the confirm screen like every contract change. <b>The list itself has no copy here</b>: the chain is asked <code>whitelisted(who)</code> for the first address typed, and that answer is what is shown.' },
+    { g: 'money', id: 'whitelistRemove', k: 'The launch whitelist: remove addresses', e: 'roles', f: 'whitelisted', text: true, u: 'addresses',
+      read: () => undefined, where: 'RareRoles.whitelisted(address) — the first address typed is read back from the chain',
+      s: 'Comma-separated 0x addresses, sent as <code>setWhitelisted(address[], false)</code>. Read back the same way as adding.' },
+    { g: 'money', id: 'multiPartner', k: 'More than one partnership at a time', e: 'partnership', f: 'id', sw: true, decSw: false,
+      read: () => undefined, where: 'nothing', s: '<b>Off at launch</b>, turned on once we have seen how a single one behaves.' },
+    { g: 'money', id: 'tradeCrystals', k: 'Trading: crystals', e: 'listing', f: 'state', sw: true, read: () => undefined, where: 'nothing',
+      s: '"The first switch we will want is probably crystals."' },
+    { g: 'money', id: 'tradeItems', k: 'Trading: items', e: 'listing', f: 'itemId', sw: true, read: () => undefined, where: 'nothing' },
+    { g: 'money', id: 'tradeBuildings', k: 'Trading: a building sold back', e: 'listing', f: 'state', sw: true, read: () => undefined, where: 'nothing' },
+    { g: 'money', id: 'tradeBase', k: 'Trading: a whole base', e: 'listing', f: 'state', sw: true, read: () => undefined, where: 'nothing' },
+
+    // ---- demo mode: M4 item 14 --------------------------------------------
+    { g: 'demo', id: 'demo', k: 'Demo mode', e: 'game', f: 'entry', sw: true, read: () => undefined, where: 'nothing',
+      s: '<b>Demo mode forces every game free</b> - no fee, no stake, no payout. It is not a money field beside the cut; it is the field that turns the money off.' },
+  ];
+
+  // homes, read out of schema.json rather than typed here (M4 item 2)
+  let SCH = null;
+  const home = (r) => {
+    if (!r.e) return { h: null, why: 'no entity in the schema carries this number' };
+    if (!SCH) return { h: null, why: 'the schema has not loaded' };
+    const e = SCH.entities[r.e];
+    if (!e) return { h: null, why: 'no entity <code>' + esc(r.e) + '</code> in the schema' };
+    const f = e.fields[r.f];
+    const h = (f && f.home) || e.home;
+    return { h, why: r.e + '.' + (r.f || '') + ' — ' + (SCH.homes[h] || '') };
+  };
+  const HOME_TAG = { chain: ['chain', 'ON CHAIN'], map: ['map', 'IN A SEED'], client: ['client', 'CLIENT BELIEF'] };
+
+  // ---------------------------------------------------------------------------
+  // WHERE A VALUE IS VERIFIED, AND IT IS NOT THIS PAGE.
+  //
+  // The deployer, twice: "show the read value directly from the contract when we
+  // make changes that impact the contract to verify that the changes we in fact
+  // made". Reading base.ECON through a hidden probe proves the page and THE GAME
+  // agree. It proves nothing whatever about a contract - and 38 of the 61 numbers
+  // below have the chain as their home, so for those the game's copy is not the
+  // answer to the question being asked.
+  //
+  // So every card answers two questions and never blurs them:
+  //   THE CHAIN   what does the contract say? Only a contract can answer that.
+  //   THE GAME    what does the client copy hold? A convenience, never a proof.
+  //
+  // CHAIN_READ names the call for a value a contract really holds - `at` is the key
+  // in bridge-config.json that records the contract's address, `sig` the function,
+  // `dec` what to make of the word it returns. CHAIN_WRITE names the setter.
+  //
+  // THREE DIFFERENT SENTENCES FOR THREE DIFFERENT FACTS, because the deployer has to
+  // see which one is true of each number:
+  //   NO CONTRACT YET        the chain is its home and NOTHING ON CHAIN HOLDS IT -
+  //                          no contract in estate/contracts has a getter for it
+  //   NO CONTRACT DEPLOYED   a contract holds it and no address is on record
+  //   NOT READ BY THE GAME   the game's own copy does not carry it either
+  //
+  // Today that is ONE row of sixty-one: RareRoles holds the demo-mode flag. Saying
+  // so plainly is worth more than looking capable.
+  // ---------------------------------------------------------------------------
+  const CHAIN_READ = {
+    roleDelay: { at: 'rareRoles', sig: 'roleChangeDelay()', src: 'RareRoles.roleChangeDelay()',
+      dec: (w) => parseInt(String(w).replace(/^0x/, '') || '0', 16) / 3600 },
+    // RareMarket holds the fee in basis points; the page shows percent, so both decode as bps / 100.
+    mktFee: { at: 'rareMarket', sig: 'feeBps()', src: 'RareMarket.feeBps()',
+      dec: (w) => parseInt(String(w).replace(/^0x/, '') || '0', 16) / 100 },
+    maxFeeBps: { at: 'rareMarket', sig: 'maxFeeBps()', src: 'RareMarket.maxFeeBps()',
+      dec: (w) => parseInt(String(w).replace(/^0x/, '') || '0', 16) / 100 },
+    demo: { at: 'rareRoles', sig: 'demoMode()', src: 'RareRoles.demoMode()',
+      dec: (w) => (/[1-9a-f]/i.test(String(w).replace(/^0x/, '')) ? 'on' : 'off') },
+    whitelistOpen: { at: 'rareRoles', sig: 'whitelistOpen()', src: 'RareRoles.whitelistOpen()',
+      dec: (w) => (/[1-9a-f]/i.test(String(w).replace(/^0x/, '')) ? 'on' : 'off') },
+    // whitelisted(address) takes an argument: the first address typed in the row, else the connected signer (whom the
+    // constructor whitelists), so the read-back is a real answer from the chain and never an empty one.
+    whitelistAdd: { at: 'rareRoles', sig: 'whitelisted(address)', src: 'RareRoles.whitelisted(address)', arg: () => addrs(val.whitelistAdd)[0] || (GATE && GATE.signer) || null,
+      dec: (w) => (/[1-9a-f]/i.test(String(w).replace(/^0x/, '')) ? 'on' : 'off') },
+    whitelistRemove: { at: 'rareRoles', sig: 'whitelisted(address)', src: 'RareRoles.whitelisted(address)', arg: () => addrs(val.whitelistRemove)[0] || (GATE && GATE.signer) || null,
+      dec: (w) => (/[1-9a-f]/i.test(String(w).replace(/^0x/, '')) ? 'on' : 'off') },
+  };
+  // a typed address list -> the well-formed 0x addresses in it, in order
+  const addrs = (t) => String(t || '').split(/[\s,;]+/).filter((a) => /^0x[0-9a-fA-F]{40}$/.test(a));
+  // abi.encode(address[] who, bool ok): head = [offset 0x40, ok], tail = [length, who...]
+  const wlWords = (t, ok) => { const a = addrs(t); return [64, ok ? 1 : 0, a.length, ...a]; };
+  const CHAIN_WRITE = {
+    roleDelay: { at: 'rareRoles', sig: 'setRoleChangeDelay(uint64)', src: 'RareRoles.setRoleChangeDelay(uint64)',
+      word: (v) => Math.round(v * 3600), power: 'the MANAGE_ROLES power, root only' },
+    mktFee: { at: 'rareMarket', sig: 'setFeeBps(uint16)', src: 'RareMarket.setFeeBps(uint16)',
+      word: (v) => Math.round(v * 100), power: 'the SET_MARKET_FEE power; the contract refuses anything above maxFeeBps' },
+    demo: { at: 'rareRoles', sig: 'setDemoMode(bool)', src: 'RareRoles.setDemoMode(bool)',
+      word: (v) => (v ? 1 : 0), power: 'the SET_DEMO_MODE power, which is root only and cannot be granted' },
+    whitelistOpen: { at: 'rareRoles', sig: 'setWhitelistOpen(bool)', src: 'RareRoles.setWhitelistOpen(bool)',
+      word: (v) => (v ? 1 : 0), power: 'the MANAGE_ROLES power, root only' },
+    whitelistAdd: { at: 'rareRoles', sig: 'setWhitelisted(address[],bool)', src: 'RareRoles.setWhitelisted(address[], true)',
+      word: (v) => wlWords(v, true), power: 'the MANAGE_ROLES power, root only' },
+    whitelistRemove: { at: 'rareRoles', sig: 'setWhitelisted(address[],bool)', src: 'RareRoles.setWhitelisted(address[], false)',
+      word: (v) => wlWords(v, false), power: 'the MANAGE_ROLES power, root only' },
+  };
+  // bridge-config.json is this project's one record of where the chain things live. It carries
+  // shadowFriends and attestor and NO rareRoles key, which is the address this page needs.
+  let CFG = null;
+  const at = (k) => (CFG && CFG[k]) || null;
+
+  // The eth_call goes to the public RPC chainlive.js already names. No wallet is needed to VERIFY
+  // state and a wallet would be no better evidence: what matters is that the answer comes from the
+  // chain. chainlive.js does not export its own rpc(), so this is the same shape over ChainLive.RPC
+  // rather than a second list of endpoints typed out here.
+  const CHAINVAL = {};                                  // row id -> { state, got, why }
+  async function rpc(method, params) {
+    let last;
+    for (const u of (window.ChainLive ? window.ChainLive.RPC : [])) {
+      try {
+        const r = await fetch(u, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) });
+        const j = await r.json(); if (j.result !== undefined) return j.result; last = j.error && j.error.message;
+      } catch (e) { last = e.message; }
+    }
+    throw new Error(last || 'no RPC answered');
+  }
+  const sel = (sig) => khex(utf8(sig)).slice(0, 10);
+  // Nothing is asked of the chain until an address is recorded: with none, there is nothing to ask.
+  async function readChain() {
+    for (const [id, c] of Object.entries(CHAIN_READ)) {
+      const a = at(c.at);
+      if (!a) { CHAINVAL[id] = { state: 'nodeploy',
+        why: '<code>' + c.src + '</code> would answer this, and <b>bridge-config.json records no <code>' + c.at + '</code> address</b>.' }; continue; }
+      if (c.arg && !c.arg()) { CHAINVAL[id] = { state: 'nodeploy', why: '<code>' + c.src + '</code> needs an address to ask about; none is typed.' }; continue; }
+      const data = sel(c.sig) + (c.arg ? window.Chance.hex(window.Chance.encode(c.arg())).slice(2) : '');
+      try { CHAINVAL[id] = { state: 'read', got: c.dec(await rpc('eth_call', [{ to: a, data }, 'latest'])),
+        why: 'read with <code>' + c.src + '</code> at <code>' + a + '</code>, over the chain\'s own RPC.' }; }
+      catch (e) { CHAINVAL[id] = { state: 'error', why: 'the chain did not answer: ' + esc(e.message) }; }
+    }
+    paintAll();
+  }
+
+  // THE CHAIN'S ANSWER for one row, or null when the chain is not its home.
+  function chainback(r) {
+    if (home(r).h !== 'chain') return null;
+    if (!CHAIN_READ[r.id]) return { c: 'nr', t: 'THE CHAIN: NO CONTRACT YET',
+      why: 'Its home is the chain and <b>nothing in <code>estate/contracts</code> holds it</b> — no contract has a getter for it, so there is nothing to verify against and nothing to sign.' };
+    const c = CHAINVAL[r.id];
+    if (!c) return { c: 'nr', t: 'THE CHAIN: READING…', why: '' };
+    if (c.state === 'nodeploy') return { c: 'nr', t: 'THE CHAIN: NO CONTRACT DEPLOYED', why: c.why };
+    if (c.state === 'error') return { c: 'no', t: 'THE CHAIN DID NOT ANSWER', why: c.why };
+    const mine = fieldOf(r), agree = r.sw ? (c.got === 'on') === !!mine : String(c.got) === String(mine);
+    return { c: agree ? 'ag' : 'no', t: (agree ? 'THE CONTRACT READS ' : 'DISAGREES — THE CONTRACT READS ') + c.got, why: c.why };
+  }
+
+  // ---------------------------------------------------------------------------
+  // THE GATE. Two questions, and collapsing them into one would be the mistake:
+  //
+  //   WHO IS AT THIS SCREEN   the gate, here. The wallet signs a challenge, this page
+  //                           RECOVERS the address that made the signature, and asks
+  //                           the role registry whether that address is in the
+  //                           DEPLOYER role.                            -- identity
+  //   IS A GAME RUNNING       the lock, further down. No number may change under a
+  //                           running game.                             -- timing
+  //
+  // A signature cannot say whether a game is running, and a running game cannot say
+  // who is holding the wallet. So the gate sits IN FRONT of the lock rather than
+  // replacing it: you sign to reach the lock, and the lock still has to be answered.
+  // The page says so on itself, and says what to ask for to have it built the other
+  // way round.
+  //
+  // WHAT IS REALLY PROVED HERE. Recovering the signer is real cryptography and it
+  // happens in this page: keccak256 is chance.js's - the same hash the contracts use -
+  // and the secp256k1 recovery is the block below. A signature that does not recover
+  // to the address the wallet named is refused, so connecting is not enough and a
+  // pasted address is worth nothing. WHAT IS NOT PROVED: that anybody is stopped. The
+  // source of this page is public and the browser belongs to the reader. See the guard.
+  //
+  // WHO THE DEPLOYER IS IS NOT WRITTEN DOWN HERE, AND MUST NOT BE. DESIGN.md: "the
+  // deployer ... It is a role, not an address - one address holds it at launch and more
+  // may be added later", and the repository is public. So the page asks a contract
+  // instead of holding a constant: RareRoles.sol's inRole(role, who), with the role id
+  // keccak256("rarefriends.role.deployer") computed here exactly as the contract
+  // computes it. The contract's ADDRESS is what has to be recorded, and there is
+  // nowhere recording it: bridge-config.json is this project's one "where the chain
+  // things live" file and it carries shadowFriends and attestor and no registry. This
+  // page reads `rareRoles` out of it, which is the key that ought to exist; until M20
+  // deploys the registry and that key is filled in, nothing can tell one address from
+  // another and the gate says exactly that instead of pretending.
+  // ---------------------------------------------------------------------------
+  const utf8 = (s) => new TextEncoder().encode(s);
+  const kec = (u8) => window.Chance.keccak256(u8);
+  const khex = (u8) => window.Chance.hex(kec(u8));
+
+  // secp256k1, only ever used to RECOVER a public key from a signature. There is no
+  // private key in this file and nothing here can sign: the gate opens for one role and
+  // a page that could sign for it would be the hole, not the gate.
+  const SEC = (() => {
+    const P = 0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2fn;
+    const N = 0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141n;
+    const G = [0x79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798n,
+               0x483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8n];
+    const mod = (a, m) => ((a % m) + m) % m;
+    const inv = (a, m) => { let r0 = mod(a, m), r1 = m, s0 = 1n, s1 = 0n;
+      while (r1) { const q = r0 / r1; [r0, r1] = [r1, r0 - q * r1]; [s0, s1] = [s1, s0 - q * s1]; } return mod(s0, m); };
+    const add = (p, q) => {                       // affine, one verification is not a hot loop
+      if (!p) return q; if (!q) return p;
+      if (p[0] === q[0] && mod(p[1] + q[1], P) === 0n) return null;
+      const l = (p[0] === q[0] && p[1] === q[1])
+        ? mod(3n * p[0] * p[0] % P * inv(2n * p[1], P), P)
+        : mod(mod(q[1] - p[1], P) * inv(mod(q[0] - p[0], P), P), P);
+      const x = mod(l * l - p[0] - q[0], P); return [x, mod(l * (p[0] - x) - p[1], P)]; };
+    const mul = (k, p) => { let r = null, a = p; k = mod(k, N);
+      while (k > 0n) { if (k & 1n) r = add(r, a); a = add(a, a); k >>= 1n; } return r; };
+    const b32 = (n) => { const o = new Uint8Array(32); for (let i = 31; i >= 0; i--) { o[i] = Number(n & 255n); n >>= 8n; } return o; };
+    const pow = (b, e, m) => { let r = 1n; b = mod(b, m); while (e > 0n) { if (e & 1n) r = r * b % m; b = b * b % m; e >>= 1n; } return r; };
+    // an Ethereum address is the last 20 bytes of keccak256 over the 64-byte public key
+    const addressOf = (x, y) => { const b = new Uint8Array(64); b.set(b32(x), 0); b.set(b32(y), 32); return '0x' + khex(b).slice(-40); };
+    // what a wallet actually signs for personal_sign: keccak256 over the prefix, the byte
+    // length as decimal text, and the message
+    const digest = (msg) => { const m = utf8(msg), p = utf8('\x19Ethereum Signed Message:\n' + m.length);
+      const all = new Uint8Array(p.length + m.length); all.set(p, 0); all.set(m, p.length); return BigInt(khex(all)); };
+    function recover(msg, sigHex) {
+      const h = String(sigHex || '').replace(/^0x/, '');
+      if (!/^[0-9a-fA-F]{130}$/.test(h)) return null;            // 65 bytes: r, s, v
+      const r = BigInt('0x' + h.slice(0, 64)), s = BigInt('0x' + h.slice(64, 128));
+      let v = parseInt(h.slice(128), 16); if (v === 0 || v === 1) v += 27;
+      const rec = v - 27; if (rec < 0 || rec > 3) return null;
+      if (r === 0n || s === 0n || r >= N || s >= N) return null;
+      const x = r + (rec >> 1 ? N : 0n); if (x >= P) return null;
+      const y2 = mod(x * x % P * x + 7n, P);
+      let y = pow(y2, (P + 1n) / 4n, P); if (y * y % P !== y2) return null;   // x is not on the curve
+      if ((y & 1n) !== BigInt(rec & 1)) y = P - y;
+      const z = digest(msg), ri = inv(r, N);
+      const Q = add(mul(mod(-z * ri, N), G), mul(mod(s * ri, N), [x, y]));
+      return Q ? addressOf(Q[0], Q[1]) : null;
+    }
+    return { recover, addressOf, digest, pub: (d) => { const q = mul(d, G); return addressOf(q[0], q[1]); } };
+  })();
+
+  // the role, and the call. Neither is typed: the id is the hash the contract computes and
+  // the selector is the hash of the signature RareRoles.sol declares.
+  const ROLE_NAME = 'rarefriends.role.deployer';
+  const ROLE_ID = khex(utf8(ROLE_NAME));
+  const IN_ROLE = khex(utf8('inRole(bytes32,address)')).slice(0, 10);
+  const CHAIN_ID = window.Chance.CHAIN_ID;
+
+  const short = (a) => a ? a.slice(0, 6) + '…' + a.slice(-4) : '';
+  const eth = () => (window.ethereum && window.ethereum.request) ? window.ethereum : null;
+
+  const GATE = { addr: '', sig: '', msg: '', signer: '', open: false, why: '', claimed: false, reg: undefined, more: false };
+
+  function challenge(addr) {
+    return 'Rare Fiends — the deployer page\n\n' +
+      'I hold the deployer role and I am opening the page that sets the game\'s numbers.\n\n' +
+      'address: ' + addr + '\n' +
+      'chain:   ' + CHAIN_ID + '\n' +
+      'role:    ' + ROLE_NAME + '\n' +
+      'nonce:   ' + GATE.nonce + '\n' +
+      'at:      ' + GATE.when + '\n\n' +
+      'This signs nothing on chain and spends nothing. It only shows the page whose key this is.';
+  }
+
+  // where the registry is recorded - and it is not recorded anywhere yet
+  async function registry() {
+    try { CFG = await (await fetch(ChainLive.BRIDGE_CONFIG || 'bridge-config.json', { cache: 'no-store' })).json(); }
+    catch (e) { CFG = {}; }
+    return at('rareRoles') || at('roles') || null;
+  }
+  // inRole(role, who), asked of the chain through the wallet the deployer is already holding
+  async function inRole(reg, who) {
+    const e = eth(); if (!e) return { ok: false, why: 'there is no wallet to ask the chain with' };
+    try {
+      const cid = await e.request({ method: 'eth_chainId' });
+      if (parseInt(cid, 16) !== CHAIN_ID) {
+        try { await e.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: '0x' + CHAIN_ID.toString(16) }] }); }
+        catch (err) { return { ok: false, why: 'the wallet is not on chain ' + CHAIN_ID + ', so the registry cannot be read' }; }
+      }
+      const data = IN_ROLE + ROLE_ID.slice(2) + who.replace(/^0x/, '').toLowerCase().padStart(64, '0');
+      const r = await e.request({ method: 'eth_call', params: [{ to: reg, data }, 'latest'] });
+      return { ok: true, member: /[1-9a-f]/i.test(String(r || '').replace(/^0x/, '')) };
+    } catch (err) { return { ok: false, why: 'the registry did not answer: ' + ((err && err.message) || 'no reason given') }; }
+  }
+
+  // A refusal is a short heading and a reason underneath. The heading never changes - what the
+  // reader needs first is that nothing happened - and the reason is set in the reading face,
+  // because a sentence in the display face at 26px does not fit a phone.
+  function shut(why, keep) { GATE.open = false; GATE.why = why || '';
+    if (!keep) { GATE.sig = ''; GATE.signer = ''; }                 // a refusal throws the proof away
+    paintAll(); }
+
+  async function connect() {
+    const e = eth();
+    if (!e) return shut('NO WALLET IN THIS BROWSER. There is nothing to sign with, so this page stays shut — ' +
+      'a typed address proves nothing and this page will not take one.');
+    try {
+      const a = await e.request({ method: 'eth_requestAccounts' });
+      if (!a || !a[0]) return shut('THE WALLET NAMED NO ADDRESS.');
+      GATE.addr = a[0]; GATE.nonce = nonce(); GATE.when = new Date().toISOString();
+      GATE.msg = challenge(GATE.addr); GATE.why = ''; paintAll();
+    } catch (err) { shut('THE WALLET SAID NO. Nothing is open.'); }
+  }
+  function nonce() { const b = new Uint8Array(16); crypto.getRandomValues(b); return window.Chance.hex(b).slice(2); }
+
+  async function signIn() {
+    const e = eth(); if (!e) return shut('NO WALLET IN THIS BROWSER.');
+    let sig;
+    try {
+      sig = await e.request({ method: 'personal_sign', params: [window.Chance.hex(utf8(GATE.msg)), GATE.addr] });
+    } catch (err) { return shut('THE SIGNATURE WAS REFUSED. Without it this page cannot tell you from anybody, so it shows nothing.'); }
+    const signer = SEC.recover(GATE.msg, sig);
+    if (!signer) return shut('THAT IS NOT A SIGNATURE OVER THIS CHALLENGE. Nothing is open.');
+    if (signer.toLowerCase() !== String(GATE.addr).toLowerCase())
+      return shut('THE SIGNATURE DOES NOT BELONG TO ' + short(GATE.addr) + '. It was made by ' + short(signer) +
+        ', so the wallet did not prove the address it named. Nothing is open.');
+    GATE.sig = sig; GATE.signer = signer;
+    const reg = GATE.reg = await registry();
+    if (!reg) {
+      return shut('NO ROLE REGISTRY ON RECORD, SO NOBODY CAN BE IDENTIFIED. The signature is good — ' + short(signer) +
+        ' really does hold that key — and there is nothing to check it against. <b>bridge-config.json has no <code>rareRoles</code> address</b>, ' +
+        'because <code>RareRoles.sol</code> is written and not deployed. This page fails closed: a signature from an address nobody vouches for is a signature, not an identity.', true);
+    }
+    const r = await inRole(reg, signer);
+    if (!r.ok) return shut('THE REGISTRY COULD NOT BE READ — ' + esc(r.why) + '. Fails closed: nothing is open.');
+    if (!r.member) return shut('THAT ADDRESS IS NOT IN THE DEPLOYER ROLE. The signature is good and the registry says no, ' +
+      'so this page shows you what it shows a stranger: nothing.');
+    GATE.open = true; GATE.claimed = false; GATE.why = '';
+    log('the gate', 'shut', 'open — signed by ' + short(signer) + ', and the registry holds it in the deployer role', false);
+    openBody();
+  }
+
+  // The same shape as the lock below, for the same reason: the one place that could answer
+  // does not exist, so the only way past is the deployer saying so, on the record.
+  function claim() {
+    if (!GATE.signer) return;
+    GATE.open = true; GATE.claimed = true; GATE.why = '';
+    log('the gate', 'shut — no registry to ask', 'open under a CLAIM by ' + short(GATE.signer) + ', checked against nothing', false);
+    openBody();
+  }
+
+  // Signing out puts the game down as well as the screen. Hiding the body while the probes keep
+  // running would leave the page reading a game for somebody it has stopped showing it to.
+  function signOut() { const was = GATE.open ? 'open' : 'shut';
+    GATE.addr = ''; GATE.sig = ''; GATE.signer = ''; GATE.open = false; GATE.claimed = false; GATE.why = '';
+    attested = false; ['pBase', 'pEra'].forEach((id) => { $(id).src = 'about:blank'; });
+    // and a new session does not inherit the last one's staged changes, or the screen it was shown
+    Object.keys(PEND).forEach((k) => delete PEND[k]); CONFIRM = null;
+    log('the gate', was, 'shut', false); paintAll(); }
+
+  // Nothing in the game is read until the gate is open. The probes carry no src until here.
+  function openBody() {
+    ['pBase', 'pEra'].forEach((id) => { const f = $(id); if (f.getAttribute('src') !== f.dataset.src) f.src = f.dataset.src; });
+    readChain();                                        // and only now is the chain asked anything
+    paintAll();
+    waitForBase(() => { $('status').textContent = 'THE GAME ANSWERED.'; paintAll(); });
+  }
+
+  function paintGate() {
+    const b = $('gate');
+    const honest = '<p>This gate is worth exactly what a page can be worth. <b>It decides what you are shown, not what you may do.</b> ' +
+      'Every setter behind this page still refuses nobody, so <i>you are not the deployer, so this page will not help you</i> is true and ' +
+      '<i>you cannot change anything</i> is not true yet.</p>';
+    if (GATE.open) {
+      b.className = 'bar off';
+      b.innerHTML = '<div class="hd">SIGNED IN AS <b>' + esc(short(GATE.signer)) + '</b>' + (GATE.claimed ? ' — ON A CLAIM' : '') + '</div>' +
+        (GATE.more ? '<p>' + (GATE.claimed
+          ? 'The signature is real and there was no registry to check it against, so this is on the record as a <b>claim</b>. Everything below is open under it.'
+          : 'The signature recovered to that address and the registry holds it in the <b>deployer</b> role.') + '</p>' : '') +
+        '<div class="row"><button class="btn" id="signout">SIGN OUT</button>' +
+        '<button class="btn" id="gateMore">' + (GATE.more ? 'LESS' : 'WHAT THIS IS NOT') + '</button></div>' +
+        (GATE.more ? honest + gateSmall() : '');
+      $('signout').onclick = signOut;
+      $('gateMore').onclick = () => { GATE.more = !GATE.more; paintGate(); };
+      return;
+    }
+    b.className = 'bar';
+    const head = GATE.why
+      ? '<div class="hd"><b>SHUT.</b> NOTHING BELOW IS SHOWN.</div><p class="shut">' + GATE.why + '</p>'
+      : '<div class="hd"><b>THE DEPLOYER\'S PAGE.</b> SIGN TO SHOW IT YOU HOLD THE KEY.</div>' +
+        (GATE.addr ? '' : '<p>Connecting proves nothing — any address can be connected. ' +
+          '<b>The wallet signing the challenge is the confirmation.</b> Until then this page shows nothing.</p>');
+    const acts = GATE.addr
+      ? '<button class="btn big" id="dosign">SIGN TO OPEN THE PAGE</button><button class="btn" id="restart">START AGAIN</button>'
+      : '<button class="btn big" id="doconnect">CONNECT THE WALLET</button>';
+    b.innerHTML = head +
+      (GATE.addr && !GATE.why ? '<p class="src">' + esc(short(GATE.addr)) + ' is connected and has proved nothing yet.</p>' : '') +
+      '<div class="row">' + acts + '<button class="btn" id="gateMore">' + (GATE.more ? 'LESS' : 'WHY') + '</button></div>' +
+      (GATE.addr && !GATE.why ? '<pre class="msg" id="chal">' + esc(GATE.msg) + '</pre>' : '') +
+      (GATE.signer && GATE.reg === null ? '<div class="row"><button class="btn" id="claimit">NO REGISTRY — I CONFIRM I HOLD THE DEPLOYER ROLE</button></div>' : '') +
+      (GATE.more ? honest + gateSmall() : '');
+    if ($('doconnect')) $('doconnect').onclick = connect;
+    if ($('dosign')) $('dosign').onclick = signIn;
+    if ($('restart')) $('restart').onclick = signOut;
+    if ($('claimit')) $('claimit').onclick = claim;
+    $('gateMore').onclick = () => { GATE.more = !GATE.more; paintGate(); };
+  }
+
+  function gateSmall() {
+    return '<p>What it does hold back is real enough to be worth having: <b>nothing is read out of the game and nothing is recorded until it opens</b>. ' +
+      'A stranger gets this bar and a heading. No field, no switch, no value read out of the running game, no trail. ' +
+      'This page\'s source is public, so the rules it carries are public — <b>what it can keep is what it reads and what it records</b>, and it keeps those.</p>' +
+      '<p>The signature is checked here: <code>keccak256</code> is <code>chance.js</code>\'s, the same hash the contracts use, and the address is ' +
+      'recovered from the signature rather than taken from the wallet\'s word. A signature that recovers to a different address is refused. ' +
+      'The role is <code>keccak256("' + ROLE_NAME + '")</code>, computed the way <code>RareRoles.sol</code> computes it, and the question asked of it is ' +
+      '<code>inRole(role, who)</code>. <b>Its address is not recorded anywhere</b>: <code>bridge-config.json</code> holds <code>shadowFriends</code> and ' +
+      '<code>attestor</code> and no <code>rareRoles</code>, because the registry is written and not deployed. Nothing is typed into this page — ' +
+      'DESIGN.md says the deployer "is a role, not an address", and the repository is public.</p>' +
+      '<p><b>Two gates, in series, and why.</b> This one asks <i>who is at this screen</i>. The lock below asks <i>is a game running</i>. ' +
+      'Neither can answer the other, so the signature does not replace the lock\'s confirmation: you sign to reach the lock and the lock still has to be answered. ' +
+      '<b>Overrule it like this</b> — say the word and the challenge above will carry the sentence <i>and no game is running</i>, so one signature answers both and ' +
+      'the record shows that half was claimed rather than read.</p>';
+  }
+
+  // ---------------------------------------------------------------------------
+  // THE LOCK. M4 item 12: nothing on this page may be changed while a game is
+  // running. Every number, not the money ones.
+  //
+  // "Is a game running" has exactly ONE home and it is game.state, on chain, and
+  // it DOES NOT EXIST - M18 writes the entity, M20 deploys it. The only place a
+  // game's lifecycle lives today is the start screen's own era object, which
+  // lives in one browser tab. So this page can be in one of two states and never
+  // in a third:
+  //
+  //   RUNNING   the lifecycle says a game exists. Hard locked, no way past it.
+  //   UNKNOWN   the lifecycle says nothing, which is not the same as "no game".
+  //             Locked, and the only way past it is the deployer attesting, on
+  //             the record, that no game is running. Every change made after
+  //             that is logged as made under the attestation.
+  //
+  // Fail closed, not open: a page with power that guesses "probably fine" is the
+  // lock on a door with no wall.
+  // ---------------------------------------------------------------------------
+  let attested = false, lockOpen = false;
+  function lifecycle() {
+    const e = eraWin();
+    if (!e) return { known: false, running: false, src: 'the start screen has not answered yet', era: null };
+    if (!e.S.era) return { known: false, running: false, src: "the start screen's era, which lives in one browser tab", era: null };
+    return { known: true, running: true, src: "the start screen's era", era: e.S.era };
+  }
+  // The gate is part of being locked and it is the outer one: a page nobody has identified
+  // themselves to is locked whatever the lifecycle says.
+  const state = () => { const l = lifecycle(); return { l, gate: GATE.open, locked: !GATE.open || l.running || !attested }; };
+
+  function paintLock() {
+    const { l, locked } = state();
+    const b = $('lock');
+    b.className = 'bar' + (locked ? '' : ' off');
+    if (l.running) {
+      const e = l.era, left = Math.max(0, e.lockAt - Date.now());
+      b.innerHTML = '<div class="hd"><b>A GAME IS RUNNING. NOTHING HERE CAN BE CHANGED.</b></div>' +
+        '<p>A running game keeps the table it was created with. This page edits what the <b>next</b> game is created with.</p>' +
+        '<div class="row"><button class="btn" id="lockMore">' + (lockOpen ? 'LESS' : 'WHY') + '</button></div>' +
+        (lockOpen ? '<p>While a game is live this page edits nothing at all, which is what makes a recorded fight replayable: the table it was fought under cannot have moved. ' +
+          'The refusal here is a convenience — the guarded setter on chain has to refuse it too, because nothing stops somebody calling the contract directly.</p>' +
+          '<p class="src">Read from ' + esc(l.src) + '. Joining closes in ' + Math.round(left / 60000) + ' min.</p>' : '');
+      $('lockMore').onclick = () => { lockOpen = !lockOpen; paintLock(); };
+      attested = false;
+      return;
+    }
+    if (locked) {
+      b.innerHTML = '<div class="hd"><b>LOCKED.</b> THIS PAGE CANNOT TELL WHETHER A GAME IS RUNNING.</div>' +
+        '<p>No number may change under a running game, so it refuses every change by default.</p>' +
+        '<div class="row"><button class="btn big" id="attest">NO REGISTRY — I CONFIRM NO GAME IS RUNNING</button>' +
+        '<button class="btn" id="lockMore">' + (lockOpen ? 'LESS' : 'WHY') + '</button></div>' +
+        (lockOpen ?
+          '<p>The rule is every number, not the money ones. The one place that could answer is <code>game.state</code> on chain, and it does not exist: ' +
+          'the schema gives it a home and a later milestone writes it. The only lifecycle that exists today lives in one browser tab, and a silent tab is not the same as no game — ' +
+          'so this page fails closed rather than guessing.</p>' +
+          '<p class="src">Read from ' + esc(l.src) + '. Every change made after the confirmation is logged as made under it.</p>' : '');
+      $('attest').onclick = () => { attested = true; log('the lock', 'refusing every change', 'open under the deployer\'s confirmation', false); paintAll(); };
+      $('lockMore').onclick = () => { lockOpen = !lockOpen; paintLock(); };
+      return;
+    }
+    b.innerHTML = '<div class="hd">OPEN — UNDER THE DEPLOYER\'S CONFIRMATION THAT NO GAME IS RUNNING</div>' +
+      '<p>Changes are accepted and every one of them is on the record below. If the lifecycle reports a game, this page locks again on its own and the confirmation is dropped.</p>' +
+      '<div class="row"><button class="btn" id="relock">LOCK IT AGAIN</button></div>' +
+      '<p class="src">Read from ' + esc(l.src) + ', every second.</p>';
+    $('relock').onclick = () => { attested = false; log('the lock', 'open', 'locked', false); paintAll(); };
+  }
+
+  // the guard: M4 item 1, and it says plainly what it is not
+  let guardOpen = false;
+  function paintGuard() {
+    $('guard').innerHTML = '<div class="hd">A GATE ON A PAGE. <b>NOT A LOCK ON THE GAME.</b></div>' +
+      '<p><b>You got in by signing, and that is worth something: nobody else is shown any of this.</b> What it is not is a lock. ' +
+      'Every setter behind this page still refuses nobody. <i>You are not the deployer, so this page will not help you</i> — true. ' +
+      '<i>You cannot change anything</i> — <b>not true yet</b>, and this page will not say it is.</p>' +
+      '<div class="row"><button class="btn" id="guardMore">' + (guardOpen ? 'LESS' : 'WHY') + '</button></div>' +
+      (guardOpen ?
+        '<p>The gate above refuses in <b>your</b> browser, and the browser is yours: the source of this page is public, the check runs in it, ' +
+        'and anyone can serve themselves a copy with the gate cut out. So a wallet check in a page is never security. ' +
+        'What it can honestly do it does: <b>hold back what this page reads and what it records</b> — every field, every switch, every value read out of the running game, and the trail.</p>' +
+        '<p><b>The gate that holds is on chain, and it is not deployed.</b> <code>RareRoles.sol</code> is written: it keeps the ' +
+        '<code>DEPLOYER</code> role as stored state and answers <code>inRole(role, who)</code>, which is the question the gate above asks it. ' +
+        'Every setter has to ask the same question and refuse anyone outside the role, with its own event and its own delay. ' +
+        'Until then this page is a lock on a door with no wall — and the door is at least shut to a stranger.</p>' +
+        '<p class="src">The page\'s own gate is this milestone\'s first deliverable and it is built. The real one is M20\'s, and its address is not recorded anywhere yet.</p>' : '');
+    $('guardMore').onclick = () => { guardOpen = !guardOpen; paintGuard(); };
+  }
+
+  // ---------------------------------------------------------------------------
+  // THE RECORD. M4 item 10. On-chain setters emit an event per change for free;
+  // anything client-side needs its own trail and had none. This is that trail,
+  // and it is honest about what it is: this tab, and nowhere else.
+  // ---------------------------------------------------------------------------
+  const LOG = [];
+  function log(what, from, to, delivered) {
+    LOG.unshift({ t: new Date(), what, from, to, delivered, under: attested && !lifecycle().running });
+  }
+
+  // ---------------------------------------------------------------------------
+  // THE READ-BACK. M4 item 11. Not a preview: a preview says what a number would
+  // do before it is real, a read-back says a real number arrived. Every card
+  // reads the value out of the game and compares it with the field.
+  // ---------------------------------------------------------------------------
+  const val = {};                                        // what the page holds, by row id
+  const REFUSE = {};                                     // a refusal stands on the card until the next try
+  function fieldOf(r) {
+    if (r.dec) return DEC[r.dec].v;
+    if (r.sw) return !!val[r.id];
+    if (r.id in val) return val[r.id];
+    return r.read ? r.read() : undefined;                 // a READ row starts at what the game reads
+  }
+  // ---------------------------------------------------------------------------
+  // THE DOCUMENT'S OWN NUMBERS, compared as NUMBERS AT THE LEVELS THEY DESCRIBE and
+  // not as one string. This page found the game reading 0, 1.5, 2.5, 3.5, 4.5 against
+  // a document that says 2, 3, 4, 5, and the deployer ruled the document right. The
+  // game now reads 0, 2, 3, 4, 5 - which IS the document's four numbers, with a
+  // level-0 slot in front because the table is indexed by tier and a cell that is not
+  // built reaches nothing. So the four levels are compared, and the level-0 entry is
+  // SAID rather than silently dropped: a comparison that quietly ignores part of what
+  // it read is how a real disagreement gets lost.
+  // ---------------------------------------------------------------------------
+  function docCheck(r, got) {
+    if (!r.doc || got === null || got === undefined) return null;
+    const nums = String(got).split(/[^0-9.]+/).filter((x) => x !== '').map(Number);
+    const zero = nums.length === r.doc.length + 1 && nums[0] === 0;
+    const lv = zero ? nums.slice(1) : nums;
+    return { agree: lv.length === r.doc.length && lv.every((v, i) => v === r.doc[i]), lv, zero, nums };
+  }
+
+  function readback(r) {
+    const got = r.read ? r.read() : undefined;
+    if (got === undefined || got === null || got === '') return { c: 'nr', t: 'NOT READABLE', got: null };
+    if (r.ro) {                                            // read only; compared when the row says what it expects
+      if (!r.exp) return { c: 'ag', t: 'READS ' + got, got };
+      const e = r.exp(), same = Math.abs(Number(got) - e) < 1e-9;
+      return { c: same ? 'ag' : 'no', t: (same ? 'AGREES — THE GAME READS ' : 'DISAGREES — THE GAME READS ') + got + (r.u ? ' ' + r.u : '') + ' · DECIDED ' + e + (r.u ? ' ' + r.u : ''), got };
+    }
+    const mine = fieldOf(r);
+    if (r.tab || r.against) {
+      const agree = r.against ? String(got) === String(r.against) : true;
+      return { c: agree ? 'ag' : 'no', t: (agree ? 'THE GAME READS ' : 'DISAGREES — THE GAME READS ') + got, got };
+    }
+    if (r.sw) { const on = got === 'on'; return { c: on === !!mine ? 'ag' : 'no', t: (on === !!mine ? 'AGREES — THE GAME IS ' : 'DISAGREES — THE GAME IS ') + got.toUpperCase(), got }; }
+    const same = Number(got) === Number(mine);
+    return { c: same ? 'ag' : 'no', t: (same ? 'AGREES — THE GAME READS ' : 'DISAGREES — THE GAME READS ') + got, got };
+  }
+
+  // delivery: the four switches, the seed and the starting purse are query
+  // parameters base.html already honours, so a change here really does reach the
+  // game and really can be read back out of it.
+  function deliver() {
+    const q = new URLSearchParams();
+    R.filter((r) => r.put === 'url').forEach((r) => {
+      if (r.sw) { if (val[r.id]) q.set(r.q, '1'); return; }
+      const v = val[r.id];
+      if (v !== undefined && v !== '' && v !== null) q.set(r.q || r.id, String(v));
+    });
+    if (val.world && val.seed == null) q.set('seed', '7');
+    q.set('econ', '1');
+    log('the switches and the starting purse', 'the game as it was', 'base.html?' + q, true);
+    $('pBase').src = 'base.html?' + q;
+    $('status').textContent = 'DELIVERED — WAITING FOR THE GAME TO COME BACK…';
+    waitForBase(() => { $('status').textContent = 'THE GAME ANSWERED. READ BACK BELOW.'; paintAll(); });
+  }
+
+  // ---------------------------------------------------------------------------
+  // WHAT IS ABOUT TO CHANGE, SHOWN BEFORE IT IS SIGNED.
+  //
+  // The deployer: "before it signs the changes it should show what is being changed
+  // and ask the deployer to confirm before signing the change on a transaction.. i
+  // imagine that page will handle both contract state changes and game changes."
+  //
+  // So there is no delay and there is a confirmation. A delay protects you only if
+  // you happen to look during it; a confirmation protects you every time. NOTHING IS
+  // SIGNED OR APPLIED THAT HAS NOT BEEN SHOWN FIRST, and that is structural rather
+  // than a habit: `openConfirm` takes keccak256 over the exact list it renders, and
+  // `guard` refuses unless the list still hashes to what was shown. A change made
+  // after the screen was drawn does not slip through with it.
+  //
+  // TWO KINDS OF CHANGE ON ONE SCREEN, AND ONE MUST NEVER LOOK LIKE THE OTHER.
+  //   A CONTRACT STATE CHANGE   a transaction: gas, a wallet signature, and no way
+  //                             back once it is mined.
+  //   A GAME CHANGE             a client belief or a seed. Nothing is signed and
+  //                             nothing is spent, and saying "sign to apply" over
+  //                             one of these would be a lie.
+  // And the third case, which is most of this page: the chain is its home and NO
+  // CONTRACT HOLDS IT YET, so there is nothing to sign and nothing to apply.
+  // ---------------------------------------------------------------------------
+  const PEND = {};                                      // row id -> { from, to }
+  const shown = (x) => (x === undefined || x === null || x === '' ? '—' : String(x));
+  function stage(r, was, to) {
+    const e = PEND[r.id] || (PEND[r.id] = { from: shown(was) });
+    e.to = shown(to);
+    if (e.from === e.to) delete PEND[r.id];             // put back where it was is not a change
+    CONFIRM = null;                                     // anything edited retires the screen just shown
+  }
+  function kind(r) {
+    const w = CHAIN_WRITE[r.id], h = home(r).h;
+    if (w) { const a = at(w.at);
+      return a ? { k: 'tx', t: 'A CONTRACT STATE CHANGE', can: true,
+          s: 'A <b>transaction</b> on chain ' + CHAIN_ID + ': <code>' + w.src + '</code> at <code>' + a + '</code>. It costs gas, <b>the wallet signs it</b>, and once it is mined it cannot be taken back. It needs ' + w.power + '.' }
+        : { k: 'notx', t: 'A CONTRACT STATE CHANGE — NOTHING CAN BE SIGNED', can: false,
+          s: '<code>' + w.src + '</code> would carry it and <b>the contract is not deployed</b>: bridge-config.json records no <code>' + w.at + '</code> address. There is nothing to send a transaction to.' }; }
+    if (r.put === 'url') return { k: 'game', t: 'A GAME CHANGE', can: true,
+      s: 'It reaches the running game by reloading it with a different web address. <b>Nothing is signed and nothing is spent</b>, and nothing about it is on chain.' };
+    if (h === 'chain') return { k: 'nochain', t: 'NO CONTRACT YET', can: false,
+      s: 'Its home is the chain and <b>nothing on chain holds it</b>. There is nothing to sign and nothing this page can deliver — the number here is a proposal until a contract carries it.' };
+    if (h === 'map') return { k: 'seed', t: 'A SEED CHANGE — THE NEXT MAP', can: false,
+      s: 'Frozen into a map at its seed, so it would change what the <b>next</b> map is generated with and nothing about the one being played. Nothing is signed, and <b>no setter exists</b>, so this page cannot deliver it.' };
+    return { k: 'belief', t: 'A CLIENT BELIEF', can: false,
+      s: 'The game believes it and nothing enforces it. Nothing is signed, and <b>no setter exists</b>, so this page cannot deliver it.' };
+  }
+  const pending = () => R.filter((r) => PEND[r.id]).map((r) => ({ r, from: PEND[r.id].from, to: PEND[r.id].to, kind: kind(r) }));
+  const digestOf = (l) => khex(utf8(JSON.stringify(l.map((x) => [x.r.id, x.from, x.to, x.kind.k]))));
+  let CONFIRM = null;
+
+  function openConfirm() {
+    const l = pending();
+    if (!l.length) { CONFIRM = { list: [], digest: digestOf([]) }; paintAll(); return; }
+    CONFIRM = { list: l, digest: digestOf(l) };
+    paintAll();
+    const c = $('confirm'); if (c && c.scrollIntoView) c.scrollIntoView({ block: 'center' });
+  }
+  // The one door. Both ways out of this page go through it, and it refuses anything that was not on
+  // the screen the deployer read.
+  function guard(what) {
+    const l = pending();
+    if (!CONFIRM || CONFIRM.digest !== digestOf(l)) {
+      log(what, 'never shown', 'REFUSED — nothing is signed or applied that has not been shown on the confirm screen first', false);
+      paintAll(); return null;
+    }
+    return l;
+  }
+  function applyGame() {
+    const l = guard('the game changes'); if (!l) return false;
+    if (!l.some((x) => x.kind.k === 'game')) return false;
+    l.filter((x) => x.kind.k === 'game').forEach((x) => { delete PEND[x.r.id]; });
+    CONFIRM = null; deliver(); return true;
+  }
+  // The transaction. It is written out because the confirm screen in front of it is the deliverable,
+  // and it is disabled on the screen while no contract is deployed - the shape bridge.html already
+  // uses for its own mint: the button exists, says why it cannot be pressed, and is not pressable.
+  async function signSend() {
+    const l = guard('the contract changes'); if (!l) return false;
+    const tx = l.filter((x) => x.kind.k === 'tx'); if (!tx.length) return false;
+    const e = eth(); if (!e) { log('the contract changes', 'confirmed', 'REFUSED — no wallet to sign with', false); paintAll(); return false; }
+    for (const x of tx) {
+      const w = CHAIN_WRITE[x.r.id];
+      const data = sel(w.sig) + window.Chance.hex(window.Chance.encode(...[].concat(w.word(val[x.r.id])))).slice(2);
+      try {
+        const h = await e.request({ method: 'eth_sendTransaction', params: [{ from: GATE.signer, to: at(w.at), data }] });
+        log(x.r.k, x.from, x.to + ' — sent as ' + h, true); delete PEND[x.r.id];
+      } catch (err) { log(x.r.k, x.from, x.to + ' — REFUSED by the wallet', false); }
+    }
+    CONFIRM = null; readChain(); paintAll(); return true;
+  }
+
+  function paintConfirm() {
+    const b = $('confirm');
+    if (!CONFIRM) { b.hidden = true; b.innerHTML = ''; return; }
+    b.hidden = false;
+    const l = CONFIRM.list, have = (k) => l.some((x) => x.kind.k === k);
+    if (!l.length) {
+      b.innerHTML = '<div class="hd">NOTHING IS PENDING</div><p>No field on this page differs from what it was. There is nothing to show and nothing to sign.</p>' +
+        '<div class="row"><button class="btn" id="nocfm">CLOSE</button></div>';
+      $('nocfm').onclick = () => { CONFIRM = null; paintAll(); };
+      return;
+    }
+    const kinds = [...new Set(l.map((x) => x.kind.k))];
+    b.innerHTML = '<div class="hd"><b>WHAT YOU ARE ABOUT TO CHANGE.</b> READ IT, THEN CONFIRM.</div>' +
+      '<p>There is <b>no waiting period</b>: a change is instant. This screen is the guard rail instead — ' +
+      '<b>nothing on this page is signed or applied without being shown here first.</b></p>' +
+      '<div class="tw"><table><thead><tr><th>NUMBER</th><th>FROM</th><th>TO</th><th>WHAT KIND OF CHANGE</th></tr></thead><tbody>' +
+      l.map((x) => '<tr><td class="wrap">' + esc(x.r.k) + '</td><td>' + esc(x.from) + '</td><td class="sig">' + esc(x.to) + '</td>' +
+        '<td class="wrap">' + x.kind.t + '</td></tr>').join('') + '</tbody></table></div>' +
+      kinds.map((k) => { const x = l.find((y) => y.kind.k === k);
+        return '<div class="note' + (k === 'tx' ? ' warn' : '') + '"><b>' + x.kind.t + '</b> — ' + x.kind.s + '</div>'; }).join('') +
+      '<div class="row">' +
+        (have('game') ? '<button class="btn big" id="doapply">APPLY THE GAME CHANGES — NOTHING IS SIGNED</button>' : '') +
+        '<button class="btn big" id="dotx"' + (have('tx') ? '' : ' disabled') + '>SIGN AND SEND THE CONTRACT CHANGES</button>' +
+        '<button class="btn" id="nocfm">CANCEL</button></div>' +
+      (have('tx') ? '' : '<div class="s">' + (have('notx')
+        ? 'There is nothing to sign: the contract that would carry this is <b>not deployed</b>.'
+        : 'There is nothing to sign: <b>no change here is a contract state change</b>.') + '</div>');
+    if ($('doapply')) $('doapply').onclick = applyGame;
+    $('dotx').onclick = signSend;
+    $('nocfm').onclick = () => { CONFIRM = null; paintAll(); };
+  }
+
+  // ---------------------------------------------------------------------------
+  // rendering
+  // ---------------------------------------------------------------------------
+  const GROUPS = [
+    { id: 'map', n: '3', t: 'THE MAP', q: 'Frozen into a map at its seed. These cannot be edited live at all — changing tree density today would change the map under a game already running — so what they edit is what the <b>next</b> map is generated with.' },
+    { id: 'econ', n: '4', t: 'THE ECONOMY', q: 'What a player starts with, what the land gives back, and how long it takes. Read out of the game rather than typed here.' },
+    { id: 'fight', n: '5', t: 'THE FIGHT', q: 'A client belief today and chain state the moment a fight settles on chain. The page says which, and it says plainly that it is editing something the client believes rather than something the game enforces.' },
+    { id: 'build', n: '6', t: 'THE BUILDINGS', q: 'What each one costs, how long it takes, and what it draws. <b>Do not assume crystals</b>: a first level should mostly be wood, and working that out is its own deliverable.' },
+    { id: 'sw', n: '7', t: 'THE SWITCHES', q: 'Four things that are typed web addresses today and belong here. <b>These are the ones that really reach the game</b>, so they are where the read-back is proved.' },
+    { id: 'money', n: '8 · 13', t: 'THE MONEY AND THE CLOCK', q: 'The cut, the fee, the places that pay out, and the three lifecycle timings. The prize split is not in here, because it is a rule and not a field.' },
+    { id: 'demo', n: '14', t: 'DEMO MODE', q: 'One switch that says <i>this is a test, not a real game</i>.' },
+  ];
+
+  function card(r) {
+    const h = home(r), ht = HOME_TAG[h.h];
+    const rb = readback(r);
+    const tags = [];
+    tags.push(ht ? '<span class="tag ' + ht[0] + '">' + ht[1] + '</span>' : '<span class="tag nohome">NO HOME</span>');
+    if (r.dec) tags.push('<span class="tag dec">DECIDED</span>');
+    else if (r.prop) tags.push('<span class="tag prop">PROPOSED</span>');
+    else if (r.open) tags.push('<span class="tag open">NOT DECIDED</span>');
+    else if (CHAIN_READ[r.id]) tags.push('<span class="tag ph">READ FROM THE CONTRACT</span>');
+    else tags.push('<span class="tag ph">READ FROM THE GAME</span>');
+    const locked = state().locked;
+    let ctl;
+    if (r.sw) {
+      ctl = '<button class="btn" data-sw="' + r.id + '" aria-pressed="' + (!!val[r.id]) + '"' + (locked ? ' disabled' : '') + '>' + (val[r.id] ? 'ON' : 'OFF') + '</button>';
+    } else if (r.text) {
+      ctl = '<input type="text" data-in="' + r.id + '" placeholder="0x…, 0x…" value="' + esc(String(val[r.id] || '')) + '"' + (locked ? ' disabled' : '') + '>' +
+        (r.u ? '<span class="u">' + r.u + '</span>' : '');
+    } else if (r.tab || r.ro) {
+      ctl = '<span class="u">' + (rb.got == null ? '—' : esc(String(rb.got))) + '</span>';
+    } else {
+      const v = fieldOf(r);
+      ctl = '<input type="number" step="any" data-in="' + r.id + '" value="' + (v === undefined || v === null || v === false ? '' : esc(String(v))) + '"' +
+        (r.cap ? ' min="1" max="' + r.cap + '"' : '') + (locked ? ' disabled' : '') + '>' +
+        (r.u ? '<span class="u">' + r.u + '</span>' : '');
+    }
+    let extra = '';
+    if (r.warn) extra += lengthWarning();
+    if (r.bound) extra += '<div class="s">Refused below <b>' + DEC.cutFloor.v + '%</b> or above <b>' + DEC.cutCeiling.v + '%</b>.</div>' +
+      '<div class="refuse" id="refuse_' + r.id + '"' + (REFUSE[r.id] ? '' : ' hidden') + '>' + esc(REFUSE[r.id] || '') + '</div>';
+    if (r.live) extra += '<div class="s"><b>Editable while a game runs</b> — the one exemption on this page.</div>';
+    if (r.pv !== undefined) {                              // a PROPOSED row: the proposal beside what the fight runs today, compared live
+      const cur = rb.got, same = cur != null && Math.abs(Number(cur) - r.pv) < 1e-9;
+      extra += '<div class="rb ' + (cur == null ? 'nr' : same ? 'ag' : 'no') + '" data-pv="' + r.pv + '">' +
+        esc('PROPOSED ' + r.pv + (r.u ? ' ' + r.u : '') + ' · CURRENT (WHAT THE FIGHT RUNS) ' + (cur == null ? 'NOT READ' : cur + (r.u ? ' ' + r.u : '')) +
+            (cur == null ? '' : same ? ' — THE SAME NUMBER, STILL NOT A DECISION' : ' — THEY DIFFER')) + '</div>';
+    }
+    // THE CHAIN FIRST where the chain is its home, because that is the question being asked of it;
+    // the game's copy after, and never unlabelled. A card whose home is a seed or a client belief has
+    // no chain line at all, and there the game IS the authority.
+    const cb = chainback(r);
+    const dk = docCheck(r, rb.got);
+    const gameLine = cb
+      ? '<div class="rb nr">' + esc('THE GAME\'S OWN COPY, WHICH IS NOT THE CHAIN: ' +
+          (rb.got === null ? 'NOT READ THERE EITHER' : String(rb.got))) + '</div>' +
+        // a read-only row that says what it expects is still compared, chain home or not (the game year)
+        (r.exp && rb.got !== null ? '<div class="rb ' + rb.c + '">' + esc(rb.t) + '</div>' : '')
+      : '<div class="rb ' + rb.c + '">' + esc(rb.t) + '</div>';
+    return '<div class="p' + ((cb ? cb.c : rb.c) === 'no' || (r.exp && rb.c === 'no') || (dk && !dk.agree) ? ' dis' : '') + '">' +
+      '<div class="k">' + r.k + '</div>' +
+      '<div class="tags">' + tags.join('') + '</div>' +
+      '<div class="f">' + ctl + '</div>' +
+      (cb ? '<div class="rb ' + cb.c + '">' + esc(cb.t) + '</div>' + (cb.why ? '<div class="s">' + cb.why + '</div>' : '') : '') +
+      gameLine +
+      (!dk ? '' : '<div class="rb ' + (dk.agree ? 'ag' : 'no') + '">' +
+        esc('THE DOCUMENT SAYS ' + r.against + (dk.agree ? ' — THE GAME AGREES' : ' — THE GAME DISAGREES: ' + dk.lv.join(', '))) + '</div>' +
+        '<div class="s">Compared at the four levels the document sets: the game reads <b>' + esc(dk.lv.join(', ')) + '</b> there' +
+        (dk.zero ? ', and its table also carries a <b>level-0 entry of 0</b> — a cell that is not built reaches nothing, which the document does not set and this comparison does not count.' : '.') + '</div>') +
+      '<div class="s">Reads from <b>' + (r.where === 'nothing' ? 'nothing — no setter and no reader' : esc(r.where)) + '</b>' +
+        (r.put === 'url' ? ' · <b>a change here reaches the game</b>' : ' · <b>no setter</b>') + '</div>' +
+      (r.dec ? '<div class="s">' + esc(DEC[r.dec].src) + '</div>' : '') +
+      (r.s ? '<div class="s">' + r.s + '</div>' : '') +
+      extra + '</div>';
+  }
+
+  // M4 item 13 - a warning beside the game-length field, and never a refusal
+  function lengthWarning() {
+    const v = Number(DEC.length.v);
+    let w = '<div class="s">Below <b>' + CAP_USEFUL + ' h</b> the capacitor will not be useful; below <b>' + CAP_BUILD + ' h</b> it cannot be built at all. ' +
+      'The field still accepts those lengths — this is a warning, not a refusal.</div>';
+    if (v < CAP_BUILD) w += '<div class="warn">' + v + ' h: <b>the capacitor cannot be built at all.</b> Its charge is 48 real hours and a game year is a quarter of the length, so the countdown can never finish inside the game.</div>';
+    else if (v < CAP_USEFUL) w += '<div class="warn">' + v + ' h: <b>the capacitor will be built too late to be useful.</b></div>';
+    else w += '<div class="s">' + v + ' h clears both thresholds. One game year is ' + (v * YEAR_OF) + ' h.</div>';
+    // the fraction itself: decided a quarter, read back from the game and compared - never v / 4 typed here
+    const g = G(), yo = g ? g.yearOf : undefined;
+    const fr = (f) => (Math.abs(1 / f - Math.round(1 / f)) < 1e-9 ? '1/' + Math.round(1 / f) : String(f));
+    if (yo == null) w += '<div class="rb nr">THE YEAR\'S FRACTION: DECIDED ' + fr(YEAR_OF) + ' · base.ECON.yearOf NOT READ</div>';
+    else if (Math.abs(yo - YEAR_OF) < 1e-9) w += '<div class="rb ag">THE YEAR\'S FRACTION: DECIDED ' + fr(YEAR_OF) + ' · AGREES — base.ECON.yearOf READS ' + fr(yo) + '</div>';
+    else w += '<div class="rb no">THE YEAR\'S FRACTION: DECIDED ' + fr(YEAR_OF) + ' · DISAGREES — base.ECON.yearOf READS ' + fr(yo) + ' (a game year of ' + (v * yo) + ' h)</div>';
+    return w;
+  }
+
+  function splitTable() {
+    const n = Number(val.places);
+    const rows = (m) => { const s = shares(m); return s ? s.map((x, i) => '<tr><td>' + (i + 1) + '</td><td>' + round(x) + '%</td><td class="sig">' + round(x * CUT_FREE / 100) + '%</td></tr>').join('') : ''; };
+    const round = (x) => Number(x.toFixed(2)).toString();
+    let out = '<h3>THE PRIZE SPLIT — DERIVED, NOT TYPED</h3>' +
+      '<p>The page holds <b>how many places pay out</b> and nothing else. The split is a rule: of the 95% that is not the cut, ' +
+      '<b>first takes 50%, second 30%, and the remaining 20% splits equally between the places after second</b> — or between whoever exists if there are none after second. ' +
+      'So one place takes all the 95%, two split it 60/40, three take 50/30/20, four 50/30/10/10, and ten take 50/30 and then 2.5% each.</p>' +
+      '<p><b>These are shares of the 95%, after the cut.</b> First place in a three-place game is paid <b>47.5% of the pot</b>, not 50%.</p>';
+    if (shares(n)) {
+      out += '<div class="tw"><table><thead><tr><th>PLACE</th><th>SHARE OF THE 95%</th><th>SHARE OF THE POT</th></tr></thead><tbody>' + rows(n) + '</tbody></table></div>';
+    } else {
+      out += '<div class="note">No count is set, so there is nothing to derive. <b>The count has no decided value</b> — only a ceiling of ' + PLACES_CAP + '. ' +
+        'Set it above and the shares appear.</div>' +
+        '<div class="tw"><table><thead><tr><th>PLACES</th><th>SHARES OF THE 95%</th></tr></thead><tbody>' +
+        [1, 2, 3, 4, PLACES_CAP].map((m) => '<tr><td>' + m + '</td><td>' + shares(m).map(round).join(' / ') + '</td></tr>').join('') +
+        '</tbody></table></div>';
+    }
+    return out;
+  }
+
+  function demoExtra() {
+    const a = at('rareRoles');
+    return '<div class="note warn"><b>The switch on this page is a convenience and not the gate.</b> The gate is on chain and it is an allowlist — ' +
+      'anyone can call a contract from an explorer, so a gate that lives in a web application is a hidden button and not a gate. ' +
+      '<b>That half is now written</b>: <code>RareRoles.sol</code> holds <code>demoMode</code> as stored state and <code>setAllowed</code> as the allowlist, and ' +
+      '<code>setDemoMode</code> is root only and cannot be granted. <b>It is not deployed</b>, so until it is, <i>demo mode protects us</i> is still false.</div>' +
+      '<div class="note"><b>This is the one number on this page a contract really holds.</b> It is read with <code>RareRoles.demoMode()</code> and written with ' +
+      '<code>RareRoles.setDemoMode(bool)</code> — a transaction, signed by the wallet, instant and irreversible. ' +
+      (a ? 'The registry answers at <code>' + a + '</code>, so the read-back above is the chain talking.'
+         : '<b>And there is no address to call</b>: <code>bridge-config.json</code> has no <code>rareRoles</code> key, so the read-back above says NO CONTRACT DEPLOYED and the confirm screen refuses to pretend a transaction is possible.') + '</div>' +
+      '<div class="note"><b>It refuses to change while a game is running</b>, which is the standing rule applied here rather than a new one: ' +
+      'flipping it mid-game does not change a number, it changes what kind of game the people in it are playing.</div>';
+  }
+
+  // The count that matters, and it is not a flattering one: HOW MANY OF THESE CAN BE VERIFIED
+  // AGAINST A CONTRACT TODAY. The page saying so is worth more than the page looking capable.
+  function verifiedSplit() {
+    const g = { contract: [], nodeploy: [], nochain: [], game: [], nothing: [] };
+    R.forEach((r) => {
+      const cb = chainback(r), rb = readback(r);
+      if (cb) {
+        if (cb.c === 'ag' || cb.c === 'no') g.contract.push(r);
+        else if (/NO CONTRACT DEPLOYED|DID NOT ANSWER/.test(cb.t)) g.nodeploy.push(r);
+        else g.nochain.push(r);
+      } else if (rb.got === null) g.nothing.push(r);
+      else g.game.push(r);
+    });
+    return g;
+  }
+
+  function readbackSection() {
+    const g = verifiedSplit(), N = R.length;
+    const rows = R.map((r) => { const rb = readback(r); return { r, cb: chainback(r), rb, dk: docCheck(r, rb.got) }; });
+    const dis = rows.filter((x) => (x.cb && x.cb.c === 'no') || (x.dk && !x.dk.agree));
+    const signable = R.filter((r) => CHAIN_WRITE[r.id] && at(CHAIN_WRITE[r.id].at)).length;
+    const held = R.filter((r) => CHAIN_WRITE[r.id]).length;
+    return '<section id="readback"><h2><span class="n">11</span>THE READ-BACK<span class="d">M4 DELIVERABLE</span></h2>' +
+      '<p class="q">No preview and no dry run. A preview says what a number would do before it is real; a read-back says a real number arrived. ' +
+      '<b>And for a number whose home is the chain, only the chain can say so.</b> Reading the game\'s own copy proves this page and the game agree; ' +
+      'it proves nothing about a contract.</p>' +
+      '<div class="counts">' +
+      '<div class="ct hi"><div class="v">' + g.contract.length + ' of ' + N + '</div><div class="k">VERIFIED AGAINST A CONTRACT</div></div>' +
+      '<div class="ct"><div class="v">' + g.nodeploy.length + '</div><div class="k">CONTRACT NOT DEPLOYED</div></div>' +
+      '<div class="ct"><div class="v">' + g.nochain.length + '</div><div class="k">NO CONTRACT YET</div></div>' +
+      '<div class="ct"><div class="v">' + g.game.length + '</div><div class="k">THE GAME\'S COPY ONLY</div></div>' +
+      '<div class="ct"><div class="v">' + g.nothing.length + '</div><div class="k">NOWHERE AT ALL</div></div>' +
+      '<div class="ct"><div class="v">' + signable + ' of ' + N + '</div><div class="k">CAN BE SIGNED TODAY</div></div>' +
+      '</div>' +
+      '<div class="note warn"><b>' + g.contract.length + ' of ' + N + ' numbers on this page can be verified against a contract right now.</b> ' +
+      (g.contract.length ? '' : 'None. ') + '<b>' + held + ' of ' + N + '</b> has a getter in a contract that exists at all — <code>RareRoles.demoMode()</code> — and ' +
+      (signable ? 'it can be read and signed because its address is on record.'
+        : '<b>no contract has an address on record</b>, so even that one cannot be read: <code>bridge-config.json</code> carries <code>shadowFriends</code> and <code>attestor</code>, both null, and no <code>rareRoles</code> key at all.') +
+      ' The other <b>' + g.nochain.length + '</b> whose home is the chain have <b>nothing on chain holding them</b>: the rules table on chain is specified and not built. ' +
+      'That is the honest state of this page, and it is the number to watch as M20 lands.</div>' +
+      '<div class="note">The three sentences are not interchangeable. <b>NO CONTRACT YET</b> means the chain is its home and no contract has a getter for it. ' +
+      '<b>NO CONTRACT DEPLOYED</b> means one does and there is no address to call. <b>NOT READ THERE EITHER</b> means the game\'s own copy does not carry it. ' +
+      'A page that showed one sentence for all three would be hiding which of the three is true.</div>' +
+      (dis.length ? '<h3>WHAT DISAGREES</h3><div class="tw"><table><thead><tr><th>NUMBER</th><th>THE DISAGREEMENT</th></tr></thead><tbody>' +
+        dis.map((x) => '<tr><td class="wrap">' + x.r.k + '</td><td class="wrap">' +
+          esc(x.cb && x.cb.c === 'no' ? x.cb.t : 'THE DOCUMENT SAYS ' + x.r.against + ' — THE GAME READS ' + (x.dk ? x.dk.lv.join(', ') : x.rb.got) + ' at those levels') + '</td></tr>').join('') +
+        '</tbody></table></div>' : '') +
+      '</section>';
+  }
+
+  function trailSection() {
+    return '<section id="record"><h2><span class="n">10</span>THE RECORD<span class="d">M4 DELIVERABLE</span></h2>' +
+      '<p class="q">A number that decides who wins should not move without a trail. On-chain setters emit one event per change for free; anything client-side needs its own and had none.</p>' +
+      '<div class="note"><b>This trail lives in this browser tab and nowhere else.</b> It is not a record anyone else can look up, and it is gone when the tab closes. ' +
+      'The real one is an event per guarded setter, on chain, behind the delay — and that is not built.</div>' +
+      (LOG.length ? '<div class="tw"><table><thead><tr><th>WHEN</th><th>WHAT</th><th>FROM</th><th>TO</th><th>REACHED THE GAME</th></tr></thead><tbody>' +
+        LOG.map((e) => '<tr><td>' + e.t.toLocaleTimeString('en-GB') + '</td><td class="wrap">' + esc(e.what) + (e.under ? ' <span class="tag open">UNDER THE CONFIRMATION</span>' : '') + '</td><td class="wrap">' + esc(e.from) + '</td><td class="wrap">' + esc(e.to) + '</td><td>' + (e.delivered ? '<span class="tag chain">YES</span>' : '<span class="tag open">NO</span>') + '</td></tr>').join('') +
+        '</tbody></table></div>' : '<div class="note">Nothing has been changed yet.</div>') +
+      '</section>';
+  }
+
+  function versionSection() {
+    const v = MG ? MG.VERSION : '—';
+    return '<div class="note warn"><b>A change to any number above has to bump the generator\'s version</b>, or an old map stops being reproducible from its seed — ' +
+      'and reproducing old maps is the whole reason the generator is seeded. The generator reads <b>VERSION ' + v + '</b>. ' +
+      '<b>Nothing in the code enforces the bump</b>; it is a rule followed by hand. This page states the obligation and shows the version. Enforcing it is still owed.</div>';
+  }
+
+  function paintAll() {
+    paintGate();
+    // Refused means refused: the body is not built at all, so there is nothing in the document
+    // to read, un-hide or screenshot. A page that renders its values and then hides them has
+    // shown them.
+    $('sheet').hidden = !GATE.open;
+    if (!GATE.open) { $('out').innerHTML = ''; $('toc').innerHTML = ''; $('status').textContent = '';
+      // the confirm screen too: it carries from-and-to values, which is exactly what a stranger is
+      // not shown. Hidden is not the same as not there.
+      CONFIRM = null; $('confirm').innerHTML = ''; $('confirm').hidden = true; return; }
+    paintGuard(); paintLock(); paintConfirm();
+    let out = '';
+    GROUPS.forEach((g) => {
+      out += '<section id="' + g.id + '"><h2><span class="n">' + g.n + '</span>' + g.t + '<span class="d">M4 DELIVERABLE</span></h2>' +
+        '<p class="q">' + g.q + '</p>';
+      if (g.id === 'map') out += versionSection();
+      out += '<div class="params">' + R.filter((r) => r.g === g.id).map(card).join('') + '</div>';
+      if (g.id === 'sw' || g.id === 'econ') out += '<div class="row"><button class="btn big" id="apply' + g.id + '"' + (state().locked ? ' disabled' : '') + '>SHOW ME WHAT WILL CHANGE</button></div>';
+      if (g.id === 'money') out += splitTable();
+      if (g.id === 'demo') out += demoExtra();
+      out += '</section>';
+    });
+    out += readbackSection() + trailSection();
+    $('out').innerHTML = out;
+    $('toc').innerHTML = GROUPS.map((g) => '<a href="#' + g.id + '">' + g.t + '</a>').join('') +
+      '<a href="#readback">THE READ-BACK</a><a href="#record">THE RECORD</a>';
+    wire();
+  }
+
+  function wire() {
+    document.querySelectorAll('[data-sw]').forEach((b) => { b.onclick = () => {
+      if (state().locked) return;
+      const id = b.dataset.sw, r = R.find((x) => x.id === id);
+      const was = !!val[id]; val[id] = !was;
+      log(r.k, was ? 'on' : 'off', was ? 'off' : 'on', false);
+      stage(r, was ? 'on' : 'off', was ? 'off' : 'on');
+      paintAll();
+    }; });
+    document.querySelectorAll('[data-in]').forEach((i) => { i.onchange = () => {
+      if (state().locked) return;
+      const id = i.dataset.in, r = R.find((x) => x.id === id);
+      const was = fieldOf(r), v = i.value === '' ? null : (r.text ? i.value : Number(i.value));
+      if (r.bound && v !== null && (v < DEC.cutFloor.v || v > DEC.cutCeiling.v)) {
+        REFUSE[r.id] = 'REFUSED: ' + v + '% is outside the floor (' + DEC.cutFloor.v + '%) and the ceiling (' + DEC.cutCeiling.v + '%). The cut is bounded so no game can launch with a surprise take.';
+        i.value = was; log(r.k, String(was), String(v) + ' — REFUSED, outside the bounds', false); paintAll(); return;   // refused is not staged
+      }
+      delete REFUSE[r.id];
+      if (r.cap && v !== null && v > r.cap) {
+        i.value = r.cap; val[id] = r.cap; log(r.k, String(was), r.cap + ' — clamped to the ceiling of ' + r.cap, false);
+        stage(r, was, r.cap); paintAll(); return;
+      }
+      if (r.dec) DEC[r.dec].v = v;
+      val[id] = v;
+      log(r.k, String(was), String(v), false);
+      stage(r, was, v);
+      paintAll();
+    }; });
+    // Neither button applies anything. Both open the confirm screen, which is the only way through.
+    const a = $('applysw'), b = $('applyecon');
+    if (a) a.onclick = openConfirm;
+    if (b) b.onclick = openConfirm;
+  }
+
+  function waitForBase(then) {
+    let n = 0;
+    (function go() { if (gameWin()) return then(); if (++n > 120) { $('status').textContent = 'THE GAME DID NOT ANSWER.'; return; } setTimeout(go, 250); })();
+  }
+
+  // boot: the schema first (the homes), then the game, then paint. The lock is
+  // re-read every second, so a game starting locks this page without a reload.
+  // The schema loads either way — it holds no values, only where a value would live — but the
+  // game is NOT opened until the gate is. `waitForBase` moved into openBody() for that reason.
+  let wasRunning = false, wasKnown = false;
+  fetch('schema.json').then((r) => r.json()).then((j) => { SCH = j; paintAll(); }).catch(() => paintAll());
+  paintAll();
+  setInterval(() => {
+    const l = lifecycle();
+    if (l.running !== wasRunning || l.known !== wasKnown) { wasRunning = l.running; wasKnown = l.known; paintAll(); }
+  }, 1000);
+
+  // A handle for the checks, read-only apart from the things a deployer does. IT IS GATED TOO:
+  // a stranger who opens the console gets null out of every value-bearing getter, for the same
+  // reason the screen gives them nothing. What stays open is the gate itself (so a check can
+  // prove the refusals), the lifecycle, and `shares` — a rule that is printed in this page's
+  // own source and in DESIGN.md, and so is not the page's to keep.
+  const ifOpen = (f) => (...a) => GATE.open ? f(...a) : null;
+  window.deployerPage = {
+    get rows() { return GATE.open ? R : null; }, get log() { return GATE.open ? LOG : null; },
+    get val() { return GATE.open ? val : null; }, get DEC() { return GATE.open ? DEC : null; },
+    shares, lifecycle, state, readback: ifOpen(readback), home: ifOpen(home), deliver: ifOpen(deliver),
+    // the read-back's chain half, and the confirm step in front of every change
+    chainback: ifOpen(chainback), kind: ifOpen(kind), split: ifOpen(verifiedSplit),
+    get pending() { return GATE.open ? pending() : null; }, get confirm() { return GATE.open ? CONFIRM : null; },
+    get chainvals() { return GATE.open ? CHAINVAL : null; }, get config() { return GATE.open ? CFG : null; },
+    openConfirm: ifOpen(openConfirm), applyGame: ifOpen(applyGame), signSend: ifOpen(signSend),
+    get chainRead() { return Object.keys(CHAIN_READ); }, get chainWrite() { return Object.keys(CHAIN_WRITE); },
+    get locked() { return state().locked; },
+    get thresholds() { return { useful: CAP_USEFUL, build: CAP_BUILD, placesCap: PLACES_CAP }; },
+    // the gate, for the checks and for anyone reading: the recovery, the role it asks for, and
+    // what state it is in. Nothing here can sign.
+    gate: { recover: SEC.recover, addressOf: SEC.addressOf, pub: SEC.pub, digest: SEC.digest,
+      get roleId() { return ROLE_ID; }, get roleName() { return ROLE_NAME; }, get selector() { return IN_ROLE; },
+      get open() { return GATE.open; }, get signer() { return GATE.signer; }, get claimed() { return GATE.claimed; },
+      get challenge() { return GATE.msg; }, get why() { return GATE.why; }, registry },
+  };
+})();
+</script>
+</body>
+</html>

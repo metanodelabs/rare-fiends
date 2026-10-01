@@ -1,0 +1,35 @@
+# secrets — never commit
+deploy/kpi-credentials.txt
+
+# collector state and generated output
+data/
+site/
+logs/
+__pycache__/
+*.pyc
+
+# local scratch
+.DS_Store
+
+# recorded clips are build output — regenerate with estate/reel.js or the studio's export
+estate/clips/
+# the asset zip unpacks here; the sprites we actually use live in estate/sprites/
+assets_doopie/
+
+# the contracts check installs its compiler and EVM here (npm i in estate/contracts)
+estate/contracts/node_modules/
+
+# the converter installs its own toolchain, and writes its output next to it
+doopies_converter/tools/node_modules/
+doopies_converter/tools/out/
+
+# the armoury weapon recordings are build output - regenerate with
+# web_assets/social/burrow/armoury-gifs.js
+web_assets/social/burrow/weapon-*.gif
+# the two-base clips are build output too (node web_assets/social/bases/bases-clip.js)
+web_assets/social/bases/*.gif
+web_assets/social/bases/*.mp4
+
+# local fork scratch (deploy/local-chain.sh) - addresses on a forked anvil, never the real chain
+estate/bridge-config.local.json
+site/bridge-config.local.json

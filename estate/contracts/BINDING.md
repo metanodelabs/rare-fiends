@@ -120,7 +120,8 @@ matter, so both are written here.
   record, and removing it re-opens 2.3's griefing vector through the back door.
 
 2.6 A tokenId may appear **at most once** in a game and at most once in a line-up. Without this, one
-Friend fields twelve units. `RareCombat.MAX_SIDE` is 12 and bounds only the count.
+Friend fields many units. `RareCombat.MAX_SIDE` is 40 (it was 12; deployer, 2026-10-01 - §74) and bounds only
+the count.
 
 ## 3. Where the generation comes from
 
@@ -3982,7 +3983,8 @@ converted by 44.1's measured law. Everything else in the table is `eth_estimateG
 
 **So the answer to the deployer is not about money. A fight at the contract's own declared maximum cannot be
 settled on chain at any price, because it does not fit in a block on 4663.** `MAX_SIDE` is 12 and
-`MAX_WALLS` is 16; both are in `RareCombat.sol`. The line-up that breaks it is not a contrived one.
+`MAX_WALLS` is 16; both are in `RareCombat.sol`. *(As metered then. Since 2026-10-01 there is no wall cap and
+`MAX_SIDE` is 40 - §74, where the same ladder is re-run at 12, 24 and 40 a side.)* The line-up that breaks it is not a contrived one.
 
 **And the expensive fight is the common fight.** Generation 6 is the slowest killer — 100 HP, a club for 10
 damage, melee, so units walk to each other and trade for the full clock — and it is **61.5% of all Friends
@@ -4935,7 +4937,10 @@ it). **Zero means no games contract yet** — the state of the first five deploy
 that nothing is running. **Deploy order gains one call:** after `RareGame` deploys, `RareRoles.setGame(game)`
 from the deployer; until it is made the setters are open to root between games, which is also what they are
 after it. Not added to `deploy.mjs --game` in this pass: it is a transaction, not a deploy, and the script's
-`step` deploys; it is written here and in the DEPLOY checklist instead.
+`step` deploys; it is written here and in the DEPLOY checklist instead. **Corrected 2026-10-01: leaving it out was a hole, not a
+neutral choice.** No deploy path made the call, so every fresh world ran with `game()` zero and every freeze off,
+ruling 74's included. `deploy.mjs --game` now sends `setGame` after RareGame deploys and refuses to finish unless
+`game()` reads it back; `grant.mjs` and `moneycheck.mjs` assert it on the deployed world (DEPLOY.md section 3).
 
 **The rule's first half, per duel.** "A game holds the numbers it was created with — a running game reads its
 own table, not the current one." A duel is the game here: `challenge` writes a `Sealed` row — the dice, the
@@ -5822,3 +5827,338 @@ Removing each `requireNoGameRunning()` line in turn - three mutants - turns part
 time (`setDemoMode: MOVED`, `setWhitelistOpen: MOVED`, `setGame: MOVED` respectively), one failure each and
 nothing else.
 
+## 74. The side cap is 40 (deployer, 2026-10-01: "let's cap it at 40 for now")
+
+It supersedes ruling 66 (*"as many as you own"*), which was never built, and it came after the economist's
+real-chain analysis recommended keeping 12 until real play. `MAX_SIDE` is **40** in both engines -
+`combat.js` and `RareCombat.sol` - and nowhere else: `record.js settle()`, the attack chooser in `index.html`
+and `attack_defense.html` all read `Combat.MAX_SIDE`, so the next change is one number in each engine.
+`paritycheck.js` reads both (the export, and the `.sol` line, because the constant is internal and inlined and
+has no getter), asserts they agree, and pins them by behaviour: 40 a side is fought field for field by both
+engines on six named line-ups, and 41 attackers or 41 defenders is refused by both (`RangeError`, `InvalidSide`).
+
+### 74.1 What an on-chain replay would cost - for information, V1 settles none
+
+In-memory, Ethereum Cancun execution gas through the view lab (a floor, not a 4663 price; §44 for the law
+that converts), generation 6 both sides, the ringed 27-section real base, read off the run of 2026-10-01:
+
+| A side | defenders holding | defenders engaging | of the 32,000,000 ceiling |
+| --- | --- | --- | --- |
+| 12 | 32,987,157 | 37,597,078 | 103% / 118% |
+| 24 | 105,005,455 | 88,638,214 | 328% / 277% |
+| 40 | 296,474,507 | 231,971,875 | 927% / 725% |
+
+The heaviest of the 516 fights is 40 a side, 60 walls, defenders engaging: **527,289,476**, 16.5x the ceiling.
+None of it is a failure: fights resolve on our server in V1 and only a hash goes on chain. **V2 needs
+multi-transaction settlement or a separate on-chain cap.** The in-memory machine gives each call 900,000,000
+gas, so the heaviest rung has 1.7x headroom there; a wider cap or more walls could exhaust it, which would show
+as a parity failure naming the line-up (a revert is now counted as a mismatch, not a crash).
+
+### 74.2 What changed in the corpus, and what did not
+
+- The 60 random bases are still drawn 1 to 12 a side (`CORPUS_SIDE`): the count drawn decides how many draws
+  follow, so drawing to 40 would re-deal every line-up after it. The cap is proved by the named rungs instead.
+- The ladder lays defenders in rows of twelve; at 12 or fewer that is the old single line, word for word.
+- The ladder's top rungs and the 27- and 60-wall rungs now fight at `MAX_SIDE` (40). The 16-wall pair stays
+  at 12 a side, the cap it was written for. 12- and 24-a-side real-base rungs are appended last.
+- The check went from 508 fights to 516 and from about 48 seconds to 289 seconds run alone on the deployer's laptop: the 40-a-side rungs are
+  most of the gas the in-memory EVM now executes.
+- Proved red: with `RareCombat.sol` alone set to 39, three assertions fail - parity (`REVERTED InvalidSide` on
+  "40 a side, generation 6, 6 walls"), the wall-cap rungs, and the side cap (`RareCombat.sol MAX_SIDE 39`).
+  With `RareCombat.sol` alone landing shots on a building at `landVsBuildingBps + 500`, six fail, the
+  field-for-field parity line first and the 40-a-side rungs at 0 of 2 each. **Not every mutation is seen:** at
+  `+ 1` the whole run stayed green - a one-basis-point shift changed no roll's outcome in 516 fights. Parity
+  catches what changes a fight on the corpus's words, and nothing finer.
+
+## 75. Ruling 74 extended - no list entry and no attestor key changes under a running game (deployer, 2026-10-01)
+
+The deployer, in session, extending ruling 74: **whitelist add and remove are not allowed while a game runs**,
+on both lists - they are two separate lists (ruling 40) - and **changing the bridge's attestor key
+(`ShadowFriends.setAttestor`) is not allowed while a game runs.** This answers what §73.3 left unasked: the
+entries are now frozen like the switches.
+
+### 75.1 What is frozen, counted off the contracts
+
+Every function that writes `RareRoles.whitelisted` or `RareRoles.allowed` - the constructor's one write
+(`whitelisted[deployer] = true`, before any game can exist) aside, there are exactly two - and the one function
+that writes `ShadowFriends.attestor` after construction:
+
+| Setter | Contract | List / value | Now |
+| --- | --- | --- | --- |
+| `setWhitelisted(address[], bool)` | `RareRoles` | the launch whitelist, `whitelisted` | **refused while a game runs** - the whole call, even a list that would change nothing |
+| `setAllowed(address, bool)` | `RareRoles` | demo mode's allowlist, `allowed` | **refused while a game runs** |
+| `setAttestor(address)` | `ShadowFriends` | `attestor`, the key that signs claims and revokes | **refused while a game runs** |
+
+Each asks the power FIRST and the running game SECOND, as §73 does, so a stranger gets `PowerNotHeld` and learns
+nothing about the game. `RareRoles` asks its own `requireNoGameRunning()`; `ShadowFriends` is permanent and
+reaches the same question through its immutable `roles` (`roles.requirePower(...)` then
+`roles.requireNoGameRunning()`), which is already in `IRareRoles`. `ShadowFriends` declares
+`error GameRunning(uint256)` in its own ABI beside `PowerNotHeld`, for the same reason: the revert comes up from
+`RareRoles`, and an explorer decodes it against the contract that was called.
+
+Not touched: `setWhitelistOpen` (already frozen, §73). `deploy.mjs`, `whitelist.mjs` and `grant.mjs` were not edited; anything they
+do with these setters must happen before the first `start`, or after every running game is declared.
+
+### 75.2 The price, stated so it is not discovered in an emergency
+
+- **A leaked attestor key cannot be rotated out while a game runs.** Until every running game is declared, a
+  thief holding it can sign claims (to whitelisted wallets only - `claim` asks `requireAllowed` first) and revoke
+  live shadows. The way out is the one §73.2 names: root can always reach `RareGame.declare`, which ends the game
+  and thaws the key. Before this section the key could be changed at any moment.
+- **No address can be removed from either list mid-game** - a wallet found abusing the game stays on the
+  whitelist until the game is declared - and none can be added, so a late invitee waits for the next game.
+- `setAllowed`'s own NatSpec calls it "needed daily during a test": during a running demo game it is not
+  available. It is between games.
+
+### 75.3 The proof - `test/fixcheck.js` part 24, six assertions, each guard broken twice
+
+A fresh `RareRoles`, `RareGame` and `ShadowFriends` (`(attestor, roles)`), with `setGame` called by the test
+itself, so nothing above can leave a game running under it. Before any game, root changes one address on each
+list and sets the attestor, and each reads back. With a game created and joined but not started, all three still
+land. Once it starts, from root: `setWhitelisted` (an add, a removal of a player in the game, and a list that
+changes nothing), `setAllowed` and `setAttestor` each answer `GameRunning`, and every entry and the key read back
+unchanged; a stranger gets `PowerNotHeld` on all three. Declared, `runningGames` is 0, all three land again, and a
+stranger still gets `PowerNotHeld`.
+
+Six mutants, one at a time, each turning exactly one assertion red and nothing else:
+
+- removing the freeze line from `setAllowed`, `setWhitelisted`, `setAttestor` in turn - the "once a game has
+  started" assertion goes red with `setAllowed: MOVED`, the three `setWhitelisted` rows `MOVED`, and
+  `setAttestor: MOVED` respectively;
+- moving the freeze ABOVE the power check in each in turn - the stranger assertion goes red with that one setter
+  answering `GameRunning` to a stranger.
+
+## 76. M20 items 5 and 6 - the Friend's own wallet, read off chain 4663, and partnerships settled (2026-10-01)
+
+Added by the **chain engineer**. The two items were built as one task because they meet at one call:
+`RareMarket._claim` -> `IRarePartners.saleClaim`. **Item 5 is STOPPED for the deployer (§76.2). Item 6 is built on
+the split side (§76.3), and the half that needs M16 item 7's clock is named, not built (§76.5).** `RareMarket.sol`
+is **not changed** by this section - not one byte - and `IRarePartners` is the same three-argument interface.
+
+### 76.1 What chain 4663 says - read, not guessed
+
+**READ-ONLY**: `eth_chainId`, `eth_blockNumber`, `eth_getCode`, `eth_getStorageAt` and `eth_call` against the public
+RPC (`rpc.mainnet.chain.robinhood.com`), at block **77,258,597**. Nothing was signed and nothing was sent. The
+collection addresses are the ones `base-data.json` (`toolkit.generations`) and TOOLKIT.md (Genesis) already pin.
+
+| What was asked | What came back |
+| --- | --- |
+| chain id | **4663** |
+| `tokenBoundAccount(uint256)` = **`0x0be76ed6`** in the bytecode (PUSH4 scan) | **present in both**: Generations `0x14c4...181d` (7,229 bytes) and Genesis `0x116e...d361` (17,135 bytes) |
+| guessed alternatives - `account(uint256)`, `tokenAccount`, `walletOf`, `accountOf`, `createAccount`, `registry()`, `implementation()` | **absent in both** - there is one name, and it is the one the toolkit and `friend-chain.js` already use |
+| `accountImplementation()` (`0x11464fbe`) | present in both; both answer **`0xed038886c002b285eb0f74971e967b02f6af8ea5`** |
+| EIP-1967 implementation slot of either collection | **zero** - neither collection is a proxy, so the selector cannot be swapped under us |
+| `supportsInterface` | ERC-721 and ERC-721 Metadata **true**; the ERC-6551 account ids **false** - the collection is not itself an account, as expected |
+| `tokenBoundAccount` vs the canonical ERC-6551 registry `0x000000006551c19487814612e58FE06813775758`'s `account(impl, salt 0, 4663, collection, id)` | **identical** for Generations #437, Genesis #1 and Generations #1 - the collection's answer is the standard registry derivation |
+| the account's code | a **173-byte EIP-1167 clone** of the implementation; the implementation carries `owner()`, `token()`, `execute(address,uint256,bytes,uint8)`, `isValidSigner`, `state()`, `onERC721Received` |
+| the account's `token()` | `(4663, collection, tokenId)` - its own token, for every account read |
+| the account's `owner()` | **the token's `ownerOf`, live** (Genesis #1, #2, #437; Generations #437) |
+| a token that does not exist (Generations #1, #2: `ownerOf` reverts) | `tokenBoundAccount` **still answers an address** (no code there) - so a caller must ask `ownerOf` first |
+| deployed accounts, Generations #400-#439 | 9 tokens exist; **all 9 accounts are deployed** |
+
+**So the interface exists and is not ambiguous.** What is ambiguous is which token's wallet a sale's money goes to,
+and that is §76.2.
+
+### 76.2 Item 5 - STOPPED: the literal routing hands the seller's money to the buyer (**since DECIDED: C - §77.1**)
+
+DESIGN says *"the money sits in the Friend's own wallet"* and, of a base sale, *"whatever sits in the token's own
+account moves because the token moved."* Both are true on chain (§76.1: `owner()` is `ownerOf`, live). Put together
+for the marketplace's one case that exists today - a sale of a token - they say:
+
+**`_settle` paying the seller's proceeds into `tokenBoundAccount(tokenId)` of the token being sold, and then moving
+that token to the buyer, gives the buyer control of the proceeds in the same transaction.** The buyer would pay
+the price and get it back less the fee and the partner's share. That is not a bug that can be written around in
+`_settle`; it is what the sentence means when the payee is the token being sold. And `RareMarket` is permanent.
+
+**Nothing in `RareMarket` was changed.** The three shapes the deployer can choose between - none built:
+
+| | Shape | What it costs |
+| --- | --- | --- |
+| **A** | **The seller names one of their OWN Friends to be paid into** (a token they hold, of a collection that has `tokenBoundAccount`, not the one being sold), on `list` and on `acceptOffer`; `_settle` re-reads its `ownerOf` at settlement and pays its wallet. | A listing field and an argument - and a rule the design has not stated: which Friend, and what happens if it changes hands before the sale settles |
+| **B** | **The Friend's wallet is the ACTOR, not the payee**: the token-bound account calls `list`/`buy`/`offer` through its own `execute(...)`, so `msg.sender` is the wallet and the market already pays `seller` = the wallet. This is how DESIGN describes the SDK - *"routes purchases, plays and rewards through it rather than through the player's wallet"*. | **No change to `_settle`.** But every gated verb asks `roles.requireMayPlay(msg.sender)`, so a wallet address would have to be whitelisted - the launch whitelist is per address (ruling 21) and nothing decides whether a Friend's wallet counts as its holder. And a Genesis cannot list itself from its own wallet (an ERC-6551 account cannot hold its own token) |
+| **C** | **The seller's address, as today**, and *"the money sits in the Friend's own wallet"* applies to ITEMS (M14), which will be held by a Friend's wallet and so sold FROM it - B, arriving by itself when items exist. | Nothing now; M15 item 3 stays partly undelivered until M14 |
+
+**The partner leg is not ambiguous, and it is built (§76.3):** a partner's share goes into the PARTNER token's own
+wallet, which is never the token being sold or earned on - the base's purse, which M3 item 8 decided is its
+`tokenBoundAccount`.
+
+### 76.3 Item 6 - built: `RarePartners` rewritten, and `RareGame` pays a partner automatically (**the payee, the sale and the timing of the payout are revised by §77 - read it with this**)
+
+**`RarePartners` is a different contract from the one §45 described**, because the one there could not express
+"Genesis with Genesis": its payee was any address. Nothing deploys it yet (`deploy.mjs` passes `partners = 0`),
+so its constructor changed freely: `(roles, waitingPeriod)`.
+
+| DESIGN's rule | How it is enforced |
+| --- | --- |
+| *"Like partners with like. A Genesis partners with another Genesis. A Generation with another Generation. Never across."* | a partnership names **one** `collection` and both sides are token ids in it - `propose`/`accept` take exactly one address, so "across" cannot be written down. Only a collection switched on by `setPartnerable` (power `SET_PARTNERSHIPS`, closed by default) may partner, so an arbitrary NFT cannot be dressed up as either |
+| *"One partnership at a time - at launch"* | each **token** is in at most one partnership that has not ended - refused `AlreadyPartnered` at `propose` (either side) and **again at `accept`**, so an offer made while a token was free cannot be accepted after it partnered. Keyed by token because an address can hold several and gain more by transfer, which no contract can stop |
+| *"Two players can partner"* | `SamePlayer` when one address holds both sides; `SameToken` for a token with itself |
+| *"The players set the split themselves"* | `shareA`, A's share of everything EITHER side earns, 1..9,999 bps; B's is the rest |
+| forming, *"the split can be changed, if both agree"*, *"ending it takes both"* | `propose`/`accept` (with the terms the acceptor expects - `TermsChanged` otherwise); `proposeChange`/`proposeEnd` by either side and `agree` by the OTHER (`NotTheCounterparty` for the proposer and for strangers). A proposal dies when its proposer's token changes hands (`ProposalStale`) |
+| *"Either side can pause, and pausing starts the waiting period"* | `pause` by either side alone; the waiting period (constructor, `setWaitingPeriod` behind `SET_PARTNERSHIPS`, refused while a game runs, never zero) is **copied into the partnership at the pause**, so moving it never moves a running pause |
+| *"Within that time the two either agree new terms and carry on, or the partnership ends by itself"* | `proposeChange` + `agree` inside the window makes it Active again. Otherwise **`stateOf` reads Ended the second the window closes, with nobody calling anything** - every claim and every "is this token free" reads `stateOf`. `lapse` (anyone) only writes it down |
+| *"A partner is paid first"* on a sale, at *"the same percentage as their share of its earnings"* (ruling 2) | `saleClaim(collection, tokenId, price)`: the partner's share of the price, to the partner token's `tokenBoundAccount`. **Owed while Paused too** - a pause stops the sharing of earnings; it is not a way to sell the base out from under a partner. Nothing once ended |
+| *"Share what they earn"* | `earningsClaim(collection, tokenId, earner, amount)`: the partner's share of an earning, **Active only** (a pause stops it at once), and **reverts unless `earner` holds `tokenId`**, so a payer cannot name somebody else's base |
+| *"Frozen once the game starts"* (schema `partnership.frozen`) | `freeze` behind `FREEZE_PARTNERSHIP` freezes the SPLIT only; pause and end still work, so a frozen split traps nobody |
+
+**Why splitting each earning as it arrives is the same as DESIGN's payout.** At 60/40, B is owed 40% of what A
+earns and A 60% of what B earns. Summed, A ends with 60% of A's plus B's earnings - exactly "the ratio applied to
+what was earned during the partnership". The arithmetic is linear, so paying it as it comes in and paying it at the
+end are the same number for $RF, and paying it as it comes in needs no clock.
+
+**`RareGame` - payouts only.** A player is an address (schema `player`) and has never said which Genesis it plays
+as; the declarer does know (the server holds the base, M3 item 5). So:
+
+- `setPartners(partners, genesis)` - **root only, refused while a game runs** - attaches the layer. Zero is "none",
+  and then nothing about a prize changes. Root already names every prize's winner, so the pointer gives root no
+  new power over the money.
+- With a layer attached, **plain `declare` is refused (`NameTheBases`)**: there is no path that pays a prize without
+  asking. `declareAs(id, placings, bases)` names each placed player's Genesis; `RarePartners` refuses a base the
+  player does not hold; **`NO_BASE` is accepted only for a player holding no Genesis at all** (`HoldsAGenesis`), so
+  "forgetting" a partnered base is refused, not trusted.
+- The partner is paid **first**, out of that place's prize, and the player the rest. `Placed` still says the place's
+  whole prize; `PartnerPaid` beside it says what went to whom. The pot pays out to the wei, as before.
+
+Sizes, printed by `fixcheck`: **`RarePartners` 9,017 bytes**; the market, the roles and every other contract are
+unchanged. `gas.json`'s figures do not move (no fight, duel or claim path changed) - only its `sourcesHash`, which is
+the check-writer's file to re-commit.
+
+### 76.4 For the deployer - before RareMarket deploys
+
+1. ~~**Item 5's shape - A, B or C** (§76.2). `RareMarket` is permanent, so this is asked, not chosen.~~ **DECIDED: C - §77.1.**
+2. **Several partnerships at once ("built, but not live") cannot be built behind a switch today.**
+   `IRarePartners.saleClaim` returns ONE partner, and `RareMarket` calls that interface permanently. If several are
+   ever to go live, the market's interface has to return a list **before** it deploys - otherwise it is a new
+   market. Either rule that one-at-a-time is permanent for the market, or the interface widens now.
+3. ~~**A partnership goes with the base when it is sold** - it is the token's, so the buyer inherits it, and the
+   partner is first paid their share of the sale. DESIGN's *"nobody buys a base and then discovers somebody else
+   has a claim on what it earns"* reads as exactly that (the buyer sees it in the price), but it is a reading.~~
+   **DECIDED the other way: a sale ENDS the partnership and the buyer inherits nothing - §77.2.**
+4. ~~**"The ratio agreed at the start"** - when the two have since agreed a new split, does the end-of-pause payout use
+   the first split or the current one? For $RF it does not arise (each earning was split at the split in force). For
+   crystals and wood (§76.5) it does.~~ **DECIDED: each period at its own split, summed - §77.3.**
+
+### 76.5 What is NOT built - the half that needs M16 item 7
+
+- **The payout of crystals and wood when a pause ends** - *"the difference between what each side had when it
+  began and what they have when it ends"*. Those holdings are base state: the server's (M3 item 5), with no chain
+  home (M6, `base.crystals`/`base.wood` have none). It needs **M16 item 7's clock** to notice the window closing and
+  the base record to compute the difference. The chain side of the trigger exists: `stateOf` says Ended, and the
+  `Paused` event carries `endsAt`. What the server does at that moment is not written.
+- **Generations partnerships earn nothing on chain yet.** They can form, pause and end, and a Generation's SALE pays
+  the partner; nothing pays a Generation an $RF earning today, so `earningsClaim` has no caller for them.
+- **`deploy.mjs` does not deploy `RarePartners`** and is not this section's file. When it does: `(roles,
+  86400)`, then `setPartnerable(Genesis, true)` and `setPartnerable(Generations, true)`, then `RareMarket(.., partners,
+  ..)` and `RareGame.setPartners(partners, Genesis)`. `SET_PARTNERSHIPS` is a new grantable power; nothing registers
+  it as root-only, deliberately - neither of its setters can name a payee.
+
+### 76.6 The proof - `test/fixcheck.js` parts 9, 13 and 25, and `test/partnermutants.js`
+
+`fixcheck` part 9 now sells base 1 with a partner paid first **into base 50's own wallet** (the ordering assertion
+reads the wallet's `Transfer` as log 0). Part 13 is rewritten: 27 assertions, 21 of them labelled `RULE <name>:`.
+Part 25 is new (numbered 24 on its branch; the freeze extension of §75 took 24 first): a fresh game with a partnered base, 7 assertions. **362 assertions, 0 failing.**
+
+`test/partnermutants.js` breaks each labelled rule's code once, in a copy of the sources in the OS temp directory,
+runs `fixcheck` against the copy and requires that rule's own line to go red - **31 mutants over 27 rules**, and it
+fails if any labelled rule has no mutant. It writes nothing in the worktree.
+
+## 77. Three deployer rulings on §76, and the payee swap on main (2026-10-01)
+
+Added by the **chain engineer**. The deployer ruled three times in the coordinator's session; the words are quoted as
+relayed. **`RareMarket.sol` is still not changed by one byte** - every ruling lands in `RarePartners` (and the
+`RareGame` payout path), behind the market's unchanged three-argument `IRarePartners.saleClaim`.
+
+### 77.1 M20 item 5 - DECIDED: a sale pays the seller's own wallet (option C)
+
+*"any sale will go into your wallet.. problem solved."* Every marketplace sale pays the **seller's own address**,
+which is what `RareMarket._settle` already does. **Item 5 needs no change to `RareMarket`.** Its doc comment (lines
+92-96, *"this file pays the seller's own address and item 3 stays undelivered"*) **stays as it is** - the bytecode is
+permanent once deployed, and a comment edit still changes its metadata hash. DESIGN's M15 item 3 (*"the money sits
+in the Friend's own wallet"*) is the design steward's to restate in the ruling's terms.
+
+**Applied to the partner's leg as well:** the ruling says *any* sale, and a partner's share is money out of a sale,
+so a partner is paid into **their own address** - the holder recorded when the partnership formed - and no longer
+into the partner token's `tokenBoundAccount` (§76.3's first build). `IFriendCollection` no longer declares
+`tokenBoundAccount` at all. **This application is mine, not the deployer's words** - flagged so it can be overruled;
+it is one line (`saleClaim`'s `partner =`).
+
+### 77.2 A sale ends the partnership - and the partner is paid first
+
+*"go with the recommendation of the partner being settled at a sale."* A base sold: the partner is paid their share
+of the price **first**, and the partnership **ends**; the buyer inherits nothing. A deliberate exception to "ending
+it takes both".
+
+**How, with `RareMarket` untouched.** `RarePartners` records both sides' **holders** when a partnership forms.
+`stateOf` reads **Ended the moment either token's `ownerOf` is not its recorded holder.** `RareMarket._settle` asks
+`saleClaim` *before* it moves the token, so the claim is live and is paid first; the token then moves, and from that
+instant the partnership is Ended, both tokens are free, and the same base never owes twice. **No market change and no
+callback were needed** - the ending is read, not written.
+
+**What this also ends, and it is a consequence to know rather than a choice:** ANY transfer of either token -
+a gift, a move to the holder's other wallet, a sale on another marketplace, a burn - ends the partnership the same
+way. Only a sale through `RareMarket` pays the partner first; a sale elsewhere pays them nothing (the same limit as
+§48.3's off-chain settlement, which no contract can see). What was **accrued** before the transfer (§77.3) is not
+lost: it is settled to the holders recorded at forming - the seller, not the buyer.
+
+### 77.3 Earnings accrue per period and are paid once, at the end
+
+*"the payout happens if they don't decide to continue.. but if they agree on new terms.. then the maths carries over
+the sum of the prior and the new."*
+
+**21e6e9e did NOT behave this way** - it paid a partner their share of every prize the moment it was won. Now:
+
+- `earn(collection, tokenId, earner, amount)` - called by `RareGame` for each partnered prize - takes the partner's
+  share **at the split in force** from the caller and **holds it in `RarePartners`**. Nothing is paid.
+- A pause takes nothing (sharing is paused) and pays nothing.
+- Agreeing new terms - in or out of a pause - **pays nothing** and opens a new **period**. Every period is stored:
+  `periodsOf(id)` returns each one's start, its split, and the gross `earnedA`/`earnedB` in it.
+- The accrued sums are **paid once, when it ends**: in `agree` itself for an end both agreed; by `settle(id)` -
+  anyone, once - for a pause that ran out or a token that changed hands (§77.2). The money goes **only** to the two
+  holders recorded at forming. `AlreadySettled` refuses a second payout.
+- So the payout is **Σ over periods of that period's earnings at that period's split** - which is exactly the
+  accrued sum, because each share was computed at the split in force when it was earned.
+
+**Reading, not ruled:** earnings *during* a pause are not shared, even if the two then continue - DESIGN: *"the
+sharing can be paused"*. If the deployer means the pause interval to count under the new terms, `earn` takes a share
+while Paused too.
+
+**`RarePartners` now holds $RF.** Only accrued partner shares, only between an earning and the end, with no exit but
+to the two recorded holders. It is `ReentrancyGuard`ed, its currency is an immutable constructor argument, and its
+constructor is now `(roles, rf, waitingPeriod)`. It was deliberately custody-free before; this ruling requires
+custody, and it is recorded here so nobody discovers it. **12,227 bytes** deployed.
+
+### 77.4 What the server needs for crystals and wood
+
+The same rule, applied to crystals and wood, is the server's (base state, M3 item 5; no chain home, M6), on M16
+item 7's clock. What the chain now gives it:
+
+- **the period boundaries and splits** - `periodsOf(id)[k].from` and `.shareA`, and the `Formed`, `SplitChanged`
+  (with the period index), `Paused` (with `endsAt`) and `Ended` events;
+- **the moment it ends** - `stateOf(id) == Ended`, whether by agreement, by the waiting period running out, or by a
+  token changing hands;
+- **who is paid** - `holderA`/`holderB` in `partnership(id)`.
+
+What the server must keep itself: **each side's crystals and wood earned within each period while Active** (not
+their holdings - DESIGN says the payout is on *what was earned during the partnership*), so it can pay
+Σ periods earned × that period's split when the chain says Ended. It should call `settle(id)` at the same moment
+for the $RF half, so the two halves land together.
+
+### 77.5 The payee swap the design steward found on main - closed by the rewrite, and now proved
+
+On main, `RarePartners.accept` (line 89): when the owner had proposed, the counterparty was the **proposed** payee,
+so the owner could name a new payee and have only the new payee accept - the current partner dropped without a say.
+
+**21e6e9e closes it by construction**: a partner is a token, not a free payee address, and a token already in a
+partnership can neither propose nor be accepted into another (`AlreadyPartnered` at `propose` and again at `accept`).
+**Proved since by a test of its own**, `fixcheck` part 13, `RULE no-payee-swap`: with 77-79 standing, the owner of
+77 offering it to 80 is refused (`AlreadyPartnered`), 80's owner cannot take it (`NoSuchProposal`), and 77 is still
+in the same partnership with the sale claim still owed to 79's holder. Its mutant removes **both** owner-side guards
+at once - at `propose` and at `accept` - since either alone still refuses the swap; with both gone, the line goes red.
+
+### 77.6 The proof
+
+`fixcheck`: **370 ok, 0 failing.** New rules: `sale-ends-it` (part 9, through the real `RareMarket`),
+`pays-the-partner`, `no-payee-swap`, `accrue-not-pay`, `continue-pays-nothing`, `per-period-sum` (400 + 300 to one
+side, 700 to the other, nothing left held), `pause-end-pays`, `settle-once`, `paid-to-recorded-holder` (part 13), and
+`prize-share-settles` (part 25). `test/partnermutants.js`: **40 mutants over 36 labelled rules, every one red**,
+including one per new rule.

@@ -70,7 +70,10 @@
 (function (root) {
   'use strict';
   const Chance = root.Chance || (typeof require !== 'undefined' ? require('./chance.js') : null);
-  const MAX_SIDE = 12;                                   // Friends a side: bounds the on-chain gas
+  // Friends a side. 40 by the deployer's ruling of 2026-10-01 ("let's cap it at 40 for now"), which superseded
+  // ruling 66's "as many as you own"; it was 12. RareCombat.sol MAX_SIDE holds the same number - change both.
+  // Every page and record.js reads THIS export (Combat.MAX_SIDE); none carries its own copy.
+  const MAX_SIDE = 40;
   const DIRS = [[0, -1], [1, -1], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1]];   // N NE E SE S SW W NW
   const SIDES = ['N', 'E', 'S', 'W'];
   const ORDERS = ['hold', 'engage', 'defend', 'fallback'];   // 0, 1, 2, 3 on chain

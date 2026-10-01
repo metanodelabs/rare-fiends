@@ -129,6 +129,17 @@ contract MockGenesis is ERC721 {
     function mint(address to, uint256 tokenId) external {
         _mint(to, tokenId);
     }
+
+    function burn(uint256 tokenId) external {
+        _burn(tokenId);
+    }
+
+    /// @dev the real collections' `tokenBoundAccount(uint256)` (selector 0x0be76ed6, read on chain 4663): a
+    /// deterministic address per (collection, token) that answers for an unminted token too. The derivation here
+    /// is a stand-in for the ERC-6551 registry's; what the tests rely on is only that it is per token and fixed.
+    function tokenBoundAccount(uint256 tokenId) external view returns (address) {
+        return address(uint160(uint256(keccak256(abi.encode("tba", address(this), tokenId)))));
+    }
 }
 
 /// @dev Test only: exposes `RareRefund`'s internal functions so the demolition rule can be compared with

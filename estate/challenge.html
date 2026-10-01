@@ -201,6 +201,10 @@ button { font: inherit; color: inherit; }
 .pcbig .u { font-family: var(--display); font-size: 14px; letter-spacing: .12em; color: var(--dim); }
 .pcline { font-size: 19px; color: var(--dim); }
 .pcline b { color: #fff; font-weight: 500; }
+/* hold'em's worst case (ruling 79), shown before accepting: one line, the number in white */
+.most { font-size: 14px; letter-spacing: .04em; color: var(--dim); text-align: center; }
+.most b { color: #fff; font-weight: 500; }
+.pcmain .most { text-align: left; }
 .pcmore { justify-self: start; font-family: var(--display); font-size: 14px; letter-spacing: .1em; background: none; color: var(--dim);
   border: 1px solid var(--faint); padding: 4px 8px; cursor: pointer; display: inline-flex; gap: 6px; align-items: center; }
 .pcmore:hover { color: var(--signal); border-color: var(--signal); }
@@ -653,13 +657,28 @@ button { font: inherit; color: inherit; }
   // is capped at `raises`. It lives in this one object and changes in one line, like Friend or Fiend's
   // board: askable, and nothing reads it twice.
   const HOLDEM = { bets: [1, 1, 2, 2], raises: 3 };
+  // WHO ACTS FIRST, ruling 79: in a two-player game it alternates, hand to hand, between the two SEATS -
+  // the challenger (p1) opens hand 1, the challenged (p2) hand 2, and so on - and the side that opens a hand
+  // opens every street of it. `S.hands` counts the hold'em hands dealt on this table; a seat, not "you",
+  // because which seat is yours depends on the side of the challenge you are on.
+  const holdemFirst = (n) => n % 2 ? 'p1' : 'p2';
+  // THE WORST CASE, ruling 79: the most one hand can cost one side, in stakes, read off HOLDEM and nothing
+  // else. The ante is one stake; on a street the most a side puts in is the bet and every raise the cap
+  // allows - (1 + raises) bets - and the streets add. 1 + (1+1+2+2) x (1+3) = 25 today; change the ladder or
+  // the cap and this, and every screen that shows it, follows.
+  const holdemMostX = () => 1 + HOLDEM.bets.reduce((a, b) => a + b, 0) * (1 + HOLDEM.raises);
+  // shown before a player accepts a hold'em game: on the terms screen, the incoming challenge and the sprung
+  // one. Empty for every other game, and in demo mode, where the stake is 0 and nothing can be lost.
+  const mostHTML = (g) => g.id !== 'holdem' || !S.stake ? '' :
+    '<div class="most" id="hmost" data-x="' + holdemMostX() + '" data-most="' + holdemMostX() * S.stake + '" title="the ante, then the bet and every raise the cap allows on all four streets">AT MOST <b>' +
+      holdemMostX() * S.stake + '</b> A HAND · ' + holdemMostX() + '× THE STAKE</div>';
 
   // screen: 'main' (terms, play, result) · 'prompt' (a challenge has arrived) · 'nope' (it was not accepted)
   // `paid` is what each side has put in, by unit: the ante and then every bet. The record's NET is what a
   // side actually won or lost, which with betting is no longer half the pot.
   const freshPaid = () => Object.fromEntries(BET_UNITS.map(u => [u.id, { p1: 0, p2: 0 }]));
   const S = { view: 'challenger', screen: 'main', answer: 'accept', phase: 'terms', stake: 50, game: 'rps', pot: 0, potRF: 0, paid: freshPaid(),
-    winner: null, duels: 0, last: null, det: false, sprung: false };
+    winner: null, duels: 0, hands: 0, last: null, det: false, sprung: false };
   const me = () => S.view === 'challenger' ? 'p1' : 'p2';           // whose seat you are in
   const them = () => me() === 'p1' ? 'p2' : 'p1';
   const $ = (id) => document.getElementById(id);
@@ -756,6 +775,7 @@ button { font: inherit; color: inherit; }
       '<div class="pot' + (terms ? '' : ' slim') + '"><div class="k">POT</div><div class="n' + (S.pot ? ' live' : '') + '" id="potn">' + (S.pot || S.stake * 2) + '</div>' +
       '<div class="sub" id="potsub">' + (S.pot ? 'in the pot' + (S.potRF ? ' · and ' + S.potRF + ' $RF' : '') : DEMO.on ? 'demo mode · free · no stake, no pot, no payout'
         : 'each stakes ' + S.stake + ' · winner takes ' + S.stake * 2) + '</div></div>';
+    if (terms) html += mostHTML(g);                     // hold'em's worst case, before the challenge is sent
     if (terms) {
       // in demo mode the picker is shut on FREE: the stake is 0 and no button can make it anything else
       html += '<div class="lab"><span>STAKE EACH</span><span>' + (DEMO.on ? 'DEMO MODE · FREE' : 'MAX ' + maxStake()) + '</span></div><div class="stake">' +
@@ -803,6 +823,7 @@ button { font: inherit; color: inherit; }
           '<div class="pcwho"><b>GENESIS #' + from.id + '</b><span class="pcrank">RANK ' + rankOf(from) + '</span></div>' +
           '<div class="pcbig"><span class="n" id="bign">' + pot + '</span><span class="u">' + (DEMO.on ? 'CRYSTALS<br>DEMO · FREE' : 'CRYSTALS<br>TO WIN') + '</span></div>' +
           '<div class="pcline">' + g.name.toLowerCase() + (DEMO.on ? ' · <b>demo mode</b> · free · nothing is staked' : ' · you stake <b>' + S.stake + '</b> of your <b>' + you.purse + '</b>') + '</div>' +
+          mostHTML(g) +
           '<button class="pcmore" type="button" id="pmore" aria-expanded="false" aria-controls="pdet">MORE <i>^</i></button>' +
         '</div>' +
         '<div class="pcdet" id="pdet" hidden>' +
@@ -1144,7 +1165,8 @@ button { font: inherit; color: inherit; }
     const word = Chance.randomWord(), duelId = ++S.duels, below = rolls(word, duelId);
     const deck = shuffled(52, below), draw = () => deck.pop();
     const mine = [draw(), draw()], theirs = [draw(), draw()], board = [draw(), draw(), draw(), draw(), draw()];
-    S.last = { duelId, word, acts: [] };                 // `acts` is the hand's transcript: [street, who, what, amount], in order
+    const first = holdemFirst(++S.hands);                // ruling 79: the seat that opens every street of this hand
+    S.last = { duelId, word, acts: [], hand: S.hands, first };   // `acts` is the hand's transcript: [street, who, what, amount], in order
     const STREETS = [['HOLE CARDS', 0], ['THE FLOP', 3], ['THE TURN', 4], ['THE RIVER', 5]];
     const TABLE = ['THE TABLE · FACE DOWN', 'THE FLOP', 'THE TURN', 'THE RIVER'];
     const U = betUnit(), who = (k) => 'GENESIS #' + P[k].id, log = (k, what, n) => S.last.acts.push([at, k, what, n || 0]);
@@ -1222,10 +1244,14 @@ button { font: inherit; color: inherit; }
         pay(them(), betN()); due = betN(); busy = false; log(them(), 'bet', due);
         paintH(who(them()) + ' BETS ' + due + ' <span class="need">· ' + due + ' TO YOU</span>');
         say('<b>' + who(them()) + '</b> bets <b>' + due + '</b>. Call, raise or fold.'); return; }
-      log(them(), 'check'); paintH(who(them()) + ' CHECKS'); say('<b>' + who(them()) + '</b> checks.');
+      log(them(), 'check');
+      if (first === them()) { busy = false; paintH(who(them()) + ' CHECKS <span class="need">· TO YOU</span>');
+        say('<b>' + who(them()) + '</b> checks. ' + (cover(betN()) ? 'Check, bet or fold.' : 'Check or fold.')); return; }
+      paintH(who(them()) + ' CHECKS'); say('<b>' + who(them()) + '</b> checks.');
       await wait(500); next();
     }
-    function check() { if (over || busy || due) return; log(me(), 'check'); theirTurn(0); }
+    function check() { if (over || busy || due) return; log(me(), 'check');
+      if (first === me()) theirTurn(0); else { busy = true; paintH('YOU CHECK'); say('You check.'); setTimeout(next, 500); } }
     function bet() { if (over || busy || due || !cover(betN())) return; const n = betN(); pay(me(), n); raises = 0; log(me(), 'bet', n);
       paintH('YOU BET ' + n); say('You bet <b>' + n + '</b>.'); theirTurn(n); }
     function call() { if (over || busy || !due) return; const n = due; pay(me(), n); due = 0; busy = true; log(me(), 'call', n);
@@ -1239,6 +1265,8 @@ button { font: inherit; color: inherit; }
       if (at < 3) { at++;
         const n = STREETS[at][1], mb = bestOf(mine.concat(board.slice(0, n)));
         paintH(STREETS[at][0] + ' · YOU HAVE ' + mb.name);
+        if (first === them()) { say(STREETS[at][0].toLowerCase() + ': you have <b>' + mb.name.toLowerCase() + '</b>. <b>' + who(them()) + '</b> acts first.');
+          theirTurn(0); return; }
         say(STREETS[at][0].toLowerCase() + ': you have <b>' + mb.name.toLowerCase() + '</b>. ' + (cover(betN()) ? 'Check, bet or fold.' : 'Check or fold.'));
         return; }
       over = true;
@@ -1259,8 +1287,10 @@ button { font: inherit; color: inherit; }
       await wait(900);
       done(them());
     }
-    paintH('HOLE CARDS');
-    say('Two cards each, five to come in the middle. The stake is the ante; now a betting round, in ' + U.name.toLowerCase() + ' — <b>CHECK</b>, <b>BET</b> or <b>FOLD</b>.');
+    paintH('HOLE CARDS · ' + (first === me() ? 'YOU ACT FIRST' : who(them()) + ' ACTS FIRST'));
+    if (first === them()) { say('Two cards each, five to come in the middle. The stake is the ante. Hand ' + S.hands + ': <b>' + who(them()) + '</b> acts first on every street this hand, you next hand.');
+      theirTurn(0); return; }
+    say('Two cards each, five to come in the middle. The stake is the ante; hand ' + S.hands + ', and you act first on every street — <b>CHECK</b>, <b>BET</b> or <b>FOLD</b>.');
   }
 
   /* ---------- the glitching terminal ----------
@@ -1419,6 +1449,7 @@ button { font: inherit; color: inherit; }
           '<div class="pcline">A <b>1/1 DOOPIE</b> was standing as a terminal. You used it; it has you.</div>' +
           '<div class="pcbig"><span class="n" id="bign">' + pot + '</span><span class="u">CRYSTALS<br>IN THE POT</span></div>' +
           '<div class="pcline">' + g.name.toLowerCase() + (DEMO.on ? ' · <b>demo mode</b> · free · nothing is staked' : ' · you stake <b>' + S.stake + '</b> of your <b>' + you.purse + '</b>') + '</div>' +
+          mostHTML(g) +
           '<span class="sample">THE DOOPIE’S EDGE, AND WHAT IT RISKS · NOT SET · THE DEPLOYER’S</span>' +
         '</div>' +
         '<div class="acts"><button class="go" type="button" id="paccept">THE MACHINE HAS YOU · PLAY IT OUT</button></div>' +
@@ -1497,7 +1528,7 @@ button { font: inherit; color: inherit; }
   readDemoChain();                                       // the chain's answer, when there is one, wins over the query
   window.challenge = { S, P, H2H, GAMES, POTS, STAKES, settle, restart, potStats, rankOf, PLAYERS, TERMS: Duel.TERMS,
     bjTotal, score5, bestOf, cmpScore, rolls, deckFor, shuffled, FOF, STAND_ON,
-    DEMO, applyDemo, readDemoChain, BET_UNITS, HOLDEM, betUnit };                                      // a handle for the checks
+    DEMO, applyDemo, readDemoChain, BET_UNITS, HOLDEM, betUnit, holdemMostX, holdemFirst };                                      // a handle for the checks
 })();
 </script>
 </body>

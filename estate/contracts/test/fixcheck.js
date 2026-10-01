@@ -934,7 +934,9 @@ const errorNames = (abi) => Object.fromEntries(abi.filter((e) => e.type === 'err
   const gen = C.genesis ? await net.deploy(TEAM, C.genesis) : null;
   // the REAL RarePartners (M16) stands where MockPartners stood: the market's IRarePartners now carries the
   // price, so the ordering below is proved through the contract that will deploy, not a reference shape
-  const part = C.rpart && ROLES ? await net.deploy(TEAM, C.rpart, [ROLES.address]) : null;
+  // the waiting period after a pause: DESIGN's "24 hours to start", a constructor argument and a deployer number
+  const WAIT = 24 * 3600;
+  const part = C.rpart && ROLES ? await net.deploy(TEAM, C.rpart, [ROLES.address, rf.address, WAIT]) : null;
   // Everything below reaches the mocks through these three, so this file RUNS TO THE END against the
   // sources as they were - where `MockGenesis`, `RarePartners` and `RareMarket` do not exist at all - and
   // reports the new rows as failures instead of crashing on the first missing key. Same discipline as
@@ -1050,18 +1052,27 @@ const errorNames = (abi) => Object.fromEntries(abi.filter((e) => e.type === 'err
   // --- A BASE CHANGES HANDS, AND THE PARTNER IS PAID FIRST ---
   const rfBal = async (a) => BigInt((await rf.call('balanceOf', [a])).out[0]);
   const OWED = 200n * 10n ** 18n;
-  // 2,000 bps of a 1,000 $RF price is 200 $RF: set by the base's OWNER (the seller), as RarePartners requires
-  await pc('propose', [GEN, 1n, PARTNER, Number((OWED * 10_000n) / PRICE)], SELLER);
-  await pc('accept', [GEN, 1n], PARTNER);
+  // A partnership is two Genesis tokens (DESIGN: like partners with like): the seller's base 1 and PARTNER's
+  // base 50, the seller keeping 8,000 bps, so the partner's 2,000 bps of a 1,000 $RF price is 200 $RF. Both
+  // agree - the seller proposes and PARTNER accepts - and the partner's share goes into PARTNER's own wallet
+  // (deployer ruling, BINDING §77.1: "any sale will go into your wallet").
+  const PARTNER_TOKEN = 50n;
+  await gc('mint', [PARTNER, PARTNER_TOKEN]);
+  await pc('setPartnerable', [GEN, true], TEAM);
+  const SELLER_SHARE = 10_000 - Number((OWED * 10_000n) / PRICE);
+  await pc('propose', [GEN, 1n, PARTNER_TOKEN, SELLER_SHARE], SELLER);
+  await pc('accept', [GEN, PARTNER_TOKEN, 1n, SELLER_SHARE], PARTNER);
+  const PID9 = part ? BigInt((await part.call('partnershipOf', [GEN, 1n])).out[0]) : 0n;
+  const PARTNER_W = PARTNER;
   const qv = mkt ? await soft(mkt, 'quote', [GEN, 1n, PRICE, MKT_FEE]) : null;
   const q = qv ? qv.out : null;
-  const before = { s: await rfBal(SELLER), b: await rfBal(BUYER), p: await rfBal(PARTNER), f: await rfBal(FEES) };
+  const before = { s: await rfBal(SELLER), b: await rfBal(BUYER), p: await rfBal(PARTNER_W), f: await rfBal(FEES) };
   const sale = mkt ? await mkt.call('buy', [GEN, 1n], BUYER).catch((e) => { detail = String(e.message); return null; }) : null;
   const saleFee = (PRICE * BigInt(MKT_FEE)) / 10_000n;
   ok('a base sells for $RF and it is A TOKEN TRANSFER - the buyer holds the Genesis token, which is the whole payoff of M3 item 8: no bespoke hand-over-everything function',
     !!sale && (await holder(1n)) === BUYER, detail);
   ok('the money splits exactly as quote() said before anybody signed: ' + (Number(saleFee) / 1e18) + ' fee, ' + (Number(OWED) / 1e18) + ' to the partner, the rest to the seller',
-    !!sale && (await rfBal(PARTNER)) - before.p === OWED && (await rfBal(FEES)) - before.f === saleFee
+    !!sale && (await rfBal(PARTNER_W)) - before.p === OWED && (await rfBal(FEES)) - before.f === saleFee
     && (await rfBal(SELLER)) - before.s === PRICE - saleFee - OWED && before.b - (await rfBal(BUYER)) === PRICE
     && !!q && q[0] === saleFee && q[2] === OWED && q[3] === PRICE - saleFee - OWED,
     'quote ' + (q ? Array.from(q).join('/') : 'null'));
@@ -1069,12 +1080,21 @@ const errorNames = (abi) => Object.fromEntries(abi.filter((e) => e.type === 'err
   const xfer = ethers.id('Transfer(address,address,address)') && ethers.id('Transfer(address,address,uint256)');
   const rfLogs = sale ? sale.logs.filter((l) => l.address.toLowerCase() === rf.address.toLowerCase() && l.topics[0] === xfer) : [];
   const idxOf = (a) => rfLogs.findIndex((l) => ('0x' + l.topics[2].slice(26)).toLowerCase() === a.toLowerCase());
-  ok('"A PARTNER IS PAID FIRST": the partner\'s $RF transfer is log ' + idxOf(PARTNER) + ' and the seller\'s is log ' + idxOf(SELLER)
+  ok('"A PARTNER IS PAID FIRST": the partner\'s $RF transfer is log ' + idxOf(PARTNER_W) + ' and the seller\'s is log ' + idxOf(SELLER)
     + ' - proved by the ORDER the money moved in, which is the only thing that can prove it',
-    rfLogs.length === 3 && idxOf(PARTNER) === 0 && idxOf(PARTNER) < idxOf(SELLER), rfLogs.length + ' $RF transfers in the sale');
+    rfLogs.length === 3 && idxOf(PARTNER_W) === 0 && idxOf(PARTNER_W) < idxOf(SELLER), rfLogs.length + ' $RF transfers in the sale');
   const soldEv = sale && sale.events.find((e) => e.name === 'Sold');
   ok('and the record says what came out of it - Sold carries the partner and what they took, so "the buyer sees it in the price" is checkable afterwards',
-    !!soldEv && soldEv.args[6].toLowerCase() === PARTNER && soldEv.args[7] === OWED && soldEv.args[8] === false, soldEv ? String(soldEv.args) : 'no Sold event');
+    !!soldEv && soldEv.args[6].toLowerCase() === PARTNER_W && soldEv.args[7] === OWED && soldEv.args[8] === false, soldEv ? String(soldEv.args) : 'no Sold event');
+  // Deployer ruling, BINDING §77.2: "the partner being settled at a sale". The partnership ENDS at the sale - after
+  // the partner was paid first, above - and the buyer inherits nothing: base 1 and base 50 are both free again.
+  const after9 = part ? Number((await part.call('stateOf', [PID9])).out[0]) : -1;
+  const claimAfter = part ? (await part.call('saleClaim', [GEN, 1n, PRICE])).out : null;
+  const free1 = part ? BigInt((await part.call('partnershipOf', [GEN, 1n])).out[0]) : -1n;
+  const free50 = part ? BigInt((await part.call('partnershipOf', [GEN, PARTNER_TOKEN])).out[0]) : -1n;
+  ok('RULE sale-ends-it: the sale through RareMarket ENDS the partnership - stateOf reads Ended, base 1 owes nobody now ((0x0, 0)) and both bases are free; the buyer does not inherit it',
+    PID9 !== 0n && !!sale && after9 === 3 && !!claimAfter && claimAfter[1] === 0n && free1 === 0n && free50 === 0n,
+    JSON.stringify([String(PID9), after9, claimAfter && String(claimAfter), String(free1), String(free50)]));
   const mGone = await mTry('buy', [GEN, 1n], OFFERER);
   ok('NEGATIVE: TWO BUYS RACING - the second finds nothing (NotListed), because the record is deleted before any external call',
     mGone === 'NotListed', mGone);
@@ -1082,18 +1102,20 @@ const errorNames = (abi) => Object.fromEntries(abi.filter((e) => e.type === 'err
   // --- an over-claim, and an unnamed partner: the sale does not happen at all ---
   await gc('setApprovalForAll', [MKTA, true], BUYER);
   await mTry('list', [GEN, 1n, PRICE], BUYER);
-  // 9,999 bps is the largest split RarePartners accepts; with the 1.5% fee it over-claims the price
-  await pc('propose', [GEN, 1n, PARTNER, 9_999], BUYER);
-  await pc('accept', [GEN, 1n], PARTNER);
+  // BUYER inherited nothing, so BUYER and PARTNER form their OWN partnership: BUYER keeps 1 bps, leaving the
+  // partner 9,999 - the largest RarePartners accepts - and with the 1.5% fee it over-claims the price.
+  await pc('propose', [GEN, 1n, PARTNER_TOKEN, 1], BUYER);
+  await pc('accept', [GEN, PARTNER_TOKEN, 1n, 1], PARTNER);
+  const PID9b = part ? BigInt((await part.call('partnershipOf', [GEN, 1n])).out[0]) : 0n;
   const ownerWas = (await holder(1n));
   const mOver = await mTry('buy', [GEN, 1n], OFFERER);
   ok('NEGATIVE: A SALE THAT CANNOT PAY THE PARTNER IN FULL DOES NOT HAPPEN (PartnerClaimExceedsPrice) - it is refused rather than paying them part, and the token does not move',
-    mOver === 'PartnerClaimExceedsPrice' && (await holder(1n)) === ownerWas, mOver);
-  const pUnnamed = part ? await tryCall(part, Object.assign({}, errorNames(C.rpart.abi), RERR), 'propose', [GEN, 1n, ethers.ZeroAddress, Number((OWED * 10_000n) / PRICE)], BUYER) : 'NO PARTNERS';
-  ok('NEGATIVE: a claim with nobody to pay it to cannot be BUILT through the real RarePartners (PayeeWithoutSplit), and the market still carries PartnerUnnamed as its own refusal should another oracle ever return one',
-    pUnnamed === 'PayeeWithoutSplit' && !!C.market && C.market.abi.some((f) => f.type === 'error' && f.name === 'PartnerUnnamed'), pUnnamed);
-  await pc('propose', [GEN, 1n, ethers.ZeroAddress, 0], BUYER);
-  await pc('accept', [GEN, 1n], PARTNER);
+    PID9b !== 0n && PID9b !== PID9 && mOver === 'PartnerClaimExceedsPrice' && (await holder(1n)) === ownerWas, mOver);
+  const pUnnamed = part ? await tryCall(part, Object.assign({}, errorNames(C.rpart.abi), RERR), 'proposeChange', [PID9b, 10_000], BUYER) : 'NO PARTNERS';
+  ok('NEGATIVE: a split that leaves one side nothing cannot be BUILT through the real RarePartners (ShareOutOfRange), and the market still carries PartnerUnnamed as its own refusal should another oracle ever return one',
+    pUnnamed === 'ShareOutOfRange' && !!C.market && C.market.abi.some((f) => f.type === 'error' && f.name === 'PartnerUnnamed'), pUnnamed);
+  await pc('proposeEnd', [PID9b], BUYER);
+  await pc('agree', [PID9b, 2, 0], PARTNER);
 
   // --- re-entrancy, from inside the one moment somebody else's code runs ---
   const reb = C.reenter && mkt ? await net.deploy(TEAM, C.reenter, [MKTA]) : null;
@@ -1476,62 +1498,243 @@ const errorNames = (abi) => Object.fromEntries(abi.filter((e) => e.type === 'err
   ok('NEGATIVE: a kind with no ladder is refused (NoSuchLadder) rather than answered with nothing', uNone === 'NoSuchLadder', uNone);
   note('there is NO demolish here: no building row and no crystal balance exist on chain (schema base/building are M6). BINDING §46.4 carries the verb as a spec.');
 
-  // ---------- 13. RarePartners - the split of a sale, set by the owner, frozen by the game (M16) ----------
-  console.log('\n--- 13. RarePartners: the real claim oracle agrees with the mock the ordering was proved with ---');
-  const RP = C.rpart && ROLES ? await net.deploy(TEAM, C.rpart, [ROLES.address]) : null;
+  // ---------- 13. RarePartners - partnerships, and what they settle (M16 items 1, 2, 4, 5; M20 item 6) ----------
+  // Every assertion that proves a RULE is labelled `RULE <name>:` so test/partnermutants.mjs can break that rule in
+  // a copy of the source and show this exact line going red. A rule with no mutant that turns it red is unproved.
+  console.log('\n--- 13. RarePartners: like with like, one at a time, both agree, either pauses, it ends by itself, and the partner is paid into their token\'s own wallet ---');
+  const RP = C.rpart && ROLES ? await net.deploy(TEAM, C.rpart, [ROLES.address, rf.address, WAIT]) : null;
   const PERR = C.rpart ? Object.assign({}, errorNames(C.rpart.abi), RERR) : {};
   const pTry = async (fn, args, from) => (RP ? await tryCall(RP, PERR, fn, args, from) : 'NO PARTNERS');
+  const pRead = async (fn, args) => (RP ? (await RP.call(fn, args || [])).out : null);
   ok('RarePartners compiles and deploys' + (RP ? ' at ' + RP.address + ', ' + C.rpart.size.toLocaleString('en-US') + ' bytes' : ''),
     !!RP && C.rpart.size < 24576, RP ? String(C.rpart.size) : 'no RarePartners.sol');
-  await gc('mint', [SELLER, 77n]);
-  // the SAME figures the ordering assertion in part 9 used: OWED out of PRICE, so the split is OWED/PRICE
-  // in bps - a test figure, not a game value (schema: splitBps has NO VALUES)
-  const BPS = Number((OWED * 10_000n) / PRICE);
-  const pThief = await pTry('propose', [GEN, 77n, PARTNER, BPS], THIEF);
-  ok('NEGATIVE: only the base\'s owner (the Genesis holder) can propose its split (NotOwner)', pThief === 'NotOwner', pThief);
-  const pWhole = await pTry('propose', [GEN, 77n, PARTNER, 10_000], SELLER);
-  const pHalf = await pTry('propose', [GEN, 77n, ethers.ZeroAddress, BPS], SELLER);
-  ok('NEGATIVE: a split of the whole price is refused (SplitTooLarge) and a split with nobody to pay is refused (PayeeWithoutSplit)',
-    pWhole === 'SplitTooLarge' && pHalf === 'PayeeWithoutSplit', pWhole + ' / ' + pHalf);
-  const pSet = await pTry('propose', [GEN, 77n, PARTNER, BPS], SELLER);
-  const claim0 = RP ? (await RP.call('saleClaim', [GEN, 77n, PRICE])).out : null;
-  const pNoAccept = await pTry('accept', [GEN, 77n], THIEF);
-  const pSelfAccept = await pTry('accept', [GEN, 77n], SELLER);
-  await gc('mint', [THIEF, 78n]);
-  await pTry('propose', [GEN, 78n, THIEF, BPS], THIEF);   // THIEF is 78's owner and its proposed payee: still not 77's
-  const pWrongBase = await pTry('accept', [GEN, 77n], THIEF);
-  ok('DESIGN L1684 (both agree): the owner PROPOSES ' + BPS + ' bps and saleClaim is still (0x0, 0) until the payee accepts; a stranger, the owner alone, and the payee of a DIFFERENT base (78) all cannot accept (NotTheCounterparty)',
-    pSet === 'MOVED' && !!claim0 && claim0[0] === ethers.ZeroAddress && claim0[1] === 0n && pNoAccept === 'NotTheCounterparty' && pSelfAccept === 'NotTheCounterparty' && pWrongBase === 'NotTheCounterparty',
-    JSON.stringify([pSet, claim0 && String(claim0), pNoAccept, pSelfAccept, pWrongBase]));
-  const pAcc = await pTry('accept', [GEN, 77n], PARTNER);
-  const claim = RP ? (await RP.call('saleClaim', [GEN, 77n, PRICE])).out : null;
-  ok('the payee accepts, and saleClaim(collection, tokenId, PRICE) returns THE SAME CLAIM the mock paid first in part 9: ' + (claim ? Number(claim[1]) / 1e18 : '-') + ' $RF to the partner',
-    pAcc === 'MOVED' && !!claim && claim[0].toLowerCase() === PARTNER && claim[1] === OWED, claim ? String(claim) : pAcc);
-  // ending takes both (DESIGN L1677): the owner alone proposes the zero split and nothing changes; the payee alone proposes it and nothing changes; the other side's accept ends it
-  const pEnd1 = await pTry('propose', [GEN, 77n, ethers.ZeroAddress, 0], SELLER);
-  const claimE1 = RP ? (await RP.call('saleClaim', [GEN, 77n, PRICE])).out : null;
-  const pEnd2 = await pTry('propose', [GEN, 77n, ethers.ZeroAddress, 0], PARTNER);
-  const claimE2 = RP ? (await RP.call('saleClaim', [GEN, 77n, PRICE])).out : null;
-  const pEndNotOwner = await pTry('accept', [GEN, 77n], PARTNER);
-  const pEndAcc = await pTry('accept', [GEN, 77n], SELLER);
-  const claimE3 = RP ? (await RP.call('saleClaim', [GEN, 77n, PRICE])).out : null;
-  ok('DESIGN L1677 (ending takes both): the owner proposing the end changes nothing, the payee proposing the end changes nothing (the payee may only ever propose the zero split), the payee cannot accept their own proposal, the owner accepts and the claim is (0x0, 0)',
-    pEnd1 === 'MOVED' && !!claimE1 && claimE1[1] === OWED && pEnd2 === 'MOVED' && !!claimE2 && claimE2[1] === OWED && pEndNotOwner === 'NotTheCounterparty' && pEndAcc === 'MOVED' && !!claimE3 && claimE3[1] === 0n && claimE3[0] === ethers.ZeroAddress,
-    JSON.stringify([pEnd1, pEnd2, pEndNotOwner, pEndAcc, claimE3 && String(claimE3)]));
-  const pPayeeNonZero = await pTry('propose', [GEN, 77n, PARTNER, BPS], PARTNER);
-  ok('NEGATIVE: a payee cannot propose a non-zero split (NotOwner) - only the end', pPayeeNonZero === 'NotOwner', pPayeeNonZero);
-  await pTry('propose', [GEN, 77n, PARTNER, BPS], SELLER); await pTry('accept', [GEN, 77n], PARTNER);
-  const pFrzThief = await pTry('freeze', [GEN, 77n], SELLER);
-  const pFrz = await pTry('freeze', [GEN, 77n], TEAM);
-  const pMove = await pTry('propose', [GEN, 77n, PARTNER, BPS + 1], SELLER);
-  ok('the owner cannot freeze their own split (PowerNotHeld - FREEZE_PARTNERSHIP is the game\'s, root tonight); once frozen the split cannot move (SplitFrozenAlready)',
-    pFrzThief === 'PowerNotHeld' && pFrz === 'MOVED' && pMove === 'SplitFrozenAlready', pFrzThief + ' / ' + pFrz + ' / ' + pMove);
+  // a SECOND collection, standing in for Generations: the Genesis mock's shape, a different address
+  const genz = C.genesis ? await net.deploy(TEAM, C.genesis) : null;
+  const GENZ = genz ? genz.address : ethers.ZeroAddress;
+  const walletOf = async (id) => (gen ? (await gen.call('tokenBoundAccount', [id])).out[0].toLowerCase() : null);
+  // 77 SELLER, 78 THIEF, 79 PARTNER, 80 OFFERER, 81 SELLER's second, 82 THIEF's second; GENZ 9005 PARTNER's
+  for (const [who, id] of [[SELLER, 77n], [THIEF, 78n], [PARTNER, 79n], [OFFERER, 80n], [SELLER, 81n], [THIEF, 82n]]) await gc('mint', [who, id]);
+  if (genz) await genz.call('mint', [PARTNER, 9005n]);
+  const SH = 6_000;   // the proposer keeps 60%: a test figure, not a game value (schema: splitBps has NO VALUES)
+  const P13 = PRICE;
+  const partOf = async (id) => (RP ? BigInt((await RP.call('partnershipOf', [GEN, id])).out[0]) : -1n);
+  const claimOf = async (id) => (RP ? Array.from((await RP.call('saleClaim', [GEN, id, P13])).out).map((v) => (typeof v === 'string' ? v.toLowerCase() : v)) : null);
+
+  // --- the setters: every one guarded on chain ---
+  const sThief = [await pTry('setPartnerable', [GEN, true], THIEF), await pTry('setWaitingPeriod', [WAIT * 2], THIEF), await pTry('freeze', [GEN, 77n], THIEF)];
+  ok('RULE setters-guarded: a stranger cannot switch a collection on for partnering, move the waiting period or freeze a split (PowerNotHeld each)',
+    sThief.every((r) => r === 'PowerNotHeld'), JSON.stringify(sThief));
+  ok('RULE wait-nonzero: the waiting period cannot be zero (ZeroWait) - a pause that ends the instant it starts is a unilateral end',
+    (await pTry('setWaitingPeriod', [0], TEAM)) === 'ZeroWait' && Number((await pRead('waitingPeriod'))[0]) === WAIT, String(await pRead('waitingPeriod')));
+
+  // --- like with like: only a switched-on collection, and both sides are tokens of that ONE collection ---
+  const before13 = await pTry('propose', [GEN, 77n, 79n, SH], SELLER);
+  ok('RULE switch-first: no collection may partner until it is switched on (NotPartnerable) - closed first, opened deliberately',
+    before13 === 'NotPartnerable', before13);
+  // part 9 switched GEN on in ITS RarePartners; this is a fresh one
+  await pTry('setPartnerable', [GEN, true], TEAM);
+  const zOff = await pTry('propose', [GENZ, 9005n, 79n, SH], PARTNER);
+  const across = await pTry('propose', [GEN, 79n, 9005n, SH], PARTNER);   // 9005 is a GENZ token: in GEN it does not exist
+  const oneColl = C.rpart ? C.rpart.abi.filter((f) => ['propose', 'accept'].includes(f.name)).every((f) => f.inputs.filter((i) => i.type === 'address').length === 1) : false;
+  ok('RULE like-with-like: a Genesis cannot partner a Generation - a partnership names ONE collection and both sides are token ids in it (propose and accept take exactly one address), so a token of the other collection is not a token here at all (' + across + '), and a collection not switched on cannot partner (' + zOff + ')',
+    oneColl && zOff === 'NotPartnerable' && across !== 'MOVED', JSON.stringify({ oneColl, zOff, across }));
+
+  // --- who may propose, and to whom ---
+  const pThief = await pTry('propose', [GEN, 77n, 79n, SH], THIEF);
+  const pSelf = await pTry('propose', [GEN, 77n, 81n, SH], SELLER);
+  const pSameTok = await pTry('propose', [GEN, 77n, 77n, SH], SELLER);
+  const pRange = [await pTry('propose', [GEN, 77n, 79n, 0], SELLER), await pTry('propose', [GEN, 77n, 79n, 10_000], SELLER)];
+  ok('RULE owner-proposes: only the token\'s owner proposes for it (NotOwner)', pThief === 'NotOwner', pThief);
+  ok('RULE two-players: "two players can partner" - not one player with two of their own Genesis (SamePlayer), and not a token with itself (SameToken)',
+    pSelf === 'SamePlayer' && pSameTok === 'SameToken', pSelf + ' / ' + pSameTok);
+  ok('RULE share-range: a split that leaves one side nothing is refused both ways (ShareOutOfRange at 0 and at 10,000)',
+    pRange.every((r) => r === 'ShareOutOfRange'), JSON.stringify(pRange));
+
+  // --- forming one takes both ---
+  const pSet = await pTry('propose', [GEN, 77n, 79n, SH], SELLER);
+  await pTry('propose', [GEN, 78n, 79n, SH], THIEF);   // a rival offer to 79, left standing for the one-at-a-time race below
+  const c0 = await claimOf(77n);
+  const aWrongTok = await pTry('accept', [GEN, 78n, 77n, SH], THIEF);
+  const aWrongTerms = await pTry('accept', [GEN, 79n, 77n, SH + 1], PARTNER);
+  const aStranger = await pTry('accept', [GEN, 79n, 77n, SH], THIEF);
+  ok('RULE both-form: the proposal alone owes nothing (saleClaim (0x0, 0)); an offer to a different token cannot be accepted (NoSuchProposal), terms edited under the acceptor are refused (TermsChanged), and only the partner token\'s owner accepts (NotOwner)',
+    pSet === 'MOVED' && !!c0 && c0[0] === ethers.ZeroAddress && c0[1] === 0n && aWrongTok === 'NoSuchProposal' && aWrongTerms === 'TermsChanged' && aStranger === 'NotOwner',
+    JSON.stringify([pSet, c0 && c0.map(String), aWrongTok, aWrongTerms, aStranger]));
+  const aOk = await pTry('accept', [GEN, 79n, 77n, SH], PARTNER);
+  const PID = await partOf(77n);
+  const W79 = await walletOf(79n);
+  const c77 = await claimOf(77n), c79 = await claimOf(79n);
+  ok('the partner token\'s owner accepts and it forms: a sale of 77 owes 79 its 40% and a sale of 79 owes 77 its 60% - the same percentage as the earnings split (ruling 2)',
+    aOk === 'MOVED' && PID !== 0n && (await partOf(79n)) === PID && !!c77 && c77[1] === (P13 * 4_000n) / 10_000n && !!c79 && c79[1] === (P13 * 6_000n) / 10_000n,
+    JSON.stringify([aOk, String(PID), c77 && c77.map(String), c79 && c79.map(String)]));
+  ok('RULE pays-the-partner: the partner is paid into THEIR OWN WALLET - the address that held 79 when it formed - and not into 79\'s token-bound account (deployer ruling: "any sale will go into your wallet", BINDING §77.1)',
+    !!c77 && c77[0] === PARTNER && W79 !== PARTNER && !!c79 && c79[0] === SELLER, JSON.stringify({ c77: c77 && c77[0], W79, PARTNER }));
+
+  // --- one at a time ---
+  const oInto = await pTry('propose', [GEN, 80n, 77n, SH], OFFERER);
+  const oFrom = await pTry('propose', [GEN, 77n, 80n, SH], SELLER);
+  const oRace = await pTry('accept', [GEN, 79n, 78n, SH], PARTNER);   // 78's offer was made while 79 was free
+  ok('RULE one-at-a-time: a token already partnered can neither be proposed to (' + oInto + ') nor propose (' + oFrom + '), and an offer made BEFORE it partnered cannot be accepted after (' + oRace + ') - AlreadyPartnered each',
+    oInto === 'AlreadyPartnered' && oFrom === 'AlreadyPartnered' && oRace === 'AlreadyPartnered', JSON.stringify([oInto, oFrom, oRace]));
+  // The defect the steward found in the contract on main: there, `accept` let the OWNER swap in a new payee
+  // with only the NEW payee agreeing, so the current partner was dropped without a say - an end that took one
+  // side. Here a partner is a token, so a swap is "77 leaves 79 and joins 80". Attempted end to end, from both
+  // ends: the owner offers 77 to 80, and 80's owner tries to accept 77 regardless.
+  const swapOffer = await pTry('propose', [GEN, 77n, 80n, SH], SELLER);
+  const swapTake = await pTry('accept', [GEN, 80n, 77n, SH], OFFERER);
+  const cSwap = await claimOf(77n);
+  ok('RULE no-payee-swap: the owner cannot swap the partner out - offering 77 to a new partner is refused (' + swapOffer + ') and the new partner cannot take it (' + swapTake + '); 77 is still in the SAME partnership and a sale still pays 79\'s holder its 40% - the only way out is an end both agree to (or a sale, which pays the partner first)',
+    swapOffer === 'AlreadyPartnered' && swapTake !== 'MOVED' && (await partOf(77n)) === PID && !!cSwap && cSwap[0] === PARTNER && cSwap[1] === (P13 * 4_000n) / 10_000n,
+    JSON.stringify([swapOffer, swapTake, cSwap && cSwap.map(String)]));
+
+  // --- changing the split takes both ---
+  const ch = await pTry('proposeChange', [PID, 5_000], SELLER);
+  const cMid = await claimOf(77n);
+  const chStr = await pTry('agree', [PID, 1, 5_000], THIEF);
+  const chOwn = await pTry('agree', [PID, 1, 5_000], SELLER);
+  const chTerms = await pTry('agree', [PID, 1, 5_001], PARTNER);
+  const chOk = await pTry('agree', [PID, 1, 5_000], PARTNER);
+  const cAfter = await claimOf(77n);
+  ok('RULE both-change: one side proposing a new split changes nothing; a stranger and the proposer cannot agree (NotTheCounterparty), the wrong figure is refused (TermsChanged), and the other side\'s agree moves it to 50/50',
+    ch === 'MOVED' && cMid && cMid[1] === (P13 * 4_000n) / 10_000n && chStr === 'NotTheCounterparty' && chOwn === 'NotTheCounterparty' && chTerms === 'TermsChanged' && chOk === 'MOVED' && cAfter && cAfter[1] === P13 / 2n,
+    JSON.stringify([ch, cMid && String(cMid[1]), chStr, chOwn, chTerms, chOk, cAfter && String(cAfter[1])]));
+
+  // --- ending it takes both ---
+  const eProp = await pTry('proposeEnd', [PID], PARTNER);
+  const eMid = await claimOf(77n);
+  const eOwn = await pTry('agree', [PID, 2, 0], PARTNER);
+  const eOk = await pTry('agree', [PID, 2, 0], SELLER);
+  const eAfter = await claimOf(77n);
+  ok('RULE both-end: "ending it takes both" - one side proposing the end changes nothing and cannot agree to itself (NotTheCounterparty); the other side agrees, the claim is (0x0, 0) and both tokens are free',
+    eProp === 'MOVED' && eMid && eMid[1] === P13 / 2n && eOwn === 'NotTheCounterparty' && eOk === 'MOVED' && eAfter && eAfter[1] === 0n && (await partOf(77n)) === 0n && (await partOf(79n)) === 0n,
+    JSON.stringify([eProp, eOwn, eOk, eAfter && eAfter.map(String)]));
+
+  // --- earnings accrue at the split in force, and are paid once, at the end (deployer ruling, BINDING §77.3) ---
+  // PAYER stands in for RareGame: it has just paid the earner the rest, and `earn` takes the partner's share from it.
+  const PAYER = '0xa000000000000000000000000000000000000006';
+  await net.acct(PAYER);
+  await rf.call('mint', [PAYER, 10n ** 24n]);
+  if (RP) await rf.call('approve', [RP.address, ethers.MaxUint256], PAYER);
+  const rfB = async (a) => BigInt((await rf.call('balanceOf', [a])).out[0]);
+  const RPA = RP ? RP.address : ethers.ZeroAddress;
+  const pOf = async (id) => (RP ? (await RP.call('partnership', [id])).out[0] : null);
+  const perOf = async (id) => (RP ? Array.from((await RP.call('periodsOf', [id])).out[0]) : []);
+  await pTry('propose', [GEN, 77n, 79n, SH], SELLER); await pTry('accept', [GEN, 79n, 77n, SH], PARTNER);
+  const PID2 = await partOf(77n);
+  const EARN = 1_000n * 10n ** 18n;
+  const earnWho = await pTry('earn', [GEN, 77n, THIEF, EARN], PAYER);
+  const b0 = { rp: await rfB(RPA), partner: await rfB(PARTNER), seller: await rfB(SELLER) };
+  const earned1 = await pTry('earn', [GEN, 77n, SELLER, EARN], PAYER);
+  const p1 = await pOf(PID2);
+  ok('RULE earner-holds: an earning is shared only for the holder of the token named (NotOwner otherwise) - whoever pays the prize cannot name somebody else\'s base',
+    earnWho === 'NotOwner', earnWho);
+  ok('RULE accrue-not-pay: 77 earns 1,000 at 60/40 and 79\'s 400 is HELD by RarePartners, not paid - the partner\'s balance does not move until the partnership ends',
+    earned1 === 'MOVED' && (await rfB(RPA)) - b0.rp === (EARN * 4_000n) / 10_000n && (await rfB(PARTNER)) === b0.partner && !!p1 && BigInt(p1.owedToB) === (EARN * 4_000n) / 10_000n,
+    JSON.stringify([earned1, p1 && String(p1.owedToB)]));
+
+  // --- either side can pause; sharing stops; a sale still pays the partner; continuing pays nothing ---
+  const pzStr = await pTry('pause', [PID2], THIEF);
+  const pz = await pTry('pause', [PID2], PARTNER);
+  const pzAgain = await pTry('pause', [PID2], SELLER);
+  ok('RULE either-pauses: a stranger cannot pause (NotAPartner); EITHER side can, alone - here the partner, not the owner who proposed - and a paused one cannot be paused again (WrongState)',
+    pzStr === 'NotAPartner' && pz === 'MOVED' && pzAgain === 'WrongState' && Number((await pRead('stateOf', [PID2]))[0]) === 2, JSON.stringify([pzStr, pz, pzAgain]));
+  const rpPaused = await rfB(RPA);
+  const earnedPaused = await pTry('earn', [GEN, 77n, SELLER, EARN], PAYER);
+  const viewPaused = RP ? (await RP.call('earningsClaim', [GEN, 77n, SELLER, EARN])).out : null;
+  ok('RULE pause-stops-sharing: an earning while paused takes nothing (the held sum is unchanged, the period records nothing) and the view agrees ((0x0, 0))',
+    earnedPaused === 'MOVED' && (await rfB(RPA)) === rpPaused && BigInt((await perOf(PID2))[0].earnedA) === EARN && !!viewPaused && viewPaused[1] === 0n,
+    JSON.stringify([earnedPaused, String(await rfB(RPA)), String(rpPaused)]));
+  const salePaused = await claimOf(77n);
+  ok('RULE pause-not-a-sale-dodge: but a SALE during the pause still pays the partner their 40% - pausing stops the sharing, it is not a way to sell the base out from under them',
+    !!salePaused && salePaused[1] === (P13 * 4_000n) / 10_000n, salePaused && salePaused.map(String));
+  const rz = await pTry('proposeChange', [PID2, 7_000], SELLER);
+  const rzOk = await pTry('agree', [PID2, 1, 7_000], PARTNER);
+  const per2 = await perOf(PID2);
+  ok('RULE new-terms-resume: inside the waiting period the two agree new terms and carry on - Active again at 70/30, with a SECOND period opened at 7,000 beside the first at 6,000',
+    rz === 'MOVED' && rzOk === 'MOVED' && Number((await pRead('stateOf', [PID2]))[0]) === 1 && per2.length === 2 && Number(per2[0].shareA) === 6_000 && Number(per2[1].shareA) === 7_000,
+    JSON.stringify([rz, rzOk, per2.map((x) => String(x.shareA))]));
+  ok('RULE continue-pays-nothing: agreeing new terms after a pause PAYS NOTHING - the 400 stays held and the partner\'s balance has not moved ("the maths carries over")',
+    (await rfB(RPA)) === rpPaused && (await rfB(PARTNER)) === b0.partner && BigInt((await pOf(PID2)).owedToB) === (EARN * 4_000n) / 10_000n, String(await rfB(PARTNER)));
+  await pTry('earn', [GEN, 77n, SELLER, EARN], PAYER);   // 77 earns 1,000 more at 70/30: 300 to 79
+  await pTry('earn', [GEN, 79n, PARTNER, EARN], PAYER);  // 79 earns 1,000 at 70/30: 700 to 77
+  const pre = { partner: await rfB(PARTNER), seller: await rfB(SELLER), rp: await rfB(RPA) };
+  await pTry('proposeEnd', [PID2], SELLER);
+  const endPaid = await pTry('agree', [PID2, 2, 0], PARTNER);
+  const toPartner = (await rfB(PARTNER)) - pre.partner, toSeller = (await rfB(SELLER)) - pre.seller;
+  ok('RULE per-period-sum: at the agreed end each side is paid the SUM over its periods at each period\'s own split - 79 gets 400 (first period, 40%) + 300 (second, 30%) = ' + Number(toPartner) / 1e18 + ', 77 gets 700 (second, 70% of 79\'s 1,000) = ' + Number(toSeller) / 1e18 + ', and nothing is left held',
+    endPaid === 'MOVED' && toPartner === (EARN * 7_000n) / 10_000n && toSeller === (EARN * 7_000n) / 10_000n && pre.rp - (await rfB(RPA)) === toPartner + toSeller && (await pOf(PID2)).settled === true,
+    JSON.stringify([endPaid, String(toPartner), String(toSeller)]));
+  note('what the server needs for crystals and wood is on chain beside it: periodsOf(id) - each period\'s start, its split and what each side earned - and the Paused/SplitChanged/Ended events.');
+
+  // --- and if they do not continue, it ends by itself and pays ---
+  await pTry('propose', [GEN, 77n, 79n, SH], SELLER); await pTry('accept', [GEN, 79n, 77n, SH], PARTNER);
+  const PID2b = await partOf(77n);
+  await pTry('earn', [GEN, 79n, PARTNER, EARN], PAYER);   // 600 to 77's holder
+  await pTry('pause', [PID2b], SELLER);
+  const endsAt = BigInt((await pRead('partnership', [PID2b]))[0].endsAt);
+  const wMove = await pTry('setWaitingPeriod', [WAIT * 2], TEAM);
+  const early = await pTry('settle', [PID2b], THIEF);
+  net.travel(WAIT);
+  const endsAt2 = BigInt((await pRead('partnership', [PID2b]))[0].endsAt);
+  const stEnd = Number((await pRead('stateOf', [PID2b]))[0]);
+  ok('RULE wait-snapshot: the waiting period is copied in AT THE PAUSE - root moving it to 48 h afterwards (' + wMove + ') does not move this pause\'s end, and it still ends at 24 h; nothing can be settled before then (' + early + ')',
+    wMove === 'MOVED' && endsAt === endsAt2 && endsAt === BigInt(net.at()) && stEnd === 3 && early === 'WrongState', JSON.stringify([String(endsAt), String(endsAt2), String(net.at()), stEnd, early]));
+  const cLapsed = await claimOf(77n);
+  const chLapsed = await pTry('proposeChange', [PID2b, 6_000], SELLER);
+  ok('RULE ends-by-itself: the moment the waiting period runs out it is ENDED with nobody calling anything - stateOf reads Ended, the sale claim is (0x0, 0), both tokens are free, and it can no longer be changed (WrongState)',
+    stEnd === 3 && !!cLapsed && cLapsed[1] === 0n && (await partOf(77n)) === 0n && (await partOf(79n)) === 0n && chLapsed === 'WrongState',
+    JSON.stringify([stEnd, cLapsed && cLapsed.map(String), chLapsed]));
+  const sBefore = await rfB(SELLER);
+  const st1 = await pTry('settle', [PID2b], THIEF), st2 = await pTry('settle', [PID2b], THIEF);
+  ok('RULE pause-end-pays: once it has run out ANYONE may settle it (M16 item 7\'s clock will) - 77\'s holder is paid the 600 held for them',
+    st1 === 'MOVED' && (await rfB(SELLER)) - sBefore === (EARN * 6_000n) / 10_000n, JSON.stringify([st1, String((await rfB(SELLER)) - sBefore)]));
+  ok('RULE settle-once: a second settle is refused (AlreadySettled) - the held sum is paid once', st2 === 'AlreadySettled', st2);
+  await pTry('setWaitingPeriod', [WAIT], TEAM);
+
+  // --- a base that changes hands ends its partnership, and what was held is the OLD holder's ---
+  await pTry('propose', [GEN, 77n, 79n, SH], SELLER); await pTry('accept', [GEN, 79n, 77n, SH], PARTNER);
+  const PID2c = await partOf(77n);
+  await pTry('earn', [GEN, 79n, PARTNER, EARN], PAYER);   // 600 held for 77's holder, SELLER
+  await gc('transferFrom', [SELLER, BUYER, 77n], SELLER);
+  const stMoved = Number((await pRead('stateOf', [PID2c]))[0]);
+  const sB = { s: await rfB(SELLER), b: await rfB(BUYER) };
+  const stMovedPay = await pTry('settle', [PID2c], THIEF);
+  ok('RULE paid-to-recorded-holder: 77 changes hands, the partnership is Ended at once (the buyer inherits nothing: 77 is free), and settling pays the 600 to SELLER, who held 77 while it was earned - not to BUYER',
+    stMoved === 3 && (await partOf(77n)) === 0n && stMovedPay === 'MOVED' && (await rfB(SELLER)) - sB.s === (EARN * 6_000n) / 10_000n && (await rfB(BUYER)) === sB.b,
+    JSON.stringify([stMoved, stMovedPay, String((await rfB(SELLER)) - sB.s), String((await rfB(BUYER)) - sB.b)]));
+  await gc('transferFrom', [BUYER, SELLER, 77n], BUYER);
+
+  // --- freezing the split for a game ---
+  await pTry('propose', [GEN, 77n, 79n, SH], SELLER); await pTry('accept', [GEN, 79n, 77n, SH], PARTNER);
+  const PID3 = await partOf(77n);
+  const fz = await pTry('freeze', [GEN, 79n], TEAM);
+  const fzMove = await pTry('proposeChange', [PID3, 5_000], SELLER);
+  const fzPause = await pTry('pause', [PID3], SELLER);
+  ok('RULE frozen-split: FREEZE_PARTNERSHIP (the game\'s; root meanwhile) freezes the split - it cannot be changed (SplitIsFrozen) - but either side can still pause, so a frozen split never traps anybody',
+    fz === 'MOVED' && fzMove === 'SplitIsFrozen' && fzPause === 'MOVED', JSON.stringify([fz, fzMove, fzPause]));
+  net.travel(WAIT);
+
+  // --- a proposal made by one owner does not bind the next ---
+  await pTry('propose', [GEN, 80n, 82n, SH], OFFERER);
+  await gc('transferFrom', [OFFERER, BUYER, 80n], OFFERER);
+  const pStale = await pTry('accept', [GEN, 82n, 80n, SH], THIEF);
+  ok('RULE proposal-dies-with-owner: an offer made by 80\'s owner cannot be accepted once 80 has changed hands (ProposalStale) - the new owner never proposed it',
+    pStale === 'ProposalStale', pStale);
+
+  // --- a partner token that no longer exists is paid nothing, and the sale still goes ahead ---
+  await pTry('propose', [GEN, 77n, 79n, SH], SELLER); await pTry('accept', [GEN, 79n, 77n, SH], PARTNER);
+  if (gen) await gen.call('burn', [79n]);
+  const cBurned = await claimOf(77n);
+  ok('a partner token that has been burned ENDS the partnership (its holder is no longer the one recorded): 77 owes nobody ((0x0, 0)) and is free again',
+    !!cBurned && cBurned[0] === ethers.ZeroAddress && cBurned[1] === 0n && (await partOf(77n)) === 0n, cBurned && cBurned.map(String));
   const none = RP ? (await RP.call('saleClaim', [GEN, 2n, PRICE])).out : null;
   ok('a base with no partnership owes nobody nothing - (0x0, 0), which is what RareMarket treats as "no claim"', !!none && none[0] === ethers.ZeroAddress && none[1] === 0n, String(none));
   const mAbi = C.market ? C.market.abi : [];
-  ok('GAP CLOSED: RareMarket\'s IRarePartners.saleClaim now carries the PRICE (three inputs), the real RarePartners answered part 9\'s sale (partner paid first, 200 of 1,000), and a market built with partners = 0 still pays no claim',
+  ok('RareMarket\'s IRarePartners.saleClaim carries the PRICE (three inputs) and is unchanged by this part; the real RarePartners answered part 9\'s sale (partner paid first, 200 of 1,000, into the partner\'s own wallet), and a market built with partners = 0 still pays no claim',
     !!C.rpart && C.rpart.abi.some((f) => f.name === 'saleClaim' && f.inputs.length === 3) && mAbi.some((f) => f.name === 'partners')
     && !!mkt2 && (await mkt2.call('quote', [GEN, 1n, PRICE, MKT_FEE])).out[2] === 0n, 'shape missing or zero-partners market owes something');
+  note('NOT built here, and why: several partnerships at once ("built, but not live") - IRarePartners.saleClaim returns ONE partner and RareMarket is permanent, so it is the deployer\'s question first (BINDING §76.4);');
+  note('and the payout of CRYSTALS AND WOOD when a partnership ends - base state, the server\'s (M3 item 5) with no chain home (M6), on M16 item 7\'s clock, by periodsOf. $RF earnings are held here and settled.');
 
   // ---------- 14. RareGame - a game, start to finish (M18): players, stake, clock, result ----------
   // Every figure is read off DESIGN.md's decisions (Starting a game; Cost tracking; the rulings): 168 h, 24 h,
@@ -1861,6 +2064,7 @@ const errorNames = (abi) => Object.fromEntries(abi.filter((e) => e.type === 'err
     // exits and in-game verbs - §26.3 "OPEN - must be", and the roster/ownership is the guard
     ['RareGame.start', () => ask(RG, 'start', [dgid], GD)], ['RareGame.restart', () => ask(RG, 'restart', [dgid], GD)],
     ['RareGame.declare', () => ask(RG, 'declare', [dgid, [GA]], GD)], ['RareGame.abandon', () => ask(RG, 'abandon', [dgid], GD)],
+    ['RareGame.declareAs', () => ask(RG, 'declareAs', [dgid, [GA], [1n]], GD)],
     ['RareMarket.cancel', () => ask(mkt, 'cancel', [GEN, 1n], GD)], ['RareMarket.withdrawOffer', () => ask(mkt, 'withdrawOffer', [GEN, 1n], GD)],
     ['RareDuel.accept', () => ask(duel, 'accept', [1n, ethers.id('x')], GD)], ['RareDuel.decline', () => ask(duel, 'decline', [1n], GD)],
     ['RareDuel.withdraw', () => ask(duel, 'withdraw', [1n], GD)], ['RareDuel.reveal', () => ask(duel, 'reveal', [1n, 1, ethers.id('s')], GD)],
@@ -1868,10 +2072,16 @@ const errorNames = (abi) => Object.fromEntries(abi.filter((e) => e.type === 'err
     ['RareDuel.refundStuck', () => ask(duel, 'refundStuck', [1n], GD)], ['RareDuel.requestRandomness', () => ask(duel, 'requestRandomness', [1n], GD)],
     ['RareDuel._entropyCallback', () => ask(duel, '_entropyCallback', [1, PROVIDER, ethers.id('w')], GD)],
     ['RareOrders.reveal', () => ask(ORD, 'reveal', [OG, 99n, 1n, ORDERS, OS], GD)],
-    ['RarePartners.propose', () => ask(RP, 'propose', [GEN, 1n, GD, 100], GD)], ['RarePartners.accept', () => ask(RP, 'accept', [GEN, 1n], GD)],
+    ['RarePartners.propose', () => ask(RP, 'propose', [GEN, 1n, 2n, 100], GD)], ['RarePartners.accept', () => ask(RP, 'accept', [GEN, 1n, 2n, 100], GD)],
+    ['RarePartners.withdrawProposal', () => ask(RP, 'withdrawProposal', [GEN, 1n], GD)],
+    ['RarePartners.proposeChange', () => ask(RP, 'proposeChange', [1n, 100], GD)], ['RarePartners.proposeEnd', () => ask(RP, 'proposeEnd', [1n], GD)],
+    ['RarePartners.agree', () => ask(RP, 'agree', [1n, 1, 100], GD)], ['RarePartners.pause', () => ask(RP, 'pause', [1n], GD)],
+    ['RarePartners.settle', () => ask(RP, 'settle', [1n], GD)], ['RarePartners.earn', () => ask(RP, 'earn', [GEN, 1n, GD, 1n], GD)],
     // the server's writes and every setter - role-guarded, and §26.3's last row: NOT gated by demo mode at all
     ['RareFightLog.commitFight', () => ask(FL2, 'commitFight', [dgid, 1n, ethers.id('h')], GD)], ['RareFightLog.commitSync', () => ask(FL2, 'commitSync', [dgid, 1n, ethers.id('h')], GD)],
     ['RareOrders.commit', () => ask(ORD, 'commit', [OG, 5n, oHash], GD)], ['RarePartners.freeze', () => ask(RP, 'freeze', [GEN, 1n], GD)],
+    ['RarePartners.setPartnerable', () => ask(RP, 'setPartnerable', [GEN, false], GD)], ['RarePartners.setWaitingPeriod', () => ask(RP, 'setWaitingPeriod', [1], GD)],
+    ['RareGame.setPartners', () => ask(RG, 'setPartners', [FEES, FEES], GD)],
     ['RareMarket.setTradeable', () => ask(mkt, 'setTradeable', [GEN, true], GD)], ['RareMarket.setFeeBps', () => ask(mkt, 'setFeeBps', [100], GD)], ['RareMarket.setFeeTo', () => ask(mkt, 'setFeeTo', [FEES], GD)],
     ['RareMarket.setTerminalShareBps', () => ask(mkt, 'setTerminalShareBps', [1], GD)], ['RareMarket.setGate', () => ask(mkt, 'setGate', [FEES], GD)],
     ['RareDuel.setOdds', () => ask(duel, 'setOdds', [7000, 5000], GD)], ['RareDuel.setFee', () => ask(duel, 'setFee', [0, FEES], GD)],
@@ -2501,7 +2711,172 @@ const errorNames = (abi) => Object.fromEntries(abi.filter((e) => e.type === 'err
     ok('the game is declared, runningGames falls to 0, and both switches flip again - the freeze is the game\'s life, not forever',
       declared === 'MOVED' && R23 && BigInt((await R23.call('runningGames')).out[0]) === 0n && thawed.every(([, r, moved]) => r === 'MOVED' && moved), JSON.stringify({ declared, thawed }));
     note('NOT FROZEN HERE, and why: RareMarket.setTradeable (one marketplace switch serves every game - DESIGN *Still open*, "Switches frozen: the marketplace\'s switches", unanswered);');
-    note('the allowlist and whitelist ENTRIES (setAllowed, setWhitelisted) are per-address lists, not on/off switches - whether ruling 74 reaches them is not asked yet.');
+    note('the allowlist and whitelist ENTRIES (setAllowed, setWhitelisted) and ShadowFriends.setAttestor are frozen too, by the deployer\'s extension of ruling 74 - part 24.');
+  }
+
+  // ---------- 24. Ruling 74 extended (deployer, 2026-10-01): no list entry and no attestor key changes under a running game ----------
+  // "Whitelist add and remove are NOT allowed while a game runs" - both lists, which are separate (ruling 40):
+  // the launch whitelist (RareRoles.setWhitelisted) and demo mode's allowlist (RareRoles.setAllowed). And
+  // "changing the bridge's attestor key is NOT allowed while a game runs": ShadowFriends.setAttestor asks
+  // roles.requireNoGameRunning() after roles.requirePower. Each works before a game starts, is refused
+  // (GameRunning) from root once one has, works again after declare; a stranger gets PowerNotHeld throughout.
+  // A FRESH registry, game and shadow, so nothing above is disturbed. `game` is pointed here by the test itself.
+  console.log('\n--- 24. ruling 74 extended: setWhitelisted, setAllowed and ShadowFriends.setAttestor before, during and after a running game ---');
+  {
+    const DEP24 = '0xe000000000000000000000000000000000000024', PA24 = '0xe100000000000000000000000000000000000024';
+    const PB24 = '0xe200000000000000000000000000000000000024', STR24 = '0xe300000000000000000000000000000000000024';
+    const X24 = '0xe400000000000000000000000000000000000024';
+    const K1 = ethers.Wallet.createRandom().address, K2 = ethers.Wallet.createRandom().address, K3 = ethers.Wallet.createRandom().address;
+    for (const a of [DEP24, PA24, PB24, STR24]) await net.acct(a);
+    const R24 = C.roles ? await net.deploy(DEP24, C.roles, [DEP24]) : null;
+    const HOUR = 3600n, LEN24 = 168n * HOUR, JW24 = 24n * HOUR, SD24 = 1n * HOUR;
+    const G24 = C.gameC && R24 ? await net.deploy(DEP24, C.gameC, [R24.address, rf.address, FEES, LEN24, JW24, SD24, 500, 3, 2, ethers.id('fixcheck part 24')]) : null;
+    let S24 = null;
+    try { S24 = R24 ? await net.deploy(DEP24, C.shadow, [K1, R24.address]) : null; } catch (e) { note('ShadowFriends would not deploy: ' + e.message.slice(0, 80)); }
+    const E24 = Object.assign({}, C.roles ? errorNames(C.roles.abi) : {}, C.gameC ? errorNames(C.gameC.abi) : {}, errorNames(C.shadow.abi));
+    const r24 = async (fn, args, from) => (R24 ? await tryCall(R24, E24, fn, args, from) : 'NO ROLES');
+    const g24 = async (fn, args, from) => (G24 ? await tryCall(G24, E24, fn, args, from) : 'NO GAME');
+    const s24 = async (fn, args, from) => (S24 ? await tryCall(S24, E24, fn, args, from) : 'NO SHADOW');
+    const rd = async (c, fn, args = []) => (c ? (await c.call(fn, args)).out[0] : null);
+    const lc = (v) => String(v).toLowerCase();
+    // one round of all three guarded calls, each flipping X24's entry / setting the key, and reading the result back
+    const round = async (from, key) => {
+      const wl = !(await rd(R24, 'whitelisted', [X24])), al = !(await rd(R24, 'allowed', [X24]));
+      const a = await r24('setWhitelisted', [[X24], wl], from), b = await r24('setAllowed', [X24, al], from), c = await s24('setAttestor', [key], from);
+      return { setWhitelisted: [a, (await rd(R24, 'whitelisted', [X24])) === wl], setAllowed: [b, (await rd(R24, 'allowed', [X24])) === al],
+        setAttestor: [c, lc(await rd(S24, 'attestor')) === lc(key)] };
+    };
+    const allMoved = (o) => Object.values(o).every(([r, moved]) => r === 'MOVED' && moved);
+
+    const pointed = await r24('setGame', [G24 ? G24.address : DEP24], DEP24);
+    const before = await round(DEP24, K2);
+    ok('BEFORE ANY GAME (game pointed by this test): root adds to the launch whitelist, adds to the allowlist and sets the attestor, and each reads back',
+      pointed === 'MOVED' && allMoved(before), JSON.stringify({ pointed, before }));
+
+    // set up a game the way part 23 does: demo OFF (a fresh registry starts in demo mode), two listed players
+    if ((await rd(R24, 'demoMode')) === true) await r24('setDemoMode', [false], DEP24);
+    await r24('setWhitelisted', [[PA24, PB24], true], DEP24);
+    for (const a of [PA24, PB24]) { await rf.call('mint', [a, 10n ** 21n]); if (G24) await rf.call('approve', [G24.address, ethers.MaxUint256], a); }
+    const made = await g24('create', [0n], PA24), gid = G24 ? BigInt((await G24.call('gameCount')).out[0]) : 0n;
+    const joined = await g24('join', [gid], PB24);
+    const whileOpen = await round(DEP24, K3);
+    ok('a game created and joined but NOT STARTED freezes none of the three: each still lands',
+      made === 'MOVED' && joined === 'MOVED' && allMoved(whileOpen), JSON.stringify({ made, joined, whileOpen }));
+
+    net.travel(Number(JW24 + SD24));
+    const started = await g24('start', [gid], STR24);
+    const running = R24 ? BigInt(await rd(R24, 'runningGames')) : -1n;
+    const snap = { wl: await rd(R24, 'whitelisted', [X24]), al: await rd(R24, 'allowed', [X24]), pa: await rd(R24, 'whitelisted', [PA24]), att: lc(await rd(S24, 'attestor')) };
+    const under = {
+      'setWhitelisted(add)': await r24('setWhitelisted', [[X24], !snap.wl], DEP24),
+      'setWhitelisted(remove a player)': await r24('setWhitelisted', [[PA24], false], DEP24),
+      'setWhitelisted(no-op list)': await r24('setWhitelisted', [[PA24], true], DEP24),
+      'setAllowed': await r24('setAllowed', [X24, !snap.al], DEP24),
+      'setAttestor': await s24('setAttestor', [K1], DEP24),
+    };
+    const after = { wl: await rd(R24, 'whitelisted', [X24]), al: await rd(R24, 'allowed', [X24]), pa: await rd(R24, 'whitelisted', [PA24]), att: lc(await rd(S24, 'attestor')) };
+    ok('ONCE A GAME HAS STARTED, from root itself: setWhitelisted (add, remove, and a list that changes nothing), setAllowed and ShadowFriends.setAttestor are each refused (GameRunning), and every entry and the key read back UNCHANGED',
+      started === 'MOVED' && running === 1n && Object.values(under).every((r) => r === 'GameRunning') && JSON.stringify(after) === JSON.stringify(snap),
+      JSON.stringify({ started, running: String(running), under, snap, after }));
+    const strangers = { setWhitelisted: await r24('setWhitelisted', [[STR24], true], STR24), setAllowed: await r24('setAllowed', [STR24, true], STR24),
+      setAttestor: await s24('setAttestor', [STR24], STR24) };
+    ok('and a stranger gets PowerNotHeld, never GameRunning, on all three: the power is asked first, so a refusal teaches nothing about the game',
+      Object.values(strangers).every((r) => r === 'PowerNotHeld'), JSON.stringify(strangers));
+
+    const declared = await g24('declare', [gid, [PA24, PB24]], DEP24);
+    const thawed = await round(DEP24, K1);
+    const strangersAfter = { setWhitelisted: await r24('setWhitelisted', [[STR24], true], STR24), setAllowed: await r24('setAllowed', [STR24, true], STR24),
+      setAttestor: await s24('setAttestor', [STR24], STR24) };
+    ok('the game is declared, runningGames falls to 0, and all three land again (a stranger still PowerNotHeld) - the freeze is the game\'s life, not forever',
+      declared === 'MOVED' && BigInt(await rd(R24, 'runningGames')) === 0n && allMoved(thawed) && Object.values(strangersAfter).every((r) => r === 'PowerNotHeld'),
+      JSON.stringify({ declared, thawed, strangersAfter }));
+    ok('ShadowFriends declares GameRunning(uint256) in its own ABI, so an explorer decodes the refusal against the bridge contract',
+      C.shadow.abi.some((f) => f.type === 'error' && f.name === 'GameRunning'), 'no GameRunning in ShadowFriends ABI');
+  }
+
+  // ---------- 25. RareGame pays a partner's share of a prize, automatically (M16 item 2, M20 item 6) ----------
+  // A FRESH registry, game, partnership layer and Genesis, so nothing above is disturbed. PA plays base 1 and is
+  // partnered with PX's base 3 (PX is not in the game) at 60/40; PB plays base 2, unpartnered; PC holds no Genesis.
+  console.log('\n--- 25. RareGame: a prize is an earning - a partnered base\'s partner is paid their share of it first, and no path settles a prize without asking ---');
+  {
+    const DEP = '0xe000000000000000000000000000000000000025', PA = '0xe100000000000000000000000000000000000025';
+    const PB = '0xe200000000000000000000000000000000000025', PC = '0xe300000000000000000000000000000000000025';
+    const PX = '0xe400000000000000000000000000000000000025', STR = '0xe500000000000000000000000000000000000025';
+    for (const a of [DEP, PA, PB, PC, PX, STR]) await net.acct(a);
+    const R25 = C.roles ? await net.deploy(DEP, C.roles, [DEP]) : null;
+    const HOUR = 3600n, JW = 24n * HOUR, SD = 1n * HOUR;
+    const G25 = C.gameC && R25 ? await net.deploy(DEP, C.gameC, [R25.address, rf.address, FEES, 168n * HOUR, JW, SD, 500, 3, 2, ethers.id('fixcheck part 25')]) : null;
+    const P25 = C.rpart && R25 ? await net.deploy(DEP, C.rpart, [R25.address, rf.address, WAIT]) : null;
+    const GG = C.genesis ? await net.deploy(DEP, C.genesis) : null;
+    const E25 = Object.assign({}, C.roles ? errorNames(C.roles.abi) : {}, C.gameC ? errorNames(C.gameC.abi) : {}, C.rpart ? errorNames(C.rpart.abi) : {});
+    const g25 = async (fn, args, from) => (G25 ? await tryCall(G25, E25, fn, args, from) : 'NO GAME');
+    const p25 = async (fn, args, from) => (P25 ? await tryCall(P25, E25, fn, args, from) : 'NO PARTNERS');
+    const GGA = GG ? GG.address : ethers.ZeroAddress, P25A = P25 ? P25.address : ethers.ZeroAddress;
+    if (GG) { await GG.call('mint', [PA, 1n]); await GG.call('mint', [PB, 2n]); await GG.call('mint', [PX, 3n]); }
+    await p25('setPartnerable', [GGA, true], DEP);
+    await p25('propose', [GGA, 1n, 3n, 6_000], PA);
+    const formed = await p25('accept', [GGA, 3n, 1n, 6_000], PX);
+    const W3 = P25A.toLowerCase();   // the partner's share is HELD by RarePartners until the partnership ends (BINDING §77.3)
+
+    if (R25) await tryCall(R25, E25, 'setWhitelisted', [[PA, PB, PC], true], DEP);
+    if (R25 && (await R25.call('whitelistOpen')).out[0] === true) await tryCall(R25, E25, 'setWhitelistOpen', [false], DEP);
+    if (R25 && (await R25.call('demoMode')).out[0] === true) await tryCall(R25, E25, 'setDemoMode', [false], DEP);
+    if (R25) await tryCall(R25, E25, 'setGame', [G25 ? G25.address : DEP], DEP);
+    const ENTRY = 100n * 10n ** 18n;
+    for (const a of [PA, PB, PC]) { await rf.call('mint', [a, 10n ** 21n]); if (G25) await rf.call('approve', [G25.address, ethers.MaxUint256], a); }
+
+    const spStr = await g25('setPartners', [P25A, GGA], STR);
+    const spHalf = await g25('setPartners', [P25A, ethers.ZeroAddress], DEP);
+    const sp = await g25('setPartners', [P25A, GGA], DEP);
+    ok('RULE game-setPartners-guarded: a stranger cannot attach a partnership layer to the game (PowerNotHeld), half an attachment is refused (ZeroAddress), root attaches it',
+      formed === 'MOVED' && spStr === 'PowerNotHeld' && spHalf === 'ZeroAddress' && sp === 'MOVED', JSON.stringify({ formed, spStr, spHalf, sp }));
+
+    const made = await g25('create', [ENTRY], PA), gid = G25 ? BigInt((await G25.call('gameCount')).out[0]) : 0n;
+    await g25('join', [gid], PB); await g25('join', [gid], PC);
+    net.travel(Number(JW + SD));
+    const started = await g25('start', [gid], STR);
+    const spRunning = await g25('setPartners', [ethers.ZeroAddress, ethers.ZeroAddress], DEP);
+    ok('RULE game-partners-frozen: once a game runs, root itself cannot detach or re-point the layer (GameRunning) - it is the same for a game\'s whole life',
+      made === 'MOVED' && started === 'MOVED' && spRunning === 'GameRunning', JSON.stringify({ made, started, spRunning }));
+
+    const NO_BASE = ethers.MaxUint256;
+    const plain = await g25('declare', [gid, [PA, PB, PC]], DEP);
+    const mism = await g25('declareAs', [gid, [PA, PB, PC], [1n, 2n]], DEP);
+    const notTheirs = await g25('declareAs', [gid, [PA, PB, PC], [2n, 1n, NO_BASE]], DEP);
+    const dodge = await g25('declareAs', [gid, [PA, PB, PC], [NO_BASE, 2n, NO_BASE]], DEP);
+    const strDecl = await g25('declareAs', [gid, [PA, PB, PC], [1n, 2n, NO_BASE]], STR);
+    ok('RULE no-unasked-prize: with a partnership layer attached, plain declare is refused (NameTheBases) - there is no path that pays a prize without asking',
+      plain === 'NameTheBases', plain);
+    ok('RULE base-is-theirs: a base the player does not hold is refused (NotOwner, from RarePartners), and the lists must match (BasesMismatch); declaring is still the deployer\'s alone (PowerNotHeld)',
+      notTheirs === 'NotOwner' && mism === 'BasesMismatch' && strDecl === 'PowerNotHeld', JSON.stringify({ notTheirs, mism, strDecl }));
+    ok('RULE no-base-only-if-none: "no base" (NO_BASE) is refused for a player who holds a Genesis (HoldsAGenesis) - the declarer cannot dodge a partner by forgetting the base',
+      dodge === 'HoldsAGenesis', dodge);
+
+    const bal25 = async (a) => BigInt((await rf.call('balanceOf', [a])).out[0]);
+    const before = { a: await bal25(PA), b: await bal25(PB), c: await bal25(PC), w: await bal25(W3), g: await bal25(G25 ? G25.address : DEP) };
+    const res = G25 ? await G25.call('declareAs', [gid, [PA, PB, PC], [1n, 2n, NO_BASE]], DEP).catch((e) => { detail = String(e.message); return null; }) : null;
+    const POT = ENTRY * 3n, PRIZE = POT - (POT * 500n) / 10_000n;
+    const first = (PRIZE * 50n) / 100n, second = (PRIZE * 30n) / 100n, third = PRIZE - first - second;
+    const toW3 = (first * 4_000n) / 10_000n;
+    const got = { a: (await bal25(PA)) - before.a, b: (await bal25(PB)) - before.b, c: (await bal25(PC)) - before.c, w: (await bal25(W3)) - before.w };
+    ok('RULE partner-share-of-prize: first place\'s ' + Number(first) / 1e18 + ' $RF splits 60/40 - ' + Number(first - toW3) / 1e18 + ' to PA and ' + Number(toW3) / 1e18 + ' HELD by RarePartners for base 3; second and third, unpartnered and baseless, are paid exactly as before; the game holds nothing after',
+      !!res && got.a === first - toW3 && got.w === toW3 && got.b === second && got.c === third && (await bal25(G25.address)) === 0n,
+      JSON.stringify({ detail: res ? '' : detail, got: Object.fromEntries(Object.entries(got).map(([k, v]) => [k, String(v)])) }));
+    const xfer = ethers.id('Transfer(address,address,uint256)');
+    const tos = res ? res.logs.filter((l) => l.address.toLowerCase() === rf.address.toLowerCase() && l.topics[0] === xfer).map((l) => ('0x' + l.topics[2].slice(26)).toLowerCase()) : [];
+    const pp = res && res.events.find((e) => e.name === 'PartnerPaid');
+    const placed = res ? res.events.filter((e) => e.name === 'Placed') : [];
+    ok('the partner\'s share goes FIRST, as a sale pays its partner first (the transfer into RarePartners comes before PA\'s), PartnerPaid records base 1, RarePartners and ' + Number(toW3) / 1e18 + ', and Placed still says each place\'s whole prize',
+      tos.indexOf(W3) === 0 && tos.indexOf(PA.toLowerCase()) === 1 && !!pp && pp.args[3] === 1n && pp.args[4].toLowerCase() === W3 && pp.args[5] === toW3
+      && placed.length === 3 && placed[0].args[3] === first, JSON.stringify({ tos, pp: pp && String(pp.args) }));
+    // and when the two agree to end it, PX - who held base 3 - is paid what was held
+    const pid25 = P25 ? BigInt((await P25.call('partnershipOf', [GGA, 1n])).out[0]) : 0n;
+    const px0 = await bal25(PX);
+    await p25('proposeEnd', [pid25], PA);
+    const ended25 = await p25('agree', [pid25, 2, 0], PX);
+    ok('RULE prize-share-settles: when the partnership ends, PX (who held base 3) is paid the ' + Number(toW3) / 1e18 + ' held from PA\'s prize, and RarePartners holds nothing',
+      ended25 === 'MOVED' && (await bal25(PX)) - px0 === toW3 && (await bal25(P25A)) === 0n, JSON.stringify([ended25, String((await bal25(PX)) - px0)]));
+    note('a PAUSED partnership takes nothing from a prize - earn takes nothing once paused, proved in part 13 (RULE pause-stops-sharing).');
   }
 
   console.log(fails ? '\n' + fails + ' check(s) failed' : '\nall nine items hold, and the fight log, and the whitelist, and the duel\'s numbers are state a running game freezes, and a building is a row');

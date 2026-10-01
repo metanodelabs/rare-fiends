@@ -1,8 +1,8 @@
 {
-  "fightAvg": 3117790,
-  "fightMax": 83870416,
-  "fightMaxLine": "12 a side, generation 6, 60 walls, defenders engaging",
-  "fights": 508,
+  "fightAvg": 10185933,
+  "fightMax": 527289476,
+  "fightMaxLine": "40 a side, generation 6, 60 walls, defenders engaging",
+  "fights": 516,
   "gasCeiling": 32000000,
   "gasCeilingFrom": "ArbGasInfo.getGasAccountingParams() on chain 4663",
   "fitsInOneTx": false,
@@ -14,8 +14,8 @@
   "requestRandomness": 101977,
   "settle": 35106,
   "shadowClaim": 1887016,
-  "measuredAt": "2026-10-01T09:12:48.456Z",
+  "measuredAt": "2026-10-01T10:35:55.443Z",
   "solc": "0.8.36",
   "note": "execution gas, measured by estate/contracts/paritycheck.js",
-  "sourcesHash": "sha256:dbb99623cfeaf6c64c266f128f94cb39c9a83662f8ea72c76c548a0ddd169ff2"
+  "sourcesHash": "sha256:7db30e3ad69fa620c045a866d85677620c85d5ae6835e27602d8375dce553358"
 }

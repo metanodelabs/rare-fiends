@@ -351,8 +351,11 @@ contract RareRoles {
     }
 
     /// @notice add or remove one address from the allowlist. Grantable to a gamemaster.
+    /// **Frozen while a game runs** (ruling 74 extended, deployer 2026-10-01): no address is added to or removed
+    /// from either list under a running game. Asked after the power, so a stranger learns nothing about the game.
     function setAllowed(address who, bool ok) external {
         if (!hasPower(msg.sender, SET_ALLOWED)) revert PowerNotHeld(msg.sender, SET_ALLOWED);
+        requireNoGameRunning();
         if (who == address(0)) revert ZeroAddress();
         if (allowed[who] == ok) revert AllowlistUnchanged(who);
         allowed[who] = ok;
@@ -428,9 +431,11 @@ contract RareRoles {
 
     /// @notice put addresses on, or take them off, the launch whitelist. ROOT ONLY (MANAGE_ROLES, never
     /// grantable), one event per address. An address already in the asked-for state is skipped rather than
-    /// refused, so a long list with one duplicate does not fail whole.
+    /// refused, so a long list with one duplicate does not fail whole. **Frozen while a game runs** (ruling 74
+    /// extended, deployer 2026-10-01), the whole call, even a list that would change nothing.
     function setWhitelisted(address[] calldata who, bool ok) external {
         if (!hasPower(msg.sender, MANAGE_ROLES)) revert PowerNotHeld(msg.sender, MANAGE_ROLES);
+        requireNoGameRunning();
         for (uint256 i = 0; i < who.length; ++i) {
             if (who[i] == address(0)) revert ZeroAddress();
             if (whitelisted[who[i]] == ok) continue;

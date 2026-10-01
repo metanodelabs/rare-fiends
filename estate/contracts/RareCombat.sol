@@ -10,7 +10,8 @@ import { RareChance } from "./RareChance.sol";
 /// Distance is king moves: max(|dx|, |dy|). Integers only. Friends act when ready, attackers first, then
 /// defenders, in line-up order.
 library RareCombat {
-    uint256 internal constant MAX_SIDE = 12;
+    /// Friends a side: 40, by the deployer's ruling of 2026-10-01 (it was 12). combat.js MAX_SIDE holds the same.
+    uint256 internal constant MAX_SIDE = 40;
     uint256 private constant NONE = type(uint256).max;
 
     uint8 internal constant WIPED = 0;      // every defender down: the attack wins

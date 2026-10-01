@@ -186,6 +186,16 @@ await provider.send('evm_increaseTime', ['0x' + wait.toString(16)]); await provi
 const POT3 = 3n * ENTRY, CUT_BPS = BigInt(g0.cutBps), GCUT = POT3 * CUT_BPS / 10_000n;
 await step('the clock passes the start (+' + wait + ' s); start: the cut (' + CUT_BPS + ' bps of the pot) to feeTo',
   async () => { await send((await as(game, 7)).start(gid)); }, { FEE_TO: GCUT, GAME: -GCUT });
+// The freeze, on the deployed world: deploy.mjs --game wires RareRoles.setGame(RareGame); without that call game() is
+// zero, runningGames() reads 0 under this started game, and root's setDemoMode goes through. Asked by staticCall, so
+// nothing is sent whichever way it answers.
+const wiredTo = await roles.game(), runningNow = await roles.runningGames();
+ok('RareRoles.game() is the deployed RareGame (' + cfg.rareGame + ') and runningGames() reads 1 under the started game',
+  wiredTo === cfg.rareGame && runningNow === 1n, 'game() ' + wiredTo + ', runningGames() ' + runningNow);
+let frozeWith = 'NOT REFUSED - setDemoMode would go through under a running game';
+try { await (await as(roles, 0)).setDemoMode.staticCall(!(await roles.demoMode())); }
+catch (e) { const d = e.data && roles.interface.parseError(e.data); frozeWith = d ? d.name + '(' + d.args.join(',') + ')' : (e.shortMessage || e.message); }
+ok('a started game freezes root\'s setDemoMode: GameRunning(1)', frozeWith === 'GameRunning(1)', frozeWith);
 // the split rule as DESIGN states it, written here, not read from RareGame.split
 const PRIZE = POT3 - GCUT;
 const first = PRIZE * 50n / 100n, second = PRIZE * 30n / 100n, third = PRIZE - first - second;   // three places: 50 / 30 / the rest

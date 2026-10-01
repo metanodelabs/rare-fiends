@@ -3,6 +3,7 @@ pragma solidity ^0.8.36;
 
 import { IERC20 } from "lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { SafeERC20 } from "lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
+import { IERC721 } from "lib/openzeppelin-contracts/contracts/token/ERC721/IERC721.sol";
 import { ReentrancyGuard } from "lib/openzeppelin-contracts/contracts/utils/ReentrancyGuard.sol";
 import { IRareRoles } from "./RareRoles.sol";
 
@@ -34,6 +35,15 @@ import { IRareRoles } from "./RareRoles.sol";
 /// server's sync key (`RECORD_SYNC`) used to be accepted here as a chain engineer's line; it is not any more.
 ///
 /// Demo mode gates entry (`create`, `join`) and never exit (`start`, `declare`, `abandon`) - BINDING §26.
+///
+/// **Partnerships (M16, M20 item 6) - a prize is an earning, and a partner's share of it is taken automatically.**
+/// A player is an address and a partnership is between two Genesis tokens, and this contract has never known
+/// which Genesis a player plays as. The declarer does - the server holds the base (M3 item 5) - so once a
+/// partnership layer is attached (`setPartners`), placings are declared WITH their bases (`declareAs`) and plain
+/// `declare` is refused, so there is no path that settles a prize without asking. `RarePartners.earn` refuses a
+/// base the player does not hold; `NO_BASE` is accepted only for a player who holds no Genesis at all. The
+/// partner's share goes FIRST, into `RarePartners`, which holds it until the partnership ends (BINDING §77.3), and
+/// the player gets the rest - the pot pays out to the wei, as before. BINDING §76.3.
 contract RareGame is ReentrancyGuard {
     using SafeERC20 for IERC20;
 
@@ -73,6 +83,15 @@ contract RareGame is ReentrancyGuard {
     IERC20 public immutable rf;
     address public feeTo;
 
+    /// @notice what a partnership is owed out of an earning. Zero means no partnership layer, and then a prize
+    /// is paid exactly as it always was. Root only, and only while no game runs, so it is the same for a game's
+    /// whole life - and root already names every prize's winner, so the pointer gives root nothing new.
+    IPartnerEarnings public partners;
+    /// @notice the collection a player's base is a token of - the Genesis collection (M3 item 8)
+    address public genesis;
+    /// @notice in `declareAs`, "this player has no base" - accepted only if they hold no Genesis at all
+    uint256 public constant NO_BASE = type(uint256).max;
+
     // ---- the parameters a new game is created with (starting values from the constructor, all settable) ----
     uint64 public defaultLength;
     uint64 public joinWindow;
@@ -105,6 +124,9 @@ contract RareGame is ReentrancyGuard {
     event GameLengthSet(uint256 indexed id, uint64 length, address by);
     event DefaultsSet(uint16 cutBps, uint8 places, uint8 minPlayers, bytes32 rulesId, address by);
     event FeeToSet(address feeTo, address by);
+    event PartnersSet(address partners, address genesis, address by);
+    /// @notice beside `Placed`, whose `paid` stays the place's whole prize: this much of it went to the partnership, held until it ends; `partner` is RarePartners
+    event PartnerPaid(uint256 indexed id, uint8 place, address indexed player, uint256 base, address partner, uint256 owed);
 
     error NoSuchGame(uint256 id);
     error WrongState(uint256 id, State state);
@@ -125,6 +147,13 @@ contract RareGame is ReentrancyGuard {
     error NoRules();
     /// @notice "number should NOT be changeable during a running game. period." - this many are running
     error GameRunning(uint256 running);
+    /// @notice a partnership layer is attached, so a prize cannot be paid without naming whose base won it
+    error NameTheBases();
+    error BasesMismatch(uint256 placings, uint256 bases);
+    /// @notice NO_BASE was named for a player who holds a Genesis - name the base they played
+    error HoldsAGenesis(address player);
+    /// @notice the partnership layer claimed more than the prize, or a share with nobody to pay
+    error BadPartnerClaim(uint256 owed, uint256 prize);
 
     constructor(address roles_, address rf_, address feeTo_, uint64 length_, uint64 joinWindow_, uint64 startDelay_,
                 uint16 cutBps_, uint8 places_, uint8 minPlayers_, bytes32 rulesId_) {
@@ -236,6 +265,19 @@ contract RareGame is ReentrancyGuard {
     /// exists (DESIGN L698: two places split 60 / 40). Integer dust (wei left by the equal split) goes to first place; see the contract note.
     function declare(uint256 id, address[] calldata placings) external nonReentrant {
         roles.requirePower(msg.sender, DECLARE_PLACINGS);   // the deployer or the game master, and no one else (ruling, 2026-10-01)
+        if (address(partners) != address(0)) revert NameTheBases();
+        _declare(id, placings, new uint256[](0));
+    }
+
+    /// @notice `declare`, naming each placed player's base - the Genesis token they played as, or NO_BASE for a
+    /// player holding no Genesis. A partnered base's partner is paid their share of that place's prize first.
+    function declareAs(uint256 id, address[] calldata placings, uint256[] calldata bases) external nonReentrant {
+        roles.requirePower(msg.sender, DECLARE_PLACINGS);
+        if (bases.length != placings.length) revert BasesMismatch(placings.length, bases.length);
+        _declare(id, placings, bases);
+    }
+
+    function _declare(uint256 id, address[] calldata placings, uint256[] memory bases) private {
         Game storage g = _game(id);
         if (g.state != State.Started) revert WrongState(id, g.state);
         uint256 n = placings.length;
@@ -250,7 +292,8 @@ contract RareGame is ReentrancyGuard {
         uint256 prize = uint256(g.pot) - g.cut;
         uint256[] memory pay = split(prize, n);
         for (uint256 i = 0; i < n; ++i) {
-            if (pay[i] != 0) rf.safeTransfer(placings[i], pay[i]);
+            uint256 owed = bases.length == 0 ? 0 : _payPartner(id, uint8(i + 1), placings[i], bases[i], pay[i]);
+            if (pay[i] - owed != 0) rf.safeTransfer(placings[i], pay[i] - owed);
             emit Placed(id, uint8(i + 1), placings[i], pay[i]);
         }
         emit GameSettled(id, prize, uint8(n));
@@ -271,7 +314,34 @@ contract RareGame is ReentrancyGuard {
         pay[0] += rest - each * (n - 2);   // dust
     }
 
+    /// @dev the partner's share of one place's prize, taken FIRST, as a sale pays its partner first. Returns it.
+    function _payPartner(uint256 id, uint8 place, address player, uint256 base, uint256 prize) private returns (uint256 owed) {
+        if (address(partners) == address(0)) return 0;
+        if (base == NO_BASE) {
+            if (IERC721(genesis).balanceOf(player) != 0) revert HoldsAGenesis(player);
+            return 0;
+        }
+        // the partner's share is HELD by RarePartners until the partnership ends (deployer ruling, BINDING §77.3):
+        // it takes exactly what it reports, under an allowance of at most the prize that is cleared straight after
+        rf.forceApprove(address(partners), prize);
+        uint256 held = rf.balanceOf(address(this));
+        owed = partners.earn(genesis, base, player, prize);   // reverts on a base not theirs
+        rf.forceApprove(address(partners), 0);
+        if (owed > prize || held - rf.balanceOf(address(this)) != owed) revert BadPartnerClaim(owed, prize);
+        if (owed != 0) emit PartnerPaid(id, place, player, base, address(partners), owed);
+    }
+
     // ---------- the deployer's setters, every one guarded on chain ----------
+
+    /// @notice attach (or detach, with both zero) the partnership layer. Root only, refused while a game runs.
+    function setPartners(address partners_, address genesis_) external {
+        roles.requirePower(msg.sender, ROOT_POWER);
+        if (runningGames != 0) revert GameRunning(runningGames);
+        if ((partners_ == address(0)) != (genesis_ == address(0))) revert ZeroAddress();
+        partners = IPartnerEarnings(partners_);
+        genesis = genesis_;
+        emit PartnersSet(partners_, genesis_, msg.sender);
+    }
 
     /// @notice the three clocks. Grantable (SET_GAME_PARAMS): DESIGN says the gamemaster may set the length.
     /// Refused while a game runs, like every number's setter: these are what the NEXT game is created with,
@@ -341,4 +411,9 @@ contract RareGame is ReentrancyGuard {
         g = _games[id];
         if (g.state == State.None) revert NoSuchGame(id);
     }
+}
+
+/// @notice the one question `RareGame` asks `RarePartners`: take the partner's share of this earning and hold it until the partnership ends
+interface IPartnerEarnings {
+    function earn(address collection, uint256 tokenId, address earner, uint256 amount) external returns (uint256 owed);
 }

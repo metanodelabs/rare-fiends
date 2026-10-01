@@ -732,12 +732,14 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
     // Each keeps its own switch so any one can be turned off later. NO CONTRACT HOLDS THEM AS FOUR: RareMarket has
     // `tradeable(address collection)`, one switch per COLLECTION, and crystals and items are not collections. So the
     // chain line stays NO CONTRACT YET - the honest sentence - and the switch shows the decision, not a reading.
-    { g: 'money', id: 'tradeCrystals', k: 'Trading: crystals', e: 'listing', f: 'state', sw: true, decSw: true, decT: 'ON at launch - ruling 29', read: () => undefined, where: 'nothing',
+    // RULING 74 AND THE TRADING SWITCHES: `trade: true` marks the four, and each says on its card that the marketplace's
+    // switch is NOT frozen and why - the question is open (DESIGN, Still open: Switches frozen: the marketplace's switches).
+    { g: 'money', id: 'tradeCrystals', k: 'Trading: crystals', e: 'listing', f: 'state', sw: true, trade: true, decSw: true, decT: 'ON at launch - ruling 29', read: () => undefined, where: 'nothing',
       s: '<code>RareMarket.tradeable(collection)</code> switches a <b>collection</b>; crystals are not one, so no contract carries this switch yet.' },
-    { g: 'money', id: 'tradeItems', k: 'Trading: items', e: 'listing', f: 'itemId', sw: true, decSw: true, decT: 'ON at launch - ruling 29', read: () => undefined, where: 'nothing',
+    { g: 'money', id: 'tradeItems', k: 'Trading: items', e: 'listing', f: 'itemId', sw: true, trade: true, decSw: true, decT: 'ON at launch - ruling 29', read: () => undefined, where: 'nothing',
       s: 'Whether meme attack cards are listable is <b>not</b> settled by ruling 29 (M15 item 4).' },
-    { g: 'money', id: 'tradeBuildings', k: 'Trading: a building sold back', e: 'listing', f: 'state', sw: true, decSw: true, decT: 'ON at launch - ruling 29', read: () => undefined, where: 'nothing' },
-    { g: 'money', id: 'tradeBase', k: 'Trading: a whole base', e: 'listing', f: 'state', sw: true, decSw: true, decT: 'ON at launch - ruling 29', read: () => undefined, where: 'nothing' },
+    { g: 'money', id: 'tradeBuildings', k: 'Trading: a building sold back', e: 'listing', f: 'state', sw: true, trade: true, decSw: true, decT: 'ON at launch - ruling 29', read: () => undefined, where: 'nothing' },
+    { g: 'money', id: 'tradeBase', k: 'Trading: a whole base', e: 'listing', f: 'state', sw: true, trade: true, decSw: true, decT: 'ON at launch - ruling 29', read: () => undefined, where: 'nothing' },
     // ---- the duel: sweep rows 42 and 43, ruling 64 ------------------------------------------------------
     // What the duel plays by is read out of challenge.html in its probe (duel.js's TERMS as the duel loaded them,
     // and its own stake presets); the odds are also RareDuel state, read off the chain once an address is recorded.
@@ -763,7 +765,29 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
       read: () => { const w = duelWin(); return w && w.challenge.DEMO.src === 'chain' ? (w.challenge.DEMO.on ? 'on' : 'off') : undefined; },
       where: 'challenge.html\'s DEMO, read by the duel itself from RareRoles.demoMode() at the rareRoles address bridge-config.json records',
       s: '<b>Demo mode forces every game free</b> - no fee, no stake, no payout. It is not a money field beside the cut; it is the field that turns the money off.' },
+
+    // ---- the freeze: M4 item 17, ruling 74 ---------------------------------
+    // RareRoles.game() is not a switch, but it is the switch for every freeze: it is the contract RareRoles asks
+    // runningGames() of, and setGame is refused while a game runs (BINDING §73) because re-pointing it at a contract
+    // answering 0 would thaw everything. So it gets a card, its live value read from the chain like every other.
+    { g: 'freeze', id: 'freezeGame', k: 'The game the freeze asks', e: 'roles', f: 'game', text: true, addr: true, u: 'address',
+      read: () => undefined, where: 'RareRoles.game() — read back from the chain, never kept here',
+      s: 'The contract <code>RareRoles.requireNoGameRunning()</code> asks how many games are running. <b>Set once at deployment</b> and frozen like a switch, because pointing it anywhere else is how every freeze would be lifted at once. ' +
+        'Changing it is <code>setGame(address)</code>, a transaction, root only; the contract refuses an address with no code. Type an address only to re-point it.' },
   ];
+
+  // ---------------------------------------------------------------------------
+  // THE FREEZE. M4 item 17, ruling 74: "once it starts.. it's a no." These three setters on RareRoles refuse while
+  // RareRoles.runningGames() is above zero, with GameRunning(n) (BINDING §73.1). The page asks THAT getter - the
+  // one the contract's own guard asks - not RareGame directly, so if RareRoles.game() points somewhere else the
+  // card still says what the contract will actually do. Nothing here is a value: it is which setters the code
+  // guards, read off RareRoles.sol, and every state shown is an eth_call.
+  // ---------------------------------------------------------------------------
+  const FROZEN = {
+    demo: { fn: 'setDemoMode(bool)', what: 'demo mode', why: 'it decides which money a game plays for' },
+    whitelistOpen: { fn: 'setWhitelistOpen(bool)', what: 'the launch whitelist', why: 'every join asks it' },
+    freezeGame: { fn: 'setGame(address)', what: 'the game the freeze asks', why: 'pointing it elsewhere would lift every freeze at once' },
+  };
 
   // homes, read out of schema.json rather than typed here (M4 item 2)
   let SCH = null;
@@ -845,6 +869,9 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
       dec: (w) => (/[1-9a-f]/i.test(String(w).replace(/^0x/, '')) ? 'on' : 'off') },
     whitelistRemove: { at: 'rareRoles', sig: 'whitelisted(address)', src: 'RareRoles.whitelisted(address)', arg: () => addrs(val.whitelistRemove)[0] || (GATE && GATE.signer) || null,
       dec: (w) => (/[1-9a-f]/i.test(String(w).replace(/^0x/, '')) ? 'on' : 'off') },
+    // the address word -> 0x and forty hex digits, the last twenty bytes of the word
+    freezeGame: { at: 'rareRoles', sig: 'game()', src: 'RareRoles.game()',
+      dec: (w) => '0x' + String(w).replace(/^0x/, '').padStart(64, '0').slice(-40) },
   };
   // a typed address list -> the well-formed 0x addresses in it, in order
   const addrs = (t) => String(t || '').split(/[\s,;]+/).filter((a) => /^0x[0-9a-fA-F]{40}$/.test(a));
@@ -865,6 +892,8 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
       word: (v) => wlWords(v, true), power: 'the MANAGE_ROLES power, root only' },
     whitelistRemove: { at: 'rareRoles', sig: 'setWhitelisted(address[],bool)', src: 'RareRoles.setWhitelisted(address[], false)',
       word: (v) => wlWords(v, false), power: 'the MANAGE_ROLES power, root only' },
+    freezeGame: { at: 'rareRoles', sig: 'setGame(address)', src: 'RareRoles.setGame(address)',
+      word: (v) => addrs(v)[0], power: 'the MANAGE_ROLES power, root only; the contract refuses zero and an address with no code' },
   };
   // bridge-config.json is this project's one record of where the chain things live. It carries
   // shadowFriends and attestor and NO rareRoles key, which is the address this page needs.
@@ -918,7 +947,7 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
   const RUN_EVERY = 10000;                              // ms between asks while the page is open and an address is recorded
   async function readRunning() {
     const a = at('rareGame');
-    if (!a) { Object.assign(RUN, { state: 'nodeploy', n: null, at: null, guard: undefined, why: 'bridge-config.json records no rareGame address' }); return RUN; }
+    if (!a) { Object.assign(RUN, { state: 'nodeploy', n: null, at: null, guard: undefined, why: 'bridge-config.json records no rareGame address' }); await readFreeze(); return RUN; }
     try { const n = word(await rpc('eth_call', [{ to: a, data: sel('runningGames()') }, 'latest']));
       Object.assign(RUN, { state: Number.isFinite(n) ? 'read' : 'error', n, at: a, why: Number.isFinite(n) ? '' : 'the answer was not a number' }); }
     catch (e) { Object.assign(RUN, { state: 'error', n: null, at: a, why: 'the chain did not answer: ' + e.message }); }
@@ -926,7 +955,41 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
     if (!r) RUN.guard = undefined;
     else { try { RUN.guard = '0x' + String(await rpc('eth_call', [{ to: r, data: sel('game()') }, 'latest'])).replace(/^0x/, '').padStart(64, '0').slice(-40); }
       catch (e) { RUN.guard = null; } }
+    await readFreeze();
     return RUN;
+  }
+
+  // THE FREEZE'S OWN ANSWER (M4 item 17): RareRoles.runningGames(), the getter requireNoGameRunning() itself asks.
+  // Not RareGame's counter read again: when RareRoles.game() points elsewhere, or nowhere, the two differ, and what
+  // a switch's card must say is what the CONTRACT will do with a transaction. A registry deployed before §73 has no
+  // runningGames() and answers with a revert, which is said, not taken as zero.
+  const FRZ = { state: 'nodeploy', n: null, at: null, why: '' };
+  async function readFreeze() {
+    const r = at('rareRoles');
+    if (!r) return Object.assign(FRZ, { state: 'nodeploy', n: null, at: null, why: 'bridge-config.json records no rareRoles address' });
+    try { const n = word(await rpc('eth_call', [{ to: r, data: sel('runningGames()') }, 'latest']));
+      Object.assign(FRZ, { state: Number.isFinite(n) ? 'read' : 'error', n, at: r, why: Number.isFinite(n) ? '' : 'the answer was not a number' }); }
+    catch (e) { Object.assign(FRZ, { state: 'error', n: null, at: r, why: 'RareRoles.runningGames() did not answer: ' + e.message }); }
+    return FRZ;
+  }
+  const isFrozen = (id) => !!FROZEN[id] && FRZ.state === 'read' && FRZ.n > 0;
+  // One line per frozen switch: its freeze, in plain English, with where the answer came from.
+  function freezeLine(id) {
+    const f = FROZEN[id]; if (!f) return null;
+    const src = 'RareRoles.runningGames()' + (FRZ.at ? ' at ' + FRZ.at : '');
+    if (FRZ.state === 'read' && FRZ.n > 0) return { c: 'no', t: 'FROZEN — ' + (FRZ.n === 1 ? 'A GAME IS' : FRZ.n + ' GAMES ARE') + ' RUNNING',
+      why: '<b>This cannot be changed until the game ends.</b> Once a game has started, ' + f.what + ' stays as it was (ruling 74), because ' + f.why + '. ' +
+        'The contract itself refuses <code>' + f.fn + '</code> with <code>GameRunning(' + FRZ.n + ')</code>, so the control is off here too. It thaws when the last running game is declared. ' +
+        '<span class="src">Read from ' + esc(src) + ', which reads ' + FRZ.n + '.</span>' };
+    if (FRZ.state === 'read') return { c: 'ag', t: 'NOT FROZEN — NO GAME IS RUNNING',
+      why: 'It can be changed now. <b>It freezes the moment a game starts</b> (<code>start</code>, not <code>create</code>) and stays frozen until that game is declared: the contract refuses <code>' + f.fn + '</code> in between (ruling 74). ' +
+        '<span class="src">Read from ' + esc(src) + ', which reads 0.</span>' };
+    if (FRZ.state === 'error') return { c: 'nr', t: 'FROZEN WHILE A GAME RUNS — WHETHER ONE RUNS IS NOT KNOWN',
+      why: 'The contract refuses <code>' + f.fn + '</code> while a game runs (ruling 74), and ' + esc(FRZ.why) + '. ' +
+        'A registry deployed before that guard was written has no such getter and no such guard. The page lock above still applies.' };
+    return { c: 'nr', t: 'FROZEN WHILE A GAME RUNS — NO CONTRACT TO ASK',
+      why: 'Once deployed, <code>RareRoles</code> refuses <code>' + f.fn + '</code> while a game runs (ruling 74), and this card will say whether one does. ' +
+        'Today ' + esc(FRZ.why) + ', so there is nothing to ask. The page lock above still applies.' };
   }
   const guardNote = () => {
     if (RUN.guard === undefined) return '';
@@ -945,6 +1008,10 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
     if (!c) return { c: 'nr', t: 'THE CHAIN: READING…', why: '' };
     if (c.state === 'nodeploy') return { c: 'nr', t: 'THE CHAIN: NO CONTRACT DEPLOYED', why: c.why };
     if (c.state === 'error') return { c: 'no', t: 'THE CHAIN DID NOT ANSWER', why: c.why };
+    // an address row: nothing typed means nothing proposed, so the reading stands on its own; typed, it is compared
+    if (r.addr) { const t = addrs(val[r.id])[0];
+      const same = !t || t.toLowerCase() === String(c.got).toLowerCase();
+      return { c: same ? 'ag' : 'no', t: (same ? 'THE CONTRACT READS ' : 'DISAGREES — THE CONTRACT READS ') + c.got, why: c.why }; }
     const mine = fieldOf(r), agree = r.sw ? (c.got === 'on') === !!mine : String(c.got) === String(mine);
     return { c: agree ? 'ag' : 'no', t: (agree ? 'THE CONTRACT READS ' : 'DISAGREES — THE CONTRACT READS ') + c.got, why: c.why };
   }
@@ -1512,6 +1579,11 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
     // asked once more at the last moment: a game may have started since the lock was last read
     if (at('rareGame')) { await readRunning();
       if (lifecycle().running) { log('the contract changes', 'confirmed', 'REFUSED — ' + lifecycle().src + ': a game is running', false); CONFIRM = null; paintAll(); return false; } }
+    // and the freeze, asked of RareRoles itself: a frozen switch is not sent, since the contract would answer GameRunning
+    await readFreeze();
+    const fzn = tx.filter((x) => isFrozen(x.r.id));
+    if (fzn.length) { fzn.forEach((x) => log(x.r.k, x.from, x.to + ' — REFUSED, FROZEN: RareRoles.runningGames() reads ' + FRZ.n + ', so ' + FROZEN[x.r.id].fn + ' would answer GameRunning', false));
+      CONFIRM = null; paintAll(); return false; }
     for (const x of tx) {
       const w = CHAIN_WRITE[x.r.id];
       const data = sel(w.sig) + window.Chance.hex(window.Chance.encode(...[].concat(w.word(val[x.r.id])))).slice(2);
@@ -1570,6 +1642,7 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
     { id: 'sw', n: '7', t: 'THE SWITCHES', q: 'Four things that are typed web addresses today and belong here. <b>These are the ones that really reach the game</b>, so they are where the read-back is proved. Beside them, read only: which pace the game is running.' },
     { id: 'money', n: '8 · 13', t: 'THE MONEY AND THE CLOCK', q: 'The cut, the fee and a planted terminal\'s share of it, the places that pay out, the three lifecycle timings, and the duel\'s odds and stakes. The prize split is not in here, because it is a rule and not a field.' },
     { id: 'demo', n: '14', t: 'DEMO MODE', q: 'One switch that says <i>this is a test, not a real game</i>.' },
+    { id: 'freeze', n: '17', t: 'THE FREEZE', q: '<b>No switch changes once a game has started</b> (ruling 74). Every switch the contracts guard, its state now, and whether it is frozen - each one an answer from the chain.' },
   ];
 
   function card(r) {
@@ -1586,12 +1659,18 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
     // RULING 64 decided the sweep's rows as starting values, so a sweep row is DECIDED - all but the one whose
     // value is question 22's table, which the approval did not name and which stays PROPOSED.
     if (r.sweep && !r.dec && !r.prop) tags.push(r.sweep.prop ? '<span class="tag prop">PROPOSED</span>' : '<span class="tag dec">DECIDED</span>');
-    const locked = state().locked;
+    // frozen (ruling 74) is its own reason to refuse, apart from the page lock: the contract will refuse it too
+    const frozen = isFrozen(r.id), locked = state().locked || frozen;
+    const offWhy = frozen ? ' title="Frozen: a game is running, and RareRoles refuses ' + FROZEN[r.id].fn + ' until it ends"' : '';
     let ctl;
     if (r.sw) {
-      ctl = '<button class="btn" data-sw="' + r.id + '" aria-pressed="' + (!!val[r.id]) + '"' + (locked ? ' disabled' : '') + '>' + (val[r.id] ? 'ON' : 'OFF') + '</button>';
+      // frozen, the switch cannot be moved, so the button shows what the CONTRACT holds rather than the page's field
+      const cv = frozen && CHAINVAL[r.id] && CHAINVAL[r.id].state === 'read' ? CHAINVAL[r.id].got === 'on' : null;
+      const on = cv === null ? !!val[r.id] : cv;
+      ctl = '<button class="btn" data-sw="' + r.id + '" aria-pressed="' + on + '"' + (locked ? ' disabled' : '') + offWhy + '>' + (on ? 'ON' : 'OFF') + '</button>' +
+        (cv === null ? '' : '<span class="u">as the contract holds it</span>');
     } else if (r.text) {
-      ctl = '<input type="text" data-in="' + r.id + '" placeholder="0x…, 0x…" value="' + esc(String(val[r.id] || '')) + '"' + (locked ? ' disabled' : '') + '>' +
+      ctl = '<input type="text" data-in="' + r.id + '" placeholder="' + (r.addr ? '0x…' : '0x…, 0x…') + '" value="' + esc(String(val[r.id] || '')) + '"' + (locked ? ' disabled' : '') + offWhy + '>' +
         (r.u ? '<span class="u">' + r.u + '</span>' : '');
     } else if (r.tab || r.ro) {
       ctl = '<span class="u">' + (rb.got == null ? '—' : esc(String(rb.got))) + '</span>';
@@ -1602,6 +1681,12 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
         (r.u ? '<span class="u">' + r.u + '</span>' : '');
     }
     let extra = '';
+    // the freeze sits directly under the control it explains, not at the foot of a long card
+    const fz = freezeLine(r.id);
+    let frz = fz ? '<div class="rb ' + fz.c + '" data-freeze="' + r.id + '">' + esc(fz.t) + '</div><div class="s">' + fz.why + '</div>' : '';
+    if (r.trade) frz += '<div class="rb nr" data-freeze="' + r.id + '">NOT FROZEN BY THE CONTRACTS — THE QUESTION IS OPEN</div>' +
+      '<div class="s">Ruling 74 freezes every switch, but <b>what frozen means for the marketplace\'s switch is not decided</b>: one switch serves every game at once. ' +
+      'Asked, not assumed - <i>Switches frozen: the marketplace\'s switches</i>, in DESIGN\'s <i>Still open</i>; see THE FREEZE below. This page\'s own lock still holds it while a game runs, as it holds every field.</div>';
     if (r.warn) extra += lengthWarning();
     if (r.bound) extra += '<div class="s">Refused below <b>' + DEC.cutFloor.v + '%</b> or above <b>' + DEC.cutCeiling.v + '%</b>.</div>' +
       '<div class="refuse" id="refuse_' + r.id + '"' + (REFUSE[r.id] ? '' : ' hidden') + '>' + esc(REFUSE[r.id] || '') + '</div>';
@@ -1641,7 +1726,7 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
     return '<div class="p' + ((cb ? cb.c : rb.c) === 'no' || (r.exp && rb.c === 'no') || (dk && !dk.agree) || (vf && vf.c === 'no') || (sc && sc.cmp === false) || (gc && gc.c === 'no') ? ' dis' : '') + '">' +
       '<div class="k">' + r.k + '</div>' +
       '<div class="tags">' + tags.join('') + '</div>' +
-      '<div class="f">' + ctl + '</div>' +
+      '<div class="f">' + ctl + '</div>' + frz +
       (cb ? '<div class="rb ' + cb.c + '">' + esc(cb.t) + '</div>' + (cb.why ? '<div class="s">' + cb.why + '</div>' : '') : '') +
       gameLine +
       (!dk ? '' : '<div class="rb ' + (dk.agree ? 'ag' : 'no') + '">' +
@@ -1706,6 +1791,34 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
         '</tbody></table></div>';
     }
     return out;
+  }
+
+  // M4 item 17: every switch in one place - what it reads now, and whether it is frozen. Each state is the chain's.
+  function freezeTable() {
+    const live = (id) => { const c = CHAINVAL[id];
+      if (!c) return 'READING…';
+      if (c.state === 'read') return id === 'freezeGame' ? c.got : String(c.got).toUpperCase();
+      return c.state === 'error' ? 'NO ANSWER' : 'NOT DEPLOYED'; };
+    const fz = (id) => { const l = freezeLine(id); return '<span class="tag ' + (l.c === 'no' ? 'chain' : 'open') + '">' + esc(l.t.split(' — ')[0]) + '</span>'; };
+    const head = FRZ.state === 'read'
+      ? (FRZ.n > 0 ? '<div class="note warn"><b>' + (FRZ.n === 1 ? 'A game is' : FRZ.n + ' games are') + ' running, so every switch below that the contracts guard is frozen.</b> ' +
+          'Their controls are off, and a transaction would be refused anyway. They thaw when the last running game is declared.</div>'
+        : '<div class="note"><b>No game is running, so nothing is frozen.</b> The moment a game starts, the three guarded switches below freeze until it is declared.</div>')
+      : '<div class="note">' + (FRZ.state === 'error' ? '<b>RareRoles did not answer</b> (' + esc(FRZ.why) + ')' : '<b>No RareRoles address is recorded</b>') +
+        ', so whether a game is running cannot be read here. The page lock above still refuses every change until it can.</div>';
+    const row = (k, fn, st, frz) => '<tr><td class="wrap">' + k + '</td><td class="wrap"><code>' + fn + '</code></td><td class="wrap">' + st + '</td><td class="wrap">' + frz + '</td></tr>';
+    return head + '<div class="tw"><table><thead><tr><th>SWITCH</th><th>SETTER</th><th>READS NOW</th><th>FROZEN WHILE A GAME RUNS</th></tr></thead><tbody>' +
+      row('Demo mode', 'RareRoles.setDemoMode', esc(live('demo')), fz('demo')) +
+      row('The launch whitelist: open to everyone', 'RareRoles.setWhitelistOpen', esc(live('whitelistOpen')), fz('whitelistOpen')) +
+      row('The game the freeze asks', 'RareRoles.setGame', '<code>' + esc(live('freezeGame')) + '</code>', fz('freezeGame')) +
+      row('Trading a collection on the marketplace', 'RareMarket.setTradeable', 'per collection', '<span class="tag open">NO — STILL OPEN</span>') +
+      '</tbody></table></div>' +
+      '<div class="note"><b>The marketplace\'s switch is not frozen, and that is not a decision.</b> One <code>RareMarket.tradeable</code> switch serves every game at once, and the marketplace is not part of a game. ' +
+      'Whether ruling 74 means it cannot change while <i>any</i> game runs - which, with games back to back, could mean never - or that each game keeps its own copy, is ' +
+      '<i>Switches frozen: the marketplace\'s switches</i> in DESIGN\'s <i>Still open</i>. Until it is answered the contract does not guard it and this table does not pretend it does.</div>' +
+      '<div class="note">Not in the table: <b>the whitelist\'s add and remove</b> are lists of addresses, not on/off switches, and are not frozen; whether ruling 74 reaches them has not been asked. ' +
+      '<b>The marketplace fee</b> is a number, and its exemption is recorded on its own card. ' +
+      '<b>The refusal on this page is a convenience</b>: the contract refuses the same transaction with <code>GameRunning</code> whoever sends it.</div>';
   }
 
   function demoExtra() {
@@ -1816,6 +1929,7 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
       out += '<section id="' + g.id + '"><h2><span class="n">' + g.n + '</span>' + g.t + '<span class="d">M4 DELIVERABLE</span></h2>' +
         '<p class="q">' + g.q + '</p>';
       if (g.id === 'map') out += versionSection();
+      if (g.id === 'freeze') out += freezeTable();
       out += '<div class="params">' + R.filter((r) => r.g === g.id).map(card).join('') + '</div>';
       if (g.id === 'sw' || g.id === 'econ') out += '<div class="row"><button class="btn big" id="apply' + g.id + '"' + (state().locked ? ' disabled' : '') + '>SHOW ME WHAT WILL CHANGE</button></div>';
       if (g.id === 'money') out += splitTable();
@@ -1831,7 +1945,7 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
 
   function wire() {
     document.querySelectorAll('[data-sw]').forEach((b) => { b.onclick = () => {
-      if (state().locked) return;
+      if (state().locked || isFrozen(b.dataset.sw)) return;
       const id = b.dataset.sw, r = R.find((x) => x.id === id);
       const was = !!val[id]; val[id] = !was;
       log(r.k, was ? 'on' : 'off', was ? 'off' : 'on', false);
@@ -1839,9 +1953,13 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
       paintAll();
     }; });
     document.querySelectorAll('[data-in]').forEach((i) => { i.onchange = () => {
-      if (state().locked) return;
+      if (state().locked || isFrozen(i.dataset.in)) return;
       const id = i.dataset.in, r = R.find((x) => x.id === id);
       const was = fieldOf(r), v = i.value === '' ? null : (r.text ? i.value : Number(i.value));
+      // an address row takes exactly one well-formed address, or nothing; anything else would sign garbage
+      if (r.addr && v !== null && !/^0x[0-9a-fA-F]{40}$/.test(v.trim())) {
+        i.value = was || ''; log(r.k, String(was || '—'), String(v) + ' — REFUSED, not one 0x address', false); paintAll(); return;
+      }
       if (r.bound && v !== null && (v < DEC.cutFloor.v || v > DEC.cutCeiling.v)) {
         REFUSE[r.id] = 'REFUSED: ' + v + '% is outside the floor (' + DEC.cutFloor.v + '%) and the ceiling (' + DEC.cutCeiling.v + '%). The cut is bounded so no game can launch with a surprise take.';
         i.value = was; log(r.k, String(was), String(v) + ' — REFUSED, outside the bounds', false); paintAll(); return;   // refused is not staged
@@ -1872,15 +1990,16 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
   // re-read every second, so a game starting locks this page without a reload.
   // The schema loads either way — it holds no values, only where a value would live — but the
   // game is NOT opened until the gate is. `waitForBase` moved into openBody() for that reason.
-  let wasRunning = false, wasKnown = false;
+  let wasRunning = false, wasKnown = false, wasFrz = '';
   fetch('schema.json').then((r) => r.json()).then((j) => { SCH = j; paintAll(); }).catch(() => paintAll());
   paintAll();
   setInterval(() => {
     const l = lifecycle();
-    if (l.running !== wasRunning || l.known !== wasKnown) { wasRunning = l.running; wasKnown = l.known; paintAll(); }
+    const fk = FRZ.state + ':' + FRZ.n;                 // the freeze moves on RareRoles' count, which may not be RareGame's
+    if (l.running !== wasRunning || l.known !== wasKnown || fk !== wasFrz) { wasRunning = l.running; wasKnown = l.known; wasFrz = fk; paintAll(); }
   }, 1000);
   // the chain's count, re-asked on its own slower clock; the one-second tick above repaints when it moves
-  setInterval(() => { if (GATE.open && at('rareGame')) readRunning(); }, RUN_EVERY);
+  setInterval(() => { if (GATE.open && (at('rareGame') || at('rareRoles'))) readRunning(); }, RUN_EVERY);
 
   // A handle for the checks, read-only apart from the things a deployer does. IT IS GATED TOO:
   // a stranger who opens the console gets null out of every value-bearing getter, for the same
@@ -1898,7 +2017,9 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
     get chainvals() { return GATE.open ? CHAINVAL : null; }, get config() { return GATE.open ? CFG : null; },
     // the lock's chain half: RareGame.runningGames() as last read, and a way to ask again (what the page's own
     // button and its ten-second clock do), so a check need not wait on the clock
-    get run() { return GATE.open ? Object.assign({}, RUN) : null; }, readRunning: ifOpen(async () => { await readRunning(); paintAll(); return Object.assign({}, RUN); }),
+    get run() { return GATE.open ? Object.assign({}, RUN) : null; },
+    // the freeze (M4 item 17): RareRoles.runningGames() as last read, and which rows it holds
+    get freeze() { return GATE.open ? Object.assign({ ids: Object.keys(FROZEN), frozen: Object.keys(FROZEN).filter(isFrozen) }, FRZ) : null; }, readRunning: ifOpen(async () => { await readRunning(); paintAll(); return Object.assign({}, RUN); }),
     readChain: ifOpen(readChain),
     sweepCheck: ifOpen((id) => { const r = R.find((x) => x.id === id); return r && r.sweep ? sweepCheck(r, readback(r).got) : null; }),
     openConfirm: ifOpen(openConfirm), applyGame: ifOpen(applyGame), signSend: ifOpen(signSend),

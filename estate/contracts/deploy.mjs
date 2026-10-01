@@ -4,6 +4,7 @@
 //   EVM_RPC=http://127.0.0.1:<port> ... node deploy.mjs --fake-rf [--game]   # LOCAL ONLY: the fake-$RF world (deploy/local-chain.sh fake)
 // The key is read from the environment only, never printed, never written. Every transaction needs a typed yes.
 // Each address is written to estate/bridge-config.json the moment its deploy is mined. --dry-run sends and writes nothing.
+// --game also sends RareRoles.setGame(RareGame) and refuses to finish unless RareRoles.game() reads it back (wireGame below).
 import { writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { Wallet, Contract, ContractFactory, getCreateAddress, id } from 'ethers';
@@ -127,6 +128,38 @@ async function step(key, c, args) {
 }
 const A = (name, value, source) => ({ name, value, source });
 
+// RareRoles.setGame(RareGame): THE WIRE EVERY FREEZE READS. RareRoles.requireNoGameRunning() asks game().runningGames(),
+// and game() is zero until this call - so without it runningGames() reads 0 while a game runs and every freeze
+// (ruling 74's setDemoMode / setWhitelistOpen / setGame, RareDuel's and RareGame's number setters, BINDING §61.1 and
+// §73) is open. It is a call, not a deploy, but it is part of every deploy that lands a RareGame: local, --fake-rf,
+// testnet and mainnet all pass through here. The run then READS game() BACK and refuses to finish unless it equals
+// the RareGame just deployed. Sent once root holds MANAGE_ROLES (the deployer, from RareRoles' constructor); refused
+// on chain while a game runs, which on a fresh RareGame it cannot be.
+async function wireGame(gameAddr) {
+  const rolesC = new Contract(roles, C.RareRoles.abi, wallet);
+  console.log(`\n== RareRoles.setGame(${gameAddr})  on RareRoles ${roles}  nonce ${nonce}`);
+  console.log('   the pointer every running-game freeze reads; zero until this call, so until it every freeze is off');
+  if (DRY) { console.log('   DRY RUN: a real run sends this and refuses to finish unless RareRoles.game() reads back ' + gameAddr); nonce++; return; }
+  const was = await rolesC.game();
+  if (was.toLowerCase() === gameAddr.toLowerCase()) console.log('   already pointed at it - nothing sent');
+  else {
+    const gas = await rolesC.setGame.estimateGas(gameAddr); const cost = gas * gasPrice; total += cost;
+    console.log(`   game() was ${was}\n   estimateGas ${gas}  x ${gasPrice} wei  = ${eth(cost)}`);
+    await confirm(`Send RareRoles.setGame(${gameAddr}) from ${wallet.address}?`);
+    const tx = await rolesC.setGame(gameAddr, { nonce });
+    console.log('   tx ' + tx.hash);
+    const rc = await tx.wait();
+    if (rc.status !== 1) { console.error('   setGame mined with status ' + rc.status + '. Refusing to finish.'); process.exit(1); }
+    nonce++;
+  }
+  const now = await rolesC.game(), running = await rolesC.runningGames();
+  console.log(`   read back: RareRoles.game() = ${now}, runningGames() = ${running}`);
+  if (now.toLowerCase() !== gameAddr.toLowerCase()) {
+    console.error(`RareRoles.game() reads ${now}, not the RareGame just deployed (${gameAddr}). Every freeze would read zero running games. Refusing to finish.`);
+    process.exit(1);
+  }
+}
+
 // With --game and the five already in the config, only the sixth is deployed. In a DRY RUN with no RareRoles yet
 // (nothing deployed), all six are planned so RareGame is shown in its place, sixth, against step 1's predicted address.
 const FIVE = !GAME || (DRY && !cfg.rareRoles);
@@ -177,13 +210,14 @@ if (GAME) {
     if (!DRY) { console.error('The ladder under RULES_ID is not frozen on RareRules. RareGame would be born pointing at a table that can still move. Refusing.'); process.exit(1); }
     console.log('   DRY RUN: a real run refuses here. ' + (frozen === null ? 'RARE_RULES is a stand-in without the getter; ' : '') + 'continuing to the plan only.');
   }
-  await step('RareGame', C.RareGame, [
+  const rareGame = await step('RareGame', C.RareGame, [
     A('roles_', roles, cfg.rareRoles ? 'RareRoles, from ' + path.basename(cfgFile) : 'RareRoles, step 1 (predicted, dry run)'),
     A('rf_', RF, RF_SRC), A('feeTo_', FEE_TO, 'env FEE_TO_ADDRESS'),
     A('length_', N.gameLength[0], N.gameLength[1]), A('joinWindow_', N.joinWindow[0], N.joinWindow[1]), A('startDelay_', N.startDelay[0], N.startDelay[1]),
     A('cutBps_', N.cutBps[0], N.cutBps[1]), A('places_', N.places[0], N.places[1]),
     A('minPlayers_', N.minPlayers[0], N.minPlayers[1]), A('rulesId_', RULES_ID, 'env RULES_ID, frozen on RareRules ' + RULES)]);
   if (!DRY) { cfg.rareRules = RULES; cfg.rulesId = RULES_ID; writeFileSync(cfgFile, JSON.stringify(cfg, null, 2) + '\n'); }
+  await wireGame(rareGame);
   // Powers: RareGame.declare accepts DECLARE_PLACINGS ONLY (deployer ruling 2026-10-01: the deployer or the game
   // master, and no one else) - the server role's RECORD_SYNC does not declare. Root holds it; granting it to the
   // game master role is a deployer transaction (RareRoles.grantPower), not this script's. Nothing is granted here.
@@ -193,7 +227,8 @@ const bal = await provider.getBalance(wallet.address);
 console.log(`\ntotal estimated ${eth(total)}  wallet ${eth(bal)}` + (DRY && bal < total ? '  <-- INSUFFICIENT, fund before running for real' : ''));
 if (DRY) { console.log('\nDRY RUN complete. Nothing sent, nothing written.'); process.exit(0); }
 console.log('\n' + path.basename(cfgFile) + ' written: ' + cfgFile + (cfgFile.endsWith('.local.json') ? ' (LOCAL FORK scratch, gitignored, never committed).' : ' (addresses only). Commit it.'));
-if (!GAME) console.log('\nNext, the sixth: RareRules (deployed and frozen first - see deploy/local-chain.sh), then RARE_RULES=0x.. RULES_ID=0x.. node deploy.mjs --game (places starts at 3; GAME_PLACES=n overrides)');
+if (!GAME) console.log('\nNext, the sixth: RareRules (deployed and frozen first - see deploy/local-chain.sh), then RARE_RULES=0x.. RULES_ID=0x.. node deploy.mjs --game (places starts at 3; GAME_PLACES=n overrides)'
+  + '\nUNTIL THEN RareRoles.game() is zero: runningGames() reads 0 and every running-game freeze is off. --game deploys RareGame AND calls RareRoles.setGame on it.');
 console.log('\nNext, grant the server key its powers (RECORD_FIGHT, RECORD_SYNC) on RareRoles ' + roles + ':');
 console.log('  DEPLOYER_KEY=... SERVER_ADDRESS=0x<server signing address> node grant.mjs');
 console.log('Then start the API server and attestor units, and run bridgecheck - see DEPLOY.md section 6.');

@@ -108,6 +108,9 @@ contract ShadowFriends is ERC721, EIP712 {
     /// @notice the caller does not hold SET_ATTESTOR. Raised by `RareRoles.requirePower`; declared here too so
     /// an explorer decodes it against this contract's own ABI.
     error PowerNotHeld(address caller, bytes32 power);
+    /// @notice a game is running, so the attestor cannot change. Raised by `RareRoles.requireNoGameRunning`;
+    /// declared here for the same reason as PowerNotHeld.
+    error GameRunning(uint256 running);
     error NotAttestor();
     error AlreadyShadowed();
     error ClaimExpired();
@@ -139,8 +142,12 @@ contract ShadowFriends is ERC721, EIP712 {
 
     /// @notice point the bridge at a new attestor key. Guarded ON CHAIN by SET_ATTESTOR in RareRoles - the
     /// deployer (root), and the gamemaster role once granted; anyone else is refused with PowerNotHeld.
+    /// **Refused while a game runs** (ruling 74 extended, deployer 2026-10-01), asked through `roles` AFTER the
+    /// power, so a stranger gets PowerNotHeld and learns nothing about the game. The price: a leaked attestor key
+    /// cannot be rotated out until every running game is declared.
     function setAttestor(address attestor_) external {
         roles.requirePower(msg.sender, SET_ATTESTOR);
+        roles.requireNoGameRunning();
         if (attestor_ == address(0)) revert WrongSigner();
         attestor = attestor_;
         emit AttestorChanged(attestor_);

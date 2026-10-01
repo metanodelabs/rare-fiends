@@ -60,4 +60,14 @@ const t = await roles.hasPower(SERVER, SIGN_TERMINAL);
 const a = await roles.roleHasPower(SET_ATTESTOR, GAMEMASTER), aServer = await roles.hasPower(SERVER, SET_ATTESTOR);
 console.log(`\nproof: hasPower(server, RECORD_FIGHT) = ${f}, hasPower(server, RECORD_SYNC) = ${s}, hasPower(server, RECORD_ORDERS) = ${o}, hasPower(server, SIGN_TERMINAL) = ${t}, roleHasPower(SET_ATTESTOR, GAMEMASTER) = ${a}, hasPower(server, SET_ATTESTOR) = ${aServer}` + (delay !== 0n ? ' (pending under the delay)' : ''));
 if (aServer) { console.error('the server key holds SET_ATTESTOR - it must not. Refusing.'); process.exit(1); }
-process.exit((f && s && o && t && a) || delay !== 0n ? 0 : 1);
+// The wire every running-game freeze reads (deploy.mjs --game sends it; an older world may lack it): with a RareGame in
+// the config, RareRoles.game() must point at it, or runningGames() reads 0 while a game runs and every freeze is off.
+let wired = true;
+if (cfg.rareGame) {
+  const g = await roles.game();
+  wired = g.toLowerCase() === cfg.rareGame.toLowerCase();
+  console.log(`proof: RareRoles.game() = ${g}, RareGame in the config = ${cfg.rareGame}` + (wired ? '' : '  <-- NOT WIRED'));
+  if (!wired) console.error('RareRoles.game() is not the deployed RareGame: every running-game freeze reads zero. Fix, from the deployer key:\n'
+    + `  cast send --rpc-url <rpc> --private-key <deployer key> ${cfg.rareRoles} 'setGame(address)' ${cfg.rareGame}`);
+} else console.log('no rareGame in the config yet: RareRoles.game() stays zero (every freeze off) until deploy.mjs --game wires it');
+process.exit(((f && s && o && t && a) || delay !== 0n) && wired ? 0 : 1);

@@ -575,9 +575,11 @@ let PROF = null, CH = null;
   // THE DEPLOYER CORRECTED THAT: the question is not whether the game reads it, it is what the
   // CONTRACT says - and RareRoles holds this one, so with a registry on record the answer comes off
   // the chain. The same assertion, with the expectation the deployer asked for.
+  // M4 item 17 put the freeze line (also a .rb, marked data-freeze) directly under the switch, ahead of the
+  // readback - so the readback is the first .rb that is NOT the freeze line, or this reads the freeze instead.
   ok('demo mode is read FROM THE CONTRACT, not from the game',
-    /THE CONTRACT READS/.test(await ev('document.querySelector(\'[data-sw="demo"]\').closest(".p").querySelector(".rb").textContent')),
-    await ev('document.querySelector(\'[data-sw="demo"]\').closest(".p").querySelector(".rb").textContent'));
+    /THE CONTRACT READS/.test(await ev('document.querySelector(\'[data-sw="demo"]\').closest(".p").querySelector(".rb:not([data-freeze])").textContent')),
+    await ev('document.querySelector(\'[data-sw="demo"]\').closest(".p").querySelector(".rb:not([data-freeze])").textContent'));
 
   // ---- THE FIGHT'S SETTINGS: rulings 44, 45, 46 and 47 (economist's spec for the check-writer) -------------
   // Ruling 47 removed the fight's clock, so no row and no card for it. Ruling 45 moved cover from BEHIND a wall to

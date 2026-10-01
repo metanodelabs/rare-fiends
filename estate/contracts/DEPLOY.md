@@ -65,11 +65,16 @@ One line each. Once mined, none of these can be changed without a redeploy and a
 - [x] **`gameId` in `RareDuel`** - landed in `c071894` (`Duel.gameId`, `challenge(gameId, ..)`,
       `Challenged(id, gameId, ..)`; `RareGame` mints it). Still true: deploy nothing until `npm run check`
       (the parity check) and `test/fixcheck.js` are green on the final source.
-- [ ] **`RareRoles.setGame(rareGame)` after `deploy.mjs --game`** - from the deployer, one transaction, not
-      in the script (it deploys; this is a call). It points every number's setter (`RareDuel` setOdds/setFee/
-      setWindows/setDice, `RareGame` setClocks/setDefaults) at the running-game count, so they refuse while a
-      game runs - BINDING §61.1. Until it is made the count reads zero and the setters are open to root, which
-      is also what they are between games.
+- [x] **`RareRoles.setGame(rareGame)` is part of `deploy.mjs --game`** (2026-10-01). It was a separate manual
+      call, and no deploy path made it, so on every fresh world `game()` was zero, `runningGames()` read 0
+      under a running game and EVERY freeze was off - the number setters (`RareDuel` setOdds/setFee/setWindows/
+      setDice, `RareGame` setClocks/setDefaults, BINDING §61.1) and ruling 74's switches (`setDemoMode`,
+      `setWhitelistOpen`, `setGame`, BINDING §73). `--game` now sends it straight after RareGame deploys (one
+      more typed yes on a real chain), reads `game()` back and refuses to finish unless it is that RareGame;
+      `grant.mjs` fails its proof if the config has a `rareGame` that `game()` does not equal; `moneycheck.mjs`
+      starts a game and asserts `setDemoMode` answers `GameRunning(1)`. **A world deployed before this fix**
+      needs one call from the deployer key, with no game running:
+      `cast send --rpc-url <rpc> --private-key <deployer key> <rareRoles> 'setGame(address)' <rareGame>`.
 - [ ] **`bridge-config.json`** - today `{"chainId": 4663, "shadowFriends": null, "attestor": null}`.
       Needs `shadowFriends`, `attestor`, and new keys `rareRoles`, `rareFightLog` (the page and server
       need them; the front-end adds the readers), and **`deployBlock`** - the block `ShadowFriends` landed

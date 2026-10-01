@@ -144,7 +144,7 @@ let bad=0; const ok=(n,c,v)=>{ if (typeof c === 'string' && c.startsWith('THREW'
     // the check-down hand needs purses that can cover a bet on the river after calling the page's bets on
     // the flop and turn - 240 cannot, and the river's BET button would rightly not be offered
     const a = kind === 'checkdown' ? 1000 : 240, b = kind === 'checkdown' ? 1000 : 610;
-    await ev('challenge.P.p1.purse = ' + a + '; challenge.P.p2.purse = ' + b + '; challenge.restart()'); await sleep(150);
+    await ev('challenge.P.p1.purse = ' + a + '; challenge.P.p2.purse = ' + b + '; challenge.S.hands = 0; challenge.restart()'); await sleep(150);   // pin p1 to open (ruling 79 alternates it): these three hands assume we act first
     const net0 = await ev('challenge.P.p1.rec.net');
     await click('#send'); await waitPhase('play'); await ready();
     let s = await state();
@@ -184,6 +184,39 @@ let bad=0; const ok=(n,c,v)=>{ if (typeof c === 'string' && c.startsWith('THREW'
   // bet sizes over all three hands: every BET offered matched the ladder, and all four streets were seen
   ok('hold\'em: every BET offered is HOLDEM.bets[street] x stake, on all four streets (' + JSON.stringify(ladder) + ' x 50; offered ' + JSON.stringify(allOffered) + ')',
     Array.isArray(ladder) && [0, 1, 2, 3].every((st) => allOffered.some(([x]) => x === st)) && allOffered.every(([st, n]) => st >= 0 && n === ladder[st] * 50), JSON.stringify(allOffered));
+
+
+  // ================= M17 item 12, ruling 79: the worst case shown, and the first actor alternating =================
+  // (a) before a hold'em game is accepted the screen shows the most one hand can cost, worked out from HOLDEM:
+  // the ante, plus on every street the bet and every raise the cap allows. Read off the live object, then the
+  // object is changed and the screen must follow - a typed-in 25 or 1250 fails the second half.
+  const MOST = `(()=>{const e=document.getElementById('hmost'), H=challenge.HOLDEM; if(!e||e.offsetParent===null) return 'no visible #hmost';
+    const x=1+H.bets.reduce((a,b)=>a+b,0)*(1+H.raises), s=challenge.S.stake;
+    return (+e.dataset.x===x && +e.dataset.most===x*s && e.innerText.includes(String(x*s))) ? x : 'shows '+[e.dataset.x,e.dataset.most,e.innerText].join(' | ')+' want '+x+' x '+s;})()`;
+  await navigate('challenge.html?game=holdem&stake=50');
+  ok('hold\'em (ruling 79): before sending, the terms show the most a hand can cost - 25 x the stake, 1250', (await ev(MOST)) === 25, await ev(MOST));
+  await ev('challenge.HOLDEM.raises = 2; challenge.restart()');
+  ok('hold\'em (ruling 79): the worst case is computed from HOLDEM - a cap of 2 raises shows 1 + 6 x 3 = 19 x', (await ev(MOST)) === 19, await ev(MOST));
+  await ev('challenge.HOLDEM.raises = 3; challenge.restart()');
+  await navigate('challenge.html?game=holdem&stake=50&as=challenged');
+  ok('hold\'em (ruling 79): the incoming challenge shows it too, before LET\'S GET IT ON', (await ev(MOST)) === 25 && (await ev('!document.getElementById("prompt").hidden && !!document.getElementById("paccept")')) === true, await ev(MOST));
+  // (b) who acts first alternates, hand to hand, between the two seats: p1 opens hand 1, p2 hand 2. Read from
+  // the hand's own transcript (the first act of every street), not from a label - and with every street played
+  // to a check-down, both seats must act on each, so a second actor that is skipped also fails.
+  await navigate('challenge.html?game=holdem&stake=10');
+  const openers = [], bothActed = [];
+  for (let h = 0; h < 4; h++) {
+    await ev('challenge.P.p1.purse = 5000; challenge.P.p2.purse = 5000; challenge.restart()'); await sleep(150);
+    await click('#send'); await waitPhase('play'); await ready();
+    let n = 0; while ((await ev('challenge.S.phase')) !== 'done' && n++ < 40) { if (!(await click('#hcheck'))) await click('#hcall'); await sleep(150); await ready(); }
+    const acts = JSON.parse(await ev('JSON.stringify(challenge.S.last.acts)'));
+    const firstOf = {}; acts.forEach(([st, k]) => { if (!(st in firstOf)) firstOf[st] = k; });
+    const ops = [...new Set(Object.values(firstOf))];
+    openers.push(ops.length === 1 ? ops[0] : 'mixed:' + JSON.stringify(firstOf));
+    bothActed.push(acts.some((x) => x[2] === 'fold') || (Object.keys(firstOf).length === 4 && Object.keys(firstOf).every((st) => ['p1', 'p2'].every((k) => acts.some((x) => String(x[0]) === st && x[1] === k)))));
+  }
+  ok('hold\'em (ruling 79): the seat that acts first alternates hand to hand - p1, p2, p1, p2 - on every street (' + openers.join(',') + ')', JSON.stringify(openers) === JSON.stringify(['p1', 'p2', 'p1', 'p2']), JSON.stringify(openers));
+  ok('hold\'em (ruling 79): whoever opens, the other seat still acts on every street', bothActed.every(Boolean), JSON.stringify(bothActed));
 
   // ================= M17 item 9: demo mode makes all four games free =================
   await navigate('challenge.html?demo=1&stake=50');

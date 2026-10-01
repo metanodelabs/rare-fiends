@@ -216,8 +216,12 @@ async function chain() {
       cases.push({ attackers: [a], entry: Combat.entry(b, 'N', 6), defenders: b.defenders, walls: b.walls }); }
   // random bases: a 6×6 plot, wall sections, defenders on random spots (some stacked, some up towers), any side
   const base = { tiles: [] }; for (let x = -3; x <= 2; x++) for (let y = -3; y <= 2; y++) base.tiles.push([x, y]);
+  // The random bases are drawn 1 to 12 a side - the cap they were written under - and NOT 1 to MAX_SIDE: the count
+  // drawn decides how many draws follow, so widening it would re-deal every line-up after it. The cap of 40
+  // (2026-10-01) is proved by the named rungs below, at 12, 24 and 40, and by the refusal at 41.
+  const CORPUS_SIDE = 12;
   for (let k = 0; k < 60; k++) {
-    const na = 1 + rint(Combat.MAX_SIDE), nd = 1 + rint(Combat.MAX_SIDE), nw = rint(8);
+    const na = 1 + rint(CORPUS_SIDE), nd = 1 + rint(CORPUS_SIDE), nw = rint(8);
     const walls = Array.from({ length: nw }, () => ({ x: -6 + 2 * rint(6), y: -6 + rint(12) }));
     const defenders = Array.from({ length: nd }, () => ({ gen: 1 + rint(6), x: -6 + rint(12), y: -6 + rint(12), tower: rint(4) === 0,
       order: rint(4), fx: -6 + rint(12), fy: -6 + rint(12) }));      // hold, engage, defend or fall back, each with somewhere to fall back to
@@ -252,19 +256,22 @@ async function chain() {
   // x = -6, -4, -2, 0, 2, 4 on y = -4, generation 1, the first two up towers), so nothing that was
   // already being proved stops being proved.
   const MAXS = Combat.MAX_SIDE, OLDW = 16;   // 16: the wall cap that was, removed 2026-10-01
+  const OLDS = 12;                           // 12: the side cap that was, raised to 40 on 2026-10-01
+  // defenders in rows of twelve: up to 12 this is the old single line exactly, so those rungs keep their words
   const ladder = (n, gen, nw, order) => ({
     attackers: Array(n).fill(gen), entry: Combat.entry(base, 'N', 10),
-    defenders: Array.from({ length: n }, (_, i) => ({ gen, x: -6 + i, y: -2, tower: i < 2, order })),
+    defenders: Array.from({ length: n }, (_, i) => ({ gen, x: -6 + (i % 12), y: -2 + Math.floor(i / 12), tower: i < 2, order })),
     // sections side by side along the wall line, a second and third row behind once six are used
     walls: Array.from({ length: nw }, (_, i) => ({ x: -6 + 2 * (i % 6), y: -4 - 2 * Math.floor(i / 6) })),
   });
   const rungs = [
-    [MAXS + ' a side, generation 1, 6 walls (the corpus\'s old heaviest hand-built fight)', ladder(MAXS, 1, 6, Combat.HOLD)],
+    [OLDS + ' a side, generation 1, 6 walls (the corpus\'s old heaviest hand-built fight)', ladder(OLDS, 1, 6, Combat.HOLD)],
     ['6 a side, generation 6, 6 walls', ladder(6, 6, 6, Combat.HOLD)],
     [MAXS + ' a side, generation 6, 6 walls', ladder(MAXS, 6, 6, Combat.HOLD)],
     [MAXS + ' a side, generation 6, 6 walls, defenders engaging', ladder(MAXS, 6, 6, Combat.ENGAGE)],
-    ['MAX_SIDE (' + MAXS + ') a side, ' + OLDW + ' walls (the old cap), generation 6, holding', ladder(MAXS, 6, OLDW, Combat.HOLD)],
-    ['MAX_SIDE (' + MAXS + ') a side, ' + OLDW + ' walls (the old cap), generation 6, defenders engaging', ladder(MAXS, 6, OLDW, Combat.ENGAGE)],
+    // the old wall cap at the old side cap, as these two were written: they prove 16 walls, not the side cap
+    [OLDS + ' a side (the old cap), ' + OLDW + ' walls (the old cap), generation 6, holding', ladder(OLDS, 6, OLDW, Combat.HOLD)],
+    [OLDS + ' a side (the old cap), ' + OLDW + ' walls (the old cap), generation 6, defenders engaging', ladder(OLDS, 6, OLDW, Combat.ENGAGE)],
   ];
   for (const [name, S] of rungs) cases.push(Object.assign({ name }, S));
   // ---------- THE GENESIS AS A TARGET (M13 item 3) ----------
@@ -319,6 +326,15 @@ async function chain() {
   ];
   for (const [name, S] of wallRungs) { if (S.walls.length !== +name.match(/(\d+) walls/)[1]) throw new Error('ring is short: ' + name); cases.push(Object.assign({ name }, S)); }
   rungs.push(...wallRungs);
+  // ---------- THE SIDE CAP IS 40 (deployer, 2026-10-01: "let's cap it at 40 for now") ----------
+  // It was 12, and ruling 66 ("as many as you own") would have removed it; this ruling superseded 66. The rungs
+  // above already fight at MAXS; these add the same real base (27 walls, generation 6) at 12 and 24 a side, so
+  // the gas of an on-chain replay prints at 12, 24 and 40 side by side. Appended last: nothing above re-deals.
+  const sideRungs = [];
+  for (const n of [OLDS, 24]) for (const [o, on] of [[Combat.HOLD, 'holding'], [Combat.ENGAGE, 'defenders engaging']])
+    sideRungs.push([n + ' a side, generation 6, 27 walls (a real base), ' + on, Object.assign(ladder(n, 6, 0, o), { walls: ring(-7, 6).concat(ring(-9, 8)).slice(0, 27) })]);
+  for (const [name, S] of sideRungs) cases.push(Object.assign({ name }, S));
+  rungs.push(...sideRungs);
   const wallsOf = (S) => S.walls.map((w) => ({ x: w.x, y: w.y, vert: !!w.vert, hp: w.hp || 0 }));
   // the four fields of RareCombat.Setup plus its Genesis: absent is `present: false`, which fights as before
   const genesisOf = (S) => S.genesis ? { present: true, x: S.genesis.x, y: S.genesis.y, hp: S.genesis.hp } : { present: false, x: 0, y: 0, hp: 0 };
@@ -334,7 +350,13 @@ async function chain() {
     const S2 = { attackers: S.attackers, entry: S.entry, walls: wallsOf(S),
       defenders: S.defenders.map(d => ({ gen: d.gen, x: d.x, y: d.y, tower: !!d.tower, order: d.order || 0,
         fx: d.fx == null ? d.x : d.fx, fy: d.fy == null ? d.y : d.fy })), genesis: genesisOf(S) };
-    const r = await lab.call('fight', [R, S2, w, fightId]);
+    // A revert in Solidity (InvalidSide, say, if the two engines' caps ever disagree) is a MISMATCH, counted and
+    // shown like any other, not a crash that hides which line-up it was.
+    let r;
+    try { r = await lab.call('fight', [R, S2, w, fightId]); }
+    catch (e) { let why = 'revert'; try { why = lab.iface.parseError(e.data).name; } catch (_) {}
+      fights++; if (!firstBad) firstBad = JSON.stringify({ line: describe(S), sol: 'REVERTED ' + why, want: js.reason });
+      continue; }
     const o = r.out[0];
     const sol = { winner: o.attackWins ? 'attack' : 'defence', reason: ['wiped', 'repelled', 'held'][Number(o.reason)], t: Number(o.t), shots: Number(o.shots),
       hits: Number(o.hits), rolls: Number(o.rolls), attackers: o.attackers.map(Number), defenders: o.defenders.map(Number), walls: o.walls.map(Number), genesis: Number(o.genesis) };
@@ -479,6 +501,24 @@ async function chain() {
     ok('generation 0 (a 1/1, ruling 55 - no weapon yet) is refused in a full fight by both engines, attacking or defending, and so is a Genesis with no strength: '
       + JSON.stringify(got), got.att0[0] === 'RangeError' && got.att0[1] === 'InvalidGeneration' && got.def0[0] === 'RangeError' && got.def0[1] === 'InvalidGeneration'
       && got.gNo[0] === 'RangeError' && got.gNo[1] === 'InvalidGenesis', JSON.stringify(got)); }
+  // THE SIDE CAP, ONE NUMBER IN EACH ENGINE (deployer, 2026-10-01: "let's cap it at 40 for now"). Read from BOTH:
+  // combat.js's export, and RareCombat.sol's own `MAX_SIDE` line (it is internal and inlined, so there is no getter
+  // to call - the source is the only place to read it). Then pinned by behaviour, so the text cannot drift from what
+  // runs: MAX_SIDE a side was FOUGHT by both engines field for field (the rungs above), and MAX_SIDE + 1 is REFUSED
+  // by both, attacking or defending. No figure is typed here: the next change is one number in each engine.
+  { const solSrc = fs.readFileSync(path.join(__dirname, 'RareCombat.sol'), 'utf8').match(/uint256\s+internal\s+constant\s+MAX_SIDE\s*=\s*(\d+)\s*;/);
+    const solMax = solSrc ? Number(solSrc[1]) : null, over = MAXS + 1;
+    const errOf = async (S) => { try { await lab.call('fight', [R, S2of(S), wordOf(4800, 1), 1]); return 'landed'; } catch (e) { try { return lab.iface.parseError(e.data).name; } catch (_) { return 'revert'; } } };
+    const jsErr = (S) => { try { Combat.fight(R, S, { word: wordOf(4800, 1), contract: lab.address, chainId: CHAIN_ID, fightId: 1 }); return 'landed'; } catch (e) { return e.name; } };
+    // the refusal comes before any fighting in both engines, so these cost nothing
+    const at = (na, nd) => Object.assign(ladder(nd, 6, 6, Combat.HOLD), { attackers: Array(na).fill(6) });
+    const got = { attackersOver: [jsErr(at(over, MAXS)), await errOf(at(over, MAXS))], defendersOver: [jsErr(at(MAXS, over)), await errOf(at(MAXS, over))] };
+    const foughtMax = rungs.filter(([, S]) => S.attackers.length === MAXS && S.defenders.length === MAXS).map(([name]) => rungSame.get(name));
+    ok('THE SIDE CAP is one number in each engine and they agree: combat.js MAX_SIDE ' + MAXS + ', RareCombat.sol MAX_SIDE ' + solMax
+      + '; ' + over + ' attackers and ' + over + ' defenders are refused by both (combat.js RangeError, RareCombat InvalidSide), and ' + foughtMax.length
+      + ' named ' + MAXS + '-a-side line-ups were fought field for field the same in both (' + foughtMax.join(', ') + ' of 2 words each): ' + JSON.stringify(got),
+      solMax === MAXS && got.attackersOver[0] === 'RangeError' && got.attackersOver[1] === 'InvalidSide' && got.defendersOver[0] === 'RangeError' && got.defendersOver[1] === 'InvalidSide'
+      && foughtMax.length >= 4 && foughtMax.every((k) => k === 2), JSON.stringify({ solMax, MAXS, got, foughtMax })); }
   // THE TRAP (ruling 55; M17 items 10 and 11): slot 0 is 1140, read out of values.js; the odds are the ruling's own
   // six figures; and RareCombat.trap settles the same one roll as combat.js trap() on every word, every victim.
   { const RULED = [6003, 6925, 7718, 8351, 8837, 9193];     // DESIGN.md, *What springs - decided*, worked out with 1140
@@ -524,7 +564,8 @@ async function chain() {
   const fitsInOneTx = gasMax < CEIL.maxTxGas;
   console.log('  info  the heaviest fight ' + (fitsInOneTx ? 'fits' : 'DOES NOT FIT') + ' in one transaction on chain ' + CHAIN_ID
     + ' (' + CEIL.maxTxGas.toLocaleString('en-US') + ' gas): the heaviest of ' + fights + ' is ' + gasMax.toLocaleString('en-US') + ', '
-    + pc(gasMax) + ' of it, on ' + JSON.stringify(worst) + (fitsInOneTx ? '' : ' - not a failure: v1 does not settle a fight on chain'));
+    + pc(gasMax) + ' of it, on ' + JSON.stringify(worst) + (fitsInOneTx ? '' : ' - not a failure: v1 does not settle a fight on chain. '
+    + 'V2 needs multi-transaction settlement or a separate on-chain cap: at ' + MAXS + ' a side (2026-10-01) the replay is many times the ceiling'));
   const GAS = { fightAvg: Math.round(gasSum / fights), fightMax: gasMax, fightMaxLine: worst && worst.line, fights,
     gasCeiling: CEIL.maxTxGas, gasCeilingFrom: 'ArbGasInfo.getGasAccountingParams() on chain ' + CHAIN_ID, fitsInOneTx };
   ok('the combat contract is under the 24 KB size limit (' + C.lab.size + ' bytes)', C.lab.size < 24576, C.lab.size);

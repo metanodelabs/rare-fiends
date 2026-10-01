@@ -16,6 +16,13 @@
 const { spawnSync } = require('child_process');
 const path = require('path');
 
+// M11 item 10 retired `friendSprites` - sixteen words that matched no token - and the card is now a frame of
+// frames(). A file that carries it again carries art with no origin, so that is a FAIL before the chain is asked.
+const artFile = process.env.ART_FILE ? path.resolve(process.env.ART_FILE) : path.join(__dirname, 'base-data.json');
+if (/"friendSprites"\s*:/.test(require('fs').readFileSync(artFile, 'utf8'))) {
+  console.log('FAIL  ' + path.basename(artFile) + ' carries `friendSprites` again - retired by M11 item 10, art with no token behind it');
+  process.exit(1);
+}
 const script = path.join(__dirname, 'sprites', 'chain-art.mjs');
 const args = [script, '--check'];
 if (process.env.ART_FILE) args.push(path.resolve(process.env.ART_FILE));
@@ -30,7 +37,8 @@ if (r.error || r.status === null) {
 }
 if (r.status === 0) {
   console.log('ok    ' + (summary || '(no summary line)'));
-  console.log('      does not cover: friendSprites (no token recorded, origin unknown); the 8 drawn family-6 clips');
+  console.log('ok    ' + path.basename(artFile) + ' carries no `friendSprites` (retired, M11 item 10)');
+  console.log('      does not cover: the 8 drawn family-6 clips');
   process.exit(0);
 }
 if (r.status === 2 && lines.some((l) => /^no RPC answered/.test(l))) {

@@ -7,6 +7,11 @@
 <link rel="apple-touch-icon" sizes="180x180" href="icon-180.png">
 <link rel="manifest" href="site.webmanifest">
 <meta name="theme-color" content="#CCFF00">
+<!-- "on" only where this page is served beside the game and our API (Server 1: deploy/deploy-test.sh writes it).
+     rarefiends.com gets this file as it is, "off", so the DEMO button and the whitelist form never show there
+     until a deploy turns them on - a form that POSTs to an endpoint the site does not have would be a promise
+     the page cannot keep. Opened from localhost, the page counts as "on" (serve.py answers /api/whitelist). -->
+<meta name="rf-app" content="off">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Rare Fiends</title>
 <link rel="modulepreload" href="three.module.js">
@@ -198,6 +203,38 @@ h1 { margin: 0; font-family: var(--display); font-weight: 400; font-size: clamp(
 .demo button[aria-pressed="true"] { background: var(--signal); color: var(--on-signal); border-color: var(--signal); }
 @media (max-width: 760px) { .demo { position: static; margin: 0 auto 8px; width: fit-content; } }
 
+/* ---------- the way into the game: DEMO, in the header beside the theme ---------- */
+.play { --home-bg: var(--signal); --home-fg: var(--on-signal); font-size: 15px; letter-spacing: .12em; padding: 8px 11px; }
+.play:hover { background: var(--home-bg); color: var(--home-fg); }
+.play:active { box-shadow: none; transform: translate(2px, 2px); }
+
+/* ---------- JOIN THE WHITELIST HERE: a card over the island, their swap panel again ---------- */
+.wl { position: absolute; z-index: 4; right: clamp(16px, 5vw, 64px); bottom: 24px; width: min(360px, calc(100vw - 32px));
+  border: var(--rule); box-shadow: var(--raised-lg); background: var(--paper); color: var(--ink);
+  display: grid; gap: 10px; padding: 14px 16px 16px; }
+.wl h2 { margin: 0; padding-right: 34px; font-family: var(--display); font-weight: 400; font-size: 20px; line-height: 1.15;
+  letter-spacing: .1em; color: var(--signal-ink); }
+.wl .sub { margin: 0; font-size: 14px; line-height: 1.4; color: var(--dim); }
+.wl form { display: grid; gap: 10px; margin: 0; }
+.wl label { display: grid; gap: 5px; font-family: var(--display); font-size: 11px; letter-spacing: .1em; color: var(--dim); }
+.wl label i { font-style: normal; color: var(--faint); }
+.wl input { font-family: var(--mono); font-size: 15px; color: var(--ink); background: transparent; border: var(--rule);
+  padding: 9px 10px; width: 100%; min-width: 0; border-radius: 0; }
+.wl input:focus { outline: 2px solid var(--signal); outline-offset: -2px; }
+.wl input[aria-invalid="true"] { border-color: #ff2a4a; }
+.wl .go { --home-bg: var(--signal); --home-fg: var(--on-signal); justify-content: center; font-size: 15px; padding: 10px 14px; }
+.wl .go:hover { background: var(--home-bg); color: var(--home-fg); }
+.wl .x { position: absolute; top: 10px; right: 10px; --home-bg: var(--paper); --home-fg: var(--ink); padding: 6px 7px; line-height: 0; box-shadow: none; }
+.wl .x::before, .wl .x::after { content: none; }
+.wl .x svg { display: block; }
+.wl .msg { margin: 0; font-size: 14px; line-height: 1.4; min-height: 0; }
+.wl .msg:empty { display: none; }
+.wl .msg.bad { color: #ff6b80; }
+.wl .msg.good { color: var(--signal-ink); font-family: var(--display); font-size: 14px; letter-spacing: .08em; }
+.wl .trap { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+[data-theme="invert"] .wl h2, [data-theme="invert"] .wl .msg.good { -webkit-text-stroke: 3.5px var(--ink); paint-order: stroke fill; }
+[data-theme="invert"] .wl .msg.bad { color: #c8001e; }
+
 /* ---------- light mode: every run of the theme colour gets its own small bordered box ----------
    #CCFF00 is the theme colour in both modes and does not change. On a light page it measures 1.02:1
    against the paper, so instead of touching the colour, each place that uses it as text is boxed: a
@@ -281,6 +318,21 @@ h1 { margin: 0; font-family: var(--display); font-weight: 400; font-size: clamp(
   .credits .by { justify-content: center; gap: 5px; }
       .theme { padding: 7px 8px; }
   .wallet { font-size: 12px; padding: 7px 9px; white-space: nowrap; }
+  .play { font-size: 12px; padding: 7px 9px; }
+  /* the whitelist card sits under the title, clear of the readings and the button at the bottom; the labels
+     go (each input keeps an aria-label and a placeholder) and the contact shares a row with JOIN */
+  /* 22.5vw: the title's box is 33.6vw tall and its letters end two thirds of the way down it */
+  .wl { right: 12px; left: 12px; width: auto; top: 22.5vw; bottom: auto; gap: 5px; padding: 9px 12px 10px; }
+  .wl h2 { font-size: 15px; }
+  .wl .sub { display: none; }
+  .wl form { grid-template-columns: minmax(0, 1fr) auto; gap: 5px; }
+  .wl label { font-size: 0; gap: 0; }
+  .wl label:first-child { grid-column: 1 / -1; }
+  .wl input { font-size: 14px; padding: 6px 8px; }
+  .wl .go { font-size: 12px; padding: 6px 10px; align-self: end; }
+  .wl .msg { grid-column: 1 / -1; font-size: 13px; }
+  .wl .msg.good { font-size: 12px; }
+  .wl .x { top: 6px; right: 6px; padding: 5px 6px; }
 }
 </style>
 </head>
@@ -288,11 +340,13 @@ h1 { margin: 0; font-family: var(--display); font-weight: 400; font-size: clamp(
 <header>
   <div class="brand"><i></i>RARE FIENDS</div>
   <span class="sp"></span>
+  <a class="btn play" id="play" href="base.html?pace=demo&amp;demo=1" hidden title="Play the game in demo mode">DEMO</a>
   <button class="btn theme" id="theme" type="button" aria-label="switch between light and dark"></button>
   <button class="btn burger" id="burger" type="button" aria-expanded="false" aria-controls="menu" aria-label="menu"></button>
   <nav class="menu" id="menu" hidden>
     <a class="btn" href="faq.html">FAQ</a>
     <a class="btn" href="#" data-apply>APPLY</a>
+    <a class="btn" href="#" id="wlOpen" hidden>JOIN THE WHITELIST</a>
     <a class="btn" href="bridge.html">BRIDGE YOUR DOOPIES</a>
     <button class="btn wallet" id="wallet" type="button">CONNECT</button>
   </nav>
@@ -369,6 +423,24 @@ h1 { margin: 0; font-family: var(--display); font-weight: 400; font-size: clamp(
       </section>
     </div>
   </div>
+  <section class="wl" id="wl" aria-labelledby="wlTitle" hidden>
+    <button class="btn x" id="wlShut" type="button" aria-label="close the whitelist"></button>
+    <h2 id="wlTitle">JOIN THE WHITELIST HERE</h2>
+    <p class="sub">Leave the Robinhood Chain wallet you will play from. We never show the list to anyone.</p>
+    <form id="wlForm" novalidate>
+      <label>ROBINHOOD CHAIN WALLET
+        <input name="address" id="wlAddr" aria-label="your Robinhood Chain wallet address" placeholder="0x…" maxlength="42"
+               autocomplete="off" autocapitalize="off" spellcheck="false" required>
+      </label>
+      <label class="c"><span>X HANDLE OR EMAIL <i>· OPTIONAL</i></span>
+        <input name="contact" id="wlContact" aria-label="your X handle or email, optional" placeholder="@handle or email (optional)"
+               maxlength="120" autocomplete="off" autocapitalize="off" spellcheck="false">
+      </label>
+      <label class="trap" aria-hidden="true"><span>Website</span><input name="website" tabindex="-1" autocomplete="off"></label>
+      <button class="btn go" id="wlGo" type="submit">JOIN</button>
+      <p class="msg" id="wlMsg" role="status" aria-live="polite"></p>
+    </form>
+  </section>
   <div class="demo" id="demo" role="group" aria-label="demo controls" hidden>
     <span>DEMO · GAME</span>
     <button type="button" data-era="none" aria-pressed="true">NOT STARTED</button>
@@ -507,6 +579,59 @@ h1 { margin: 0; font-family: var(--display); font-weight: 400; font-size: clamp(
         })
         .catch(() => say('That did not send. Try again, or DM @rarefiends.'))
         .finally(() => { send.disabled = false; send.textContent = 'SEND'; });
+    });
+  })();
+
+  // THE APP SWITCH (see the rf-app meta in <head>): the DEMO button and the whitelist exist only where the game and
+  // our API are served beside this page - Server 1, where deploy-test.sh writes "on", and localhost.
+  const APP = (document.querySelector('meta[name="rf-app"]') || {}).content === 'on'
+    || /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
+  if (APP) $('play').hidden = false;
+
+  // JOIN THE WHITELIST HERE. The address is checked here for shape, and again by the server, which is the one that
+  // counts (serve.py whitelist_post). Closing the card is remembered in localStorage; the menu brings it back.
+  (function whitelist() {
+    if (!APP) return;
+    const card = $('wl'), form = $('wlForm'), addr = $('wlAddr'), contact = $('wlContact'), go = $('wlGo'), msg = $('wlMsg');
+    const KEY = 'rf-wl-shut';
+    const shut = () => { try { return localStorage.getItem(KEY) === '1'; } catch (_) { return false; } };
+    const remember = (v) => { try { v ? localStorage.setItem(KEY, '1') : localStorage.removeItem(KEY); } catch (_) {} };
+    $('wlShut').innerHTML = CLOSE;
+    card.hidden = shut();
+    $('wlOpen').hidden = false;
+    $('wlShut').onclick = () => { card.hidden = true; remember(true); };
+    $('wlOpen').addEventListener('click', (e) => { e.preventDefault(); setMenu(false); remember(false); card.hidden = false; addr.focus(); });
+    const ADDR = /^0x[0-9a-fA-F]{40}$/, X = /^@?[A-Za-z0-9_]{1,15}$/, MAIL = /^[^@\s]{1,64}@[^@\s.]{1,63}(\.[^@\s.]{1,63})+$/;
+    const say = (t, kind) => { msg.textContent = t; msg.className = 'msg' + (kind ? ' ' + kind : ''); };
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const a = addr.value.trim(), c = contact.value.trim();
+      addr.removeAttribute('aria-invalid'); contact.removeAttribute('aria-invalid');
+      if (!ADDR.test(a) || /^0x0{40}$/i.test(a)) {
+        addr.setAttribute('aria-invalid', 'true'); addr.focus();
+        say('Not a wallet address: 0x and 40 hex characters.', 'bad'); refuse(go); return;
+      }
+      if (c && !(c.length <= 120 && (X.test(c) || MAIL.test(c)))) {
+        contact.setAttribute('aria-invalid', 'true'); contact.focus();
+        say('Leave an X @handle, an email, or nothing.', 'bad'); refuse(go); return;
+      }
+      go.disabled = true; go.textContent = 'SENDING'; say('');
+      const body = { address: a, contact: c, website: form.elements.website.value };
+      fetch('/api/whitelist', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+        .then((r) => r.json().catch(() => ({ ok: false })).then((j) => ({ r, j })))
+        .then(({ r, j }) => {
+          if (r.ok && j.ok) {
+            say('ON THE LIST: ' + a.slice(0, 6) + '…' + a.slice(-4), 'good');
+            addr.value = ''; contact.value = '';
+            return;
+          }
+          if (r.status === 400 && j.error) { addr.setAttribute('aria-invalid', 'true'); say('Refused: ' + j.error + '.', 'bad'); }
+          else if (r.status === 429) say('Too many tries from here. Wait a few minutes.', 'bad');
+          else say('That did not go through. Try again, or DM @rarefiends.', 'bad');
+          refuse(go);
+        })
+        .catch(() => { say('That did not go through. Try again, or DM @rarefiends.', 'bad'); refuse(go); })
+        .finally(() => { go.disabled = false; go.textContent = 'JOIN'; });
     });
   })();
 

@@ -63,7 +63,8 @@ space. Generations `0x14c49e6118f46525de9ab41a51cbaa3c6ebf181d`, Genesis
 `0x116eaa62241751e0c98da43d458600c6c17cd361`, and `ShadowFriends` once it is deployed. The collection
 must be explicit.
 
-1.3 **Genesis never fields a unit.** Combat: *"It still never fights."* Reject it at the boundary.
+1.3 **Genesis never fields a unit.** Combat: *"It still never fights."* Reject it at the boundary. **Since §71.4 it can
+be a TARGET** (M13 item 3: touched only once every Friend is down) through `Setup.genesis`, never as a fighting unit.
 
 1.4 **A shadow cannot field a unit yet.** `ShadowFriends` has no generation and DESIGN question 13 —
 *what is a shadow in the game, and how is its generation set* — is open. There is nothing to read, so
@@ -380,16 +381,18 @@ the array at all. He does not choose it, he does not know something about it the
 is the only party who benefits from it being wrong. It is the defender's property described by the
 attacker.
 
-**Cost.** `MAX_WALLS` is 16 and a section is `int16, int16, bool` — 33 bits, so sixteen of them pack
+**Cost.** ~~`MAX_WALLS` is 16 and~~ a section is `int16, int16, bool` — 33 bits, so sixteen of them pack
 into three words: **three cold `SLOAD`s, 6,300 gas, 0.31% of `fightAvg`**. Arithmetic, not a
-measurement. **It changes nothing.**
+measurement. **It changes nothing.** (A read grows by one cold `SLOAD` per ~7 sections now there is no cap.)
 
 **Reverts.** Nothing reverts, because nothing is supplied — the absence of the parameter is the guard.
-`TooManyWalls()` stays at `RareCombat.sol:136` as the last line of defence for a base with more than 16
-finished sections, and note that it becomes **reachable by ordinary play** the moment walls are read
-rather than supplied: a player can build a seventeenth. **How a fight handles a base with more than 16
-wall sections is not decided and this file does not decide it** — the cap exists to bound gas, and
-which 16 are fought, or whether the cap rises, is the deployer's.
+~~`TooManyWalls()` stays at `RareCombat.sol:136` as the last line of defence for a base with more than 16
+finished sections~~ **DECIDED by the deployer, 2026-10-01: there is no limit on wall sections** — *"there
+should be no limit .. if they can attack then they should be allowed to. it incentivizes players to secure
+their bases better."* `MAX_WALLS` and `TooManyWalls()` are gone from `RareCombat.sol` and `combat.js`, and
+every finished section is fought. The cost is gas, which grows with sections (the per-step wall test is a
+linear scan) — `paritycheck.js` prints 27- and 60-section rungs against the 32,000,000 ceiling; in v1 no
+fight is settled on chain, so it bounds nothing that runs.
 
 ### 10.3 `S.entry` — a real choice, and everything about it derived from it
 
@@ -671,8 +674,8 @@ Short, and none of it is a number this specification may pick:
    player pays, not who funds the dice.
 4. **The gap, and whether the attacker chooses it.** §10.3.3. A real tactical lever with no decided
    value and three mockup buttons.
-5. **A base with more than 16 finished wall sections.** §10.2. `MAX_WALLS` becomes reachable by ordinary
-   play the moment the list is read instead of supplied.
+5. ~~**A base with more than 16 finished wall sections.**~~ **DECIDED 2026-10-01: no limit** (§10.2).
+   `MAX_WALLS` and `TooManyWalls()` are removed.
 6. **Who opens the sealed orders, and what a fight that is never opened does.** §11.7. DESIGN names the
    problem and assigns it to M20; the ordering rule needs an answer, not a preference.
 7. **Whether a rented Friend defends, and whose ownership check it passes.** §12, last row.
@@ -1660,8 +1663,10 @@ Lines 142–150. The only member that could reach outward is `_burn`, and it doe
   skips its whole body and writes `_tokenApprovals[tokenId] = to`. No call.
 - **This contract's own `_update` override** (lines 266–270) adds `_ownerOf`, a comparison, the `Soulbound`
   revert and `super._update`. No call. And note it lets a burn through deliberately — `to == address(0)`
-  fails the `to != address(0)` half of its condition — which is the *"Burning it (giving it up) is
-  allowed"* of the contract's own header comment.
+  fails the `to != address(0)` half of its condition — so that `revoke` can burn. ~~which is the *"Burning
+  it (giving it up) is allowed"* of the contract's own header comment.~~ **That header sentence was false
+  and is corrected (DESIGN ruling 82, M21 item 13):** there is no public `burn`, `revoke` is the only caller
+  of `_burn`, and a player gives a shadow up by moving or selling the Doopie on Solana.
 
 **So `revoke` makes no external call at all, on any path.** Same conclusion as `recheck`, by a longer
 route.
@@ -3955,7 +3960,8 @@ by rejection: that needs a transaction, and this was read-only. The RPC's own `e
 Metered on 4663, settling one fight — the fight **plus** writing the result **plus** the event — using a
 stand-in settlement contract compiled from an in-memory source that imports the real `RareCombat.sol`.
 **No `.sol` file in this directory was created or changed.** Median of five Entropy words, both sides the
-same generation, twelve a side capped by `MAX_SIDE`, walls capped by `MAX_WALLS = 16`:
+same generation, twelve a side capped by `MAX_SIDE`, walls capped by `MAX_WALLS = 16` (the wall cap was removed
+2026-10-01 - no limit, deployer's ruling; the figures below were metered while it stood):
 
 | Line-up | gen 1 both sides | gen 6 both sides |
 | --- | --- | --- |
@@ -5563,3 +5569,256 @@ mints one unit, and 7 rows go red: the supply moved in every step after it.
 **What the fake world is not.** It is not gas or prices, since anvil is not Arbitrum. It is not Pyth, whose word
 here is not random. It is not the real Genesis or Friends collections: MockGenesis has an open mint. Pages that read
 those collections from chain find nothing on an unforked anvil.
+
+## 70. M20 item 1 - `ShadowFriends` re-judged against the schema, now that the schema has a row for it (2026-10-01)
+
+§64.2 left `ShadowFriends` *"cannot be judged against the schema, because the schema has no row for it"*.
+The rows exist now, written from the contract as it stands and not the other way round: **`shadow`** (one live
+shadow, `struct Shadow` plus its key and its ERC-721 owner), **`shadowClaim`** (what the attestor signs,
+`struct Claim`) and **`shadowFriends`** (the contract's own state: `attestor`, `SET_ATTESTOR`, `roles`,
+`CLAIM_TTL`, `MAX_TRAITS`, and the per-mint `shadowed` and `revokedAt`). `schemacheck` holds all three to the
+file: both structs field for field and in order; every field the contract holds outside a struct by the exact
+line that holds it (`beside`, 12 lines grepped); and the Claim's `CLAIM_TYPEHASH` type string, its struct and
+its schema row to one order. Breaking any of the four goes red - shown in the commit that added them.
+
+**The judgement: the contract matches its own rows, and it is consistent with the rest of the schema on
+ownership, guards and the whitelist. It is NOT yet fieldable under the schema, and that is a schema gap, not a
+contract defect. One comment in it is false, and it is permanent once deployed.**
+
+| Against | Finding |
+| --- | --- |
+| `shadow`, `shadowClaim`, `shadowFriends` | **Match**, by construction and by check. The raw mint key is the token id, never a hash; the owner is the claim's `to` and is soulbound; the traits are bounded, non-empty and unique; `checkedAt` is the recheck state and `revokedAt` the revoke state, which outlives the shadow |
+| Every setter guarded (DESIGN) | **Holds.** `setAttestor`: `SET_ATTESTOR` in `RareRoles` (ruling 60, §68). `recheck` and `revoke`: `msg.sender == attestor`. `claim`: the attestor's EIP-712 signature, `to == msg.sender`, and the whitelist first. Nothing else writes |
+| `roles.whitelisted` (ruling 21) | **Holds.** `claim` asks `requireAllowed` before any argument check; `recheck` and `revoke` do not ask, so closing the gate never strands a revoke - the §26 rule |
+| Ruling 54, the 1/1 terminal's cut | **Holds.** The cut goes to *"whoever holds the 1/1's shadow on 4663"*, which is `ownerOf` - `shadow.owner`, fixed for the shadow's life |
+| `friend.gen` and `rosterRow.gen` - *"READ from generation(tokenId)"* | **Gap, the schema's.** A shadow is a Doopie, not a Generation (ruling 35), and `ShadowFriends` has no `generation()`. A 1/1 fights in slot 0 at strength 1140 (ruling 55), and the only on-chain way to know it is a 1/1 is `RareDoopieGate.isOneOfOne`, reading the attested `Evolution` trait. So `rosterRow` as written cannot hold a shadow: its `gen` names a read that does not exist for one. **Owed in the schema:** say that a row whose collection is `ShadowFriends` takes slot 0 iff `isOneOfOne`, and say what a non-1/1 Doopie is in a fight - which ruling 55 left open (*a Doopie's weapon in a full fight*). Not invented here |
+| `shadow.checkedAt` | **Nothing reads it.** The hourly recheck (ruling 16) writes it, but no contract refuses a shadow whose check has lapsed, so an attestor that stops running leaves every shadow playable until it comes back and revokes. Whether a lapsed check should bar a shadow is decided nowhere. Recorded, not chosen |
+| `shadow.name` | **The one unbounded write.** Every array `claim` copies is bounded by the format so `revoke` can always clear it (the contract's own comment). `name` is not: its bound is whatever the attestor signs. `attestor.mjs` reads it as a `u32`-length string off the Solana asset and signs it as read (`String(meta.name || asset.name || '')`, line 340), with no cap of its own; the asset's own account size is the practical bound. A name long enough would make `revoke`'s `delete` expensive; the attestor, not the contract, is what stops it today |
+| **The header comment, line 19** - *"Burning it (giving it up) is allowed."* | **False, and permanent once published.** There is no public `burn`: OpenZeppelin 5.5's `ERC721` exposes `_burn` only as `internal`, `ERC721Burnable` is not inherited, and the only caller of `_burn` is the attestor's `revoke`. `_update` *permits* a burn, which is what line 385 says and is true; a holder has no way to reach it. **Two ways out, and it is not this role's choice:** delete the sentence, or add an owner-only `burn` that does what `revoke` does (delete the row, free `shadowed`, burn) - a plain burn would leave `shadowed[mint]` true and the mint unclaimable for ever. The bridge engineer and the deployer decide whether a player may give a shadow up; either way the comment must match before M21 item 1 deploys, for the reason §B3.3 gives. **DECIDED, DESIGN ruling 82 (2026-10-01): no give-up function.** The player moves or sells the real Doopie on Solana, and the hourly re-check revokes the shadow, which drops everything it holds (ruling 41). The sentence is deleted and replaced with one saying so (`ShadowFriends.sol` lines 19-21, M21 item 13); the `_update` comment, now line 387, names `revoke` as the only burn. No function was added or removed |
+
+**What did not change:** `ShadowFriends.sol` was not edited (another chain engineer holds the `.sol` files).
+§64.2's row for it is superseded by this section.
+
+**And §64.4's owed line is paid:** `schema.json` now has a **`switch`** entity and a **`switchSet`** event,
+specified from §64.4 and marked `notBuilt`. `schemacheck` holds that both ways - the day `RareRoles.sol`
+declares `requireSwitchOn`, it goes red until the row says what was built. One point §64.4 left open is
+specified in the row: **the switch's key and the power that flips it are the same word**,
+`keccak256("rarefriends.switch." + name)`, and a per-collection switch names its collection in its name
+(`"collection." + lowercase hex address`). Whether a switch may change while a game runs stays the deployer's
+(`switch.heldWhileGameRuns`, undecided).
+
+## 71. Ruling 55 and M13 item 3 - a 1/1's strength, the trap roll, the terminal's terms, and the Genesis as a target (M17 items 10 and 11, 2026-10-01)
+
+Both engines changed together, so parity is proved in one place, the way the fight rules were (§63).
+
+70.1 **Slot 0 is a 1/1 Doopie's strength, 1140.** `values.js` line 46 is now `HP_OF = { 0: 1140, 1: 759, ... 6: 100 }`,
+marked DECIDED with ruling 55 cited. `Combat.rulesFrom` reads `E.hp[0]` into `R.hp[0]` and **refuses a table without
+it** rather than defaulting to 0, so `rulesHash` can never hash a missing 1/1 as zero. `rulesHash` already hashed
+index 0 of every table, so the encoding is unchanged; **the value is not**, so every `rulesHash` taken before this
+moves (none was ever committed - nothing is deployed). `RareCombat.Rules.hp` is still `uint32[7]`; index 0 is no
+longer unused. **A 1/1 has no weapon** (ruling 55 left that open), so slot 0 is read only by the trap: `_gen` still
+allows 1 to 6 in a full fight, and `combat.js` `fight()` now refuses generation 0 (and anything outside 1 to 6) with a
+`RangeError`, where before it would have fought a weaponless unit the contract refused.
+
+70.2 **The trap roll lives in `RareCombat`**, beside the fight it is weighed like - which answers M17 item 11's *"which
+contract the trap roll lives in"*. `RareCombat.trapBps(R, victimGen)` = `hp[0] x 10000 / (hp[0] + hp[victimGen])`
+and `RareCombat.trap(R, victimGen, word, trapId)` = one `RareChance.roll(word, address(this), block.chainid,
+trapId, 0)`; the Doopie wins on `roll < bps`. `combat.js` `trapBps` / `trap(R, victimGen, { word, contract,
+chainId, trapId })` is the same line. Both are **internal library functions** (inlined, nothing to re-point, frozen
+exactly as the fight is); `RareCombatLab.trap` is the view wrapper for replay. **Nothing in the game calls either
+on chain**: a trap is a server-side fight in v1. The victim's strength is its generation's table value, as a shot
+reads it - nothing tracks a strength a trap has reduced, because how strength comes back is still open.
+
+70.3 **The terminal is a separate set of terms.** `duel.js` keeps `TERMS` 70 / 50 / 30 exactly (ruling 64, frozen at
+deploy) and gains `TERMINAL = { counterBps: 7000, sameBps: 7000, beatenBps: 5000, feeBps: 0 }`; `oddsBps` reads
+`beatenBps` when a set has one and `10000 - counterBps` otherwise, so the ordinary duel computes as before.
+`Duel.terminal(ctx, duelId, doopiePick, victimPick, stake)` settles with the Doopie as p1. `RareDuel` gains
+`terminalCounterBps / terminalSameBps / terminalBeatenBps` as stored state, opened at 7000 / 7000 / 5000 **in the
+constructor body, not as constructor arguments** - so `deploy.mjs` and the harnesses that deploy `RareDuel`
+positionally keep their argument lists - plus `terminalOddsBps(doopiePick, victimPick)` and
+`terminalRoll(word, id, doopiePick, victimPick)`: the same one roll `settle` takes, through the live dice, moving
+nothing. `setTerminalOdds` is guarded exactly like `setOdds`: `ROOT_POWER` first, then `requireNoGameRunning`,
+then each value within 10,000. `_odds` takes the beaten figure as an argument; `settle` and `oddsBps` pass
+`10000 - counterBps`, so a struck duel settles as it did. **No terminal duel escrows anything on chain**: its stake is
+a tenth of the smaller *purse*, crystals, which settle on our server in v1. **Whether the terminal's odds are
+tunable at all is not ruled**; the setter mirrors the ordinary odds' shape and is the deployer's to keep or drop.
+
+70.4 **The Genesis is a target, last (M13 item 3).** DESIGN: *"a Genesis can only be touched once every one of its
+Friends is eliminated"* and *"It still never fights."* Built in both engines as an optional
+`Setup.genesis = { present, x, y, hp }` (`combat.js`: `setup.genesis = { x, y, hp }`; absent = as before):
+- it is a unit on the defence's side, last in the line-up, that never takes a turn (`ready` is the maximum);
+- while any defending Friend lives, no attacker aims at it, and no crossbow bolt or catapult splash reaches it -
+  **judged once at the start of each shot**, so a stone that kills the last Friend does not splash the Genesis in the
+  same shot;
+- the attack wins (`WIPED`) only when every Friend **and** the Genesis are down; `Result.genesis` is its strength left;
+- a Genesis may stand alone (no Friends - nobody home) and is then the one target from the first turn;
+- a shot at it lands at `hp_a x 10000 / (hp_a + genesis.hp)`, the way a shot at a Friend does, and on-wall cover
+  applies to it as to any defender.
+
+**Its strength is the caller's and is not decided.** No figure for a Genesis's strength exists in DESIGN, so neither
+engine writes one: a setup that carries a Genesis must give `hp > 0` (`RangeError` / `InvalidGenesis`). The parity
+corpus uses fixtures spread over 100 to 2,000 to exercise the formula, labelled as such. **The readings above - the
+Genesis's own strength, that a shot at it is weighed like a shot at a Friend, that a splash is judged before it
+lands - are this lane's, not rulings**, and are listed for the design steward in §71.7. `setupHash` and
+`resultHash` append `(1, x, y, hp)` and `(1, hp left)` **only when a Genesis is present**, so a fight without one
+hashes exactly as before. §1.3 still holds in its sense - the Genesis never fields a fighting unit.
+
+`index.html` already gives the Genesis actor `gen: 0` (line 1486). Slot 0 is now a 1/1's 1140, so **anything that
+feeds that actor to the fight as a generation would give the Genesis a Doopie's strength**. Nothing does today
+(`Record.defense` fields the roster only), and `fight()` refuses generation 0 anyway.
+
+70.5 **What a sprung trap does - the outcome, and a spec for `record.js` MOVES (M13's file, not edited here).**
+`Combat.trapStakes(disguise, doopieWins, tenth)` returns ruling 55's table as fractions; `tenth` has **no default**,
+because the size of *a tenth* is open. Applying it to two bases needs one server-applied move:
+
+`{ k: 'trap', trapId, disguise: 'tile'|'tree'|'crystalBed', doopie: { token, base }, victim: { r, base, gen },
+word, roll, bps, doopieWins }` - the roll is re-derived by `Combat.trap(R, gen, { word, contract, chainId, trapId })`
+and the move is refused if `roll`, `bps` or `doopieWins` differ. Effects:
+- **crystal bed:** the Doopie wins - the victim's base loses `floor(carried x tenth)` of what that Friend carries
+  (whole hundredths), credited to the Doopie owner's base; it loses - the Doopie owner's base pays half of that
+  figure to the victim's base. *Credited to the other side* is a reading: ruling 55 says the victim "loses" and the
+  victim learns "what it took";
+- **tree:** the Doopie wins - the victim Friend's strength falls by half of what remains; it loses - the Doopie's falls
+  by a quarter. **The roster row has no strength field today**: this needs `rosterRow.strength` (schema.json, not
+  edited here), and how it returns is open;
+- **tile:** the Doopie wins - the victim's roster row is out of the game, not gone for good (ruling 53): marked out,
+  not deleted; it loses - the Doopie's strength halves and it stays in;
+- **terminal:** a duel, not this move: each side stakes `tenth` of the smaller of the two base purses, under
+  `Duel.TERMINAL`, and the winner takes both.
+Every field above is what the victim is told (ruling 55: *everything*). If the trap is to be published like a fight
+(M13 item 7), the natural preimage is `keccak256(abi.encode(fightLog, chainid, gameId, trapId, word, rulesHash,
+victimGen, disguiseIndex, roll, bps, doopieWins))` - **recommended, not built**.
+
+70.6 **Proof (`npm run check`, 51 ok, 0 FAIL).** The corpus gains 24 Genesis line-ups (four with nobody home): **468
+fights**, all field for field. New assertions, each broken once and seen red:
+- *the Genesis is the last thing standing* - over 48 Genesis fights no shot, bolt or splash touches it while a Friend
+  stands, it is shot at once they are down, and every win leaves it at 0 (broken: shield off in `combat.js` - 1,231
+  early touches, and parity red);
+- *nobody home* - 8 of 8 wiped with the Genesis at 0 (broken: the result reports its full strength - 0 of 8);
+- generation 0 refused in a full fight by both engines, and a Genesis with no strength (broken: `InvalidGenesis`
+  removed - the contract lands it);
+- slot 0 is 1140 and the trap's odds are the ruling's 6003 / 6925 / 7718 / 8351 / 8837 / 9193 in both (broken:
+  1141 - the odds move by one or two points);
+- the trap roll matches on 240 of 240 (broken: play id 1 in Solidity - 0 of 240);
+- `rulesHash` moves with slot 0 (broken: hash from index 1 - same hash);
+- the terminal's terms on chain equal `duel.js TERMINAL`, 70 / 70 / 50 on all nine pairs, 63.3% across them, with the
+  ordinary 70 / 50 / 30 beside it unchanged (broken: beaten 3000 on chain);
+- `terminalRoll` matches `Duel.terminal` on 36 of 36 (broken: play id 1 - 0 of 36).
+`test/fixcheck.js` part 15 adds `setTerminalOdds` to the running-game refusal and the stranger refusal (each broken
+by removing that guard and seen red), and a line proving the terminal set opened at 70/70/50, survived the ordinary
+odds moving, and is settable by root; the audited surface lists it (before it did, that line went red with
+*UNACCOUNTED: RareDuel.setTerminalOdds*). `fixcheck` 333 ok, 0 FAIL.
+
+**Gas.** The declared-maximum fight went from 63,274,860 to 65,202,386 (+3.0%) with no Genesis in it - the cost of the
+wider `Unit` and the shield test, which returns at once when there is no Genesis. Floors on the in-memory machine,
+as every figure in `gas.json`.
+
+70.7 **Owed outside this lane's lock - found, not fixed.**
+- `gencheck.js` (check writer) asserts *"the table is exactly generations 1 to 6"* and now fails on `0, 1, ... 6`;
+  `schemacheck.js` line 302 asserts *"`hp` and `weapons` are keyed by generations 1 to 6"* and fails the same way.
+  Both encode the pre-ruling-55 shape: the table is now 0 to 6 with 0 a 1/1, and `weapons` stays 1 to 6.
+- `schema.json`'s `rules.hp` (another chain engineer's file today) should say index 0 is a 1/1's strength.
+- `economy.html` line 389 still prints *"The Genesis is never a target and never fights"*.
+- `deployer.html` line 439 lists `base.ECON.hp`, which now shows slot 0.
+- The design steward: the three Genesis readings in §71.4 and the crystal-bed transfer reading in §71.5; whether the
+  terminal's odds are tunable (§71.3); and the Genesis's strength, which no row asks for yet.
+
+## 72. A wall's strength is its level's, in both engines (ruling 64, question 21 row 6; 2026-10-01)
+
+Ruling 64 decides building strength per level, a wall **400 / 800 / 1,600**. Both engines gave every section
+`Rules.wallHp`, 400, whatever its level.
+
+71.1 **Built.** `RareCombat.Wall` gains `uint32 hp`: the section's own strength, supplied by the caller from the wall
+kind's registry row (`RareRules` `strength[level - 1]`, which the fight is told and never reads). `0` means it carries
+none and `Rules.wallHp` applies - **the chain cannot tell absent from 0, so `combat.js` does not either**:
+`Combat.wallHpOf(R, w)` is `w.hp` when it is a positive integer and `R.wallHp` otherwise (a negative or fractional hp
+is a `RangeError`). `captureSetup` passes each section's hp through, and `captureFight`'s *"a capture fight harmed
+the base"* guard compares against each section's own starting hp. `setupHash` now carries each section as
+`(x, y, vert, hp or 0)` - the `Wall` struct as the chain sees it - so every `setupHash` of a fight with walls moves
+(none was ever committed).
+
+71.2 **`Rules.wallHp` is kept, not retired.** It is the fallback every fight in the game uses today, because
+`Record.defense` (record.js, M13's file) hands walls over as `{ x, y, vert, tile }` with no hp. **Owed to record.js:**
+each wall in `defense()` gains `hp: V.kinds.wall.strength[standingLevel(b) - 1]` (the registry row the ledger
+already holds the level for). Once every caller supplies it, `wallHp` can leave `Rules`, `rulesFrom` and `rulesHash`
+in one change, with parity re-run.
+
+71.3 **Proof (`npm run check`, 52 ok, 0 FAIL, 500 fights).** The corpus gains 16 levelled line-ups - a wall line
+across the north edge with each section at a level drawn from `values.js` `kinds.wall.strength`, a few loose
+sections, crews on the line in a quarter of them, and short-reach attackers from the north so walls are broken
+rather than shot over. One new assertion, read off `combat.js`'s log and proved in both engines: every section that
+stands ends at exactly its own hp less what landed on it, every one that falls took at least its own hp; a section
+at twice `wallHp` changes the fight in **both** engines on 6 of 6 words; and a section carrying `wallHp` explicitly
+fights exactly as one carrying nothing on 6 of 6. **Broken once:** with `F.whp[k] = R.wallHp` on chain the line goes
+red (0 of 6 doubled fights change in Solidity).
+
+**On this branch the registry row is still `[400, 400, 400]`** (7a9519b, with 400 / 800 / 1,600, is not merged here),
+so the levelled corpus is 400 throughout and **the parity line alone cannot see a per-wall hp** - the doubled-wall
+clause is what does, which is why it exists. **Run once with the ladder at 400 / 800 / 1,600** (the row as 7a9519b
+writes it, substituted for that run only and put back): 500 of 500 fights match, 6 sections fell and 220 stood
+exactly, 6 of 6 and 6 of 6. After the merge the corpus draws the real ladder with no edit here.
+
+**Gas.** The declared maximum is 65,210,666 (from 65,202,386): one more word per section.
+
+## 73. Ruling 74, M20 item 22 - no switch changes once a game has started (2026-10-01)
+
+The deployer: *"once it starts.. it's a no."* Demo mode (§26-§28), and every other on/off switch a game reads,
+refuses a change while a game runs - *No number changes under a running game*, widened from numbers to switches.
+The question asked is the one the numbers already ask: `RareRoles.requireNoGameRunning()`, which reads
+`RareGame.runningGames` (raised by `start`, lowered by `declare`). It is asked **after** the power check, so a
+stranger gets `PowerNotHeld` and learns nothing about the game. "Started" means `start`, not `create`: a game
+that is only Open freezes nothing, because it already holds its own demo bit from `create` (§28).
+
+### 73.1 What is frozen, counted off the contracts
+
+Every setter that takes a `bool`, and every public `bool` a verb reads, across the fourteen `.sol` files:
+
+| Setter | Contract | What reads it | Now |
+| --- | --- | --- | --- |
+| `setDemoMode` | `RareRoles` | `RareGame.create` (snapshotted into the game), `RareDuel.challenge` (live) | **refused while a game runs** |
+| `setWhitelistOpen` | `RareRoles` | every gated verb, through `requireAllowed` | **refused while a game runs** |
+| `setGame` | `RareRoles` | every freeze - the pointer `requireNoGameRunning` reads | **refused while a game runs** |
+| `setTradeable` | `RareMarket` | `list`, `buy`, `offer`, `acceptOffer` and the two terminal routes | **NOT TOUCHED** - see 73.3 |
+
+`setGame` is not a switch, but it is the switch for every freeze: re-pointing it at any contract that answers
+`runningGames() == 0` would thaw every number and every switch in one transaction, from root, with only a
+`GameSet` in the log. Before this section that door was open. Part 15 of `test/fixcheck.js` calls `setGame`
+while a game runs on a registry whose `game` is still zero, which the guard allows - zero running is the honest
+answer then - so nothing above part 23 moved.
+
+`RareRules.frozen`, `RareMarket.terminalAuthUsed` and `ShadowFriends.shadowed` are one-way records, not
+switches. `RareGame`, `RareDuel`, `RareOrders`, `RarePartners`, `RareFightLog`, `RareDoopieGate`, `RareDice`,
+`RareRefund`, `RareChance` and `RareCombat` hold no on/off switch. **The collection switches have no contract.**
+*A collection on or off* (M4 item 7) is still a typed web address in the game, and the only per-collection
+switch on chain is `RareMarket.tradeable`, which is the trading switch.
+
+### 73.2 Not a brick, and the price
+
+§26.5's brick is a guard on demo mode that only `setDemoMode` could lift. This is not that: the guard is a
+count, and every running game has an end root can always reach - `RareGame.declare` needs `DECLARE_PLACINGS`,
+which root holds. The price, stated so it is not discovered in an emergency: **demo mode can no longer be
+thrown ON as a brake while a game is running**, and the launch whitelist cannot be opened or closed mid-game.
+Both were possible before. The ruling says so; this records that the code now agrees.
+
+### 73.3 What is NOT built, and why
+
+- **`RareMarket.setTradeable`** - one marketplace switch serves every game at once, and the marketplace is
+  decided not to be part of a game. Whether *frozen* means "cannot change while any game is running" or "each
+  game keeps its own copy" is *Switches frozen: the marketplace's switches* in DESIGN's *Still open*,
+  unanswered. Not guessed.
+- **The allowlist and whitelist entries** (`setAllowed`, `setWhitelisted`) are per-address lists, not on/off
+  switches, and `setAllowed` is "needed daily during a test" (its own NatSpec). Whether ruling 74 reaches them
+  is not asked; they are left as they were.
+
+### 73.4 The proof - `test/fixcheck.js` part 23, five assertions, each guard broken once
+
+A fresh `RareRoles` and `RareGame`, so nothing above can leave a game running under it. Before any game, root
+flips both switches each way and `setGame` points the guard. With a game created and joined but not started,
+both still flip. Once it starts: `setDemoMode`, `setWhitelistOpen` and `setGame` each answer `GameRunning` from
+root, the same-value call too, and all three getters read back unchanged; a stranger gets `PowerNotHeld`.
+Declared, `runningGames` is 0 and both flip again.
+
+Removing each `requireNoGameRunning()` line in turn - three mutants - turns part 23's third assertion red every
+time (`setDemoMode: MOVED`, `setWhitelistOpen: MOVED`, `setGame: MOVED` respectively), one failure each and
+nothing else.
+

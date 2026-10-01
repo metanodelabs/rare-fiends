@@ -16,7 +16,9 @@ import { IRareRoles } from "./RareRoles.sol";
 /// the wallet it names. The same attestor revokes a shadow when a re-check finds the NFT has moved on.
 ///
 /// A shadow cannot be sold or sent on: it is bound to the wallet that claimed it, so nobody can buy their way
-/// into a game they do not own the NFT for. Burning it (giving it up) is allowed.
+/// into a game they do not own the NFT for. Its holder cannot burn it or give it up here either: there is no
+/// public burn, and the only way a shadow ends is the attestor's `revoke`. To give one up, the player moves or
+/// sells the real Doopie on Solana; the next re-check finds it gone and revokes (DESIGN.md rulings 82 and 41).
 contract ShadowFriends is ERC721, EIP712 {
     using Strings for uint256;
 
@@ -382,7 +384,7 @@ contract ShadowFriends is ERC721, EIP712 {
         return keccak256(bytes.concat(head, tail));
     }
 
-    /// @dev bound to its wallet: minting and burning are allowed, passing it on is not
+    /// @dev bound to its wallet: minting (`claim`) and burning (`revoke`, attestor only) pass, passing it on does not
     function _update(address to, uint256 tokenId, address auth) internal override returns (address) {
         address from = _ownerOf(tokenId);
         if (from != address(0) && to != address(0)) revert Soulbound();

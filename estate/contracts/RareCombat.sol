@@ -11,7 +11,6 @@ import { RareChance } from "./RareChance.sol";
 /// defenders, in line-up order.
 library RareCombat {
     uint256 internal constant MAX_SIDE = 12;
-    uint256 internal constant MAX_WALLS = 16;
     uint256 private constant NONE = type(uint256).max;
 
     uint8 internal constant WIPED = 0;      // every defender down: the attack wins
@@ -27,9 +26,14 @@ library RareCombat {
 
     error InvalidSide();
     error InvalidGeneration();
-    error TooManyWalls();
+    /// @notice a Genesis in the fight with no strength: no figure is decided, so the caller must give one
+    error InvalidGenesis();
+    /// @notice the trap needs slot 0 of `hp`, a 1/1 Doopie's strength (ruling 55)
+    error NoDoopieStrength();
 
-    /// @dev Indexed by generation, 1 to 6 (index 0 unused). Reaches and areas are in spots; times in ms.
+    /// @dev Indexed by generation, 1 to 6. Index 0 of `hp` is a 1/1 Doopie's strength, 1140 (ruling 55), read only by
+    /// `trap`: a 1/1 has no weapon (still open), so `_gen` keeps generation 0 out of a full fight, and index 0 of
+    /// every other table is unused. Reaches and areas are in spots; times in ms.
     struct Rules {
         uint32[7] hp;
         uint32[7] dmg;
@@ -40,7 +44,7 @@ library RareCombat {
         bool[7] pierce;
         uint32[7] area;
         uint32[7] vsBuilding;
-        uint32 wallHp;
+        uint32 wallHp;       // a section that carries no hp of its own (Wall.hp 0): the level-1 figure
         uint32 landVsBuildingBps;
         uint32 towerReach;
         uint32 dropReach;
@@ -60,11 +64,14 @@ library RareCombat {
         int16 fy;
     }
 
-    /// @dev a wall section covers spots (x, y) and (x + 1, y), or (x, y + 1) when `vert`
+    /// @dev a wall section covers spots (x, y) and (x + 1, y), or (x, y + 1) when `vert`. `hp` is the section's own
+    /// strength - its kind's registry row (`RareRules` `strength[level - 1]`; ruling 64: 400 / 800 / 1,600 by level).
+    /// 0 means it carries none and `Rules.wallHp` applies, which is every wall before this field existed.
     struct Wall {
         int16 x;
         int16 y;
         bool vert;
+        uint32 hp;
     }
 
     /// @dev attacker i starts at (x, y) + (ax, ay) × off(i), off = 0, 1, -1, 2, -2 …
@@ -75,11 +82,21 @@ library RareCombat {
         int16 ay;
     }
 
+    /// @dev the Genesis (M13 item 3): touched only once every defending Friend is down, and it never fights.
+    /// `present` false is a fight without one, exactly as before. `hp` is its strength, the caller's: undecided.
+    struct Genesis {
+        bool present;
+        int16 x;
+        int16 y;
+        uint32 hp;
+    }
+
     struct Setup {
         uint8[] attackers;
         Entry entry;
         Defender[] defenders;
         Wall[] walls;
+        Genesis genesis;
     }
 
     struct Result {
@@ -92,6 +109,7 @@ library RareCombat {
         uint32[] attackers;  // hit points left
         uint32[] defenders;
         uint32[] walls;
+        uint32 genesis;      // the Genesis's strength left; 0 when the setup had none (read `present` beside it)
     }
 
     struct Unit {
@@ -108,6 +126,7 @@ library RareCombat {
         int256 hy;
         int256 fx;           // where it falls back to
         int256 fy;
+        bool genesis;        // the Genesis: never acts, shielded while a defending Friend lives
     }
 
     /// @dev the state of one fight, kept in memory so each turn can be its own function
@@ -123,6 +142,7 @@ library RareCombat {
         uint32 rolls;
         bytes32 word;
         uint256 fightId;
+        uint32 genesisHp;    // the Genesis's full strength, what a shot at it is weighed against
     }
 
     function fight(Rules memory R, Setup memory S, bytes32 word, uint256 fightId)
@@ -132,36 +152,10 @@ library RareCombat {
     {
         uint256 na = S.attackers.length;
         uint256 nd = S.defenders.length;
-        if (na == 0 || nd == 0 || na > MAX_SIDE || nd > MAX_SIDE) revert InvalidSide();
-        uint256 nw = S.walls.length;
-        if (nw > MAX_WALLS) revert TooManyWalls();
-        Field memory F;
-        F.u = new Unit[](na + nd);
-        F.wx = new int256[](nw);
-        F.wy = new int256[](nw);
-        F.wv = new bool[](nw);
-        F.whp = new uint32[](nw);
-        F.word = word;
-        F.fightId = fightId;
-        for (uint256 i; i < na; ++i) {
-            uint8 g = _gen(S.attackers[i]);
-            int256 o = i % 2 == 1 ? int256((i + 1) / 2) : -int256(i / 2);
-            int256 ax = int256(S.entry.x) + int256(S.entry.ax) * o;
-            int256 ay = int256(S.entry.y) + int256(S.entry.ay) * o;
-            F.u[i] = Unit(g, true, false, ax, ay, R.hp[g], 0, NONE, HOLD, ax, ay, ax, ay);
-        }
-        for (uint256 i; i < nd; ++i) {
-            Defender memory d = S.defenders[i];
-            uint8 g = _gen(d.gen);
-            F.u[na + i] = Unit(g, false, d.tower && !R.siege[g], int256(d.x), int256(d.y), R.hp[g], 0, NONE,
-                d.order, int256(d.x), int256(d.y), int256(d.fx), int256(d.fy));
-        }
-        for (uint256 k; k < nw; ++k) {
-            F.wx[k] = int256(S.walls[k].x);
-            F.wy[k] = int256(S.walls[k].y);
-            F.wv[k] = S.walls[k].vert;
-            F.whp[k] = R.wallHp;
-        }
+        if (S.genesis.present && S.genesis.hp == 0) revert InvalidGenesis();
+        if (na == 0 || (nd == 0 && !S.genesis.present) || na > MAX_SIDE || nd > MAX_SIDE) revert InvalidSide();
+        // no limit on wall sections (deployer, 2026-10-01): every finished section is fought; gas grows with them
+        Field memory F = _field(R, S, word, fightId);
         for (;;) {
             if (!_alive(F.u, false)) { res.reason = WIPED; break; }
             if (!_alive(F.u, true)) { res.reason = REPELLED; break; }
@@ -179,7 +173,74 @@ library RareCombat {
         res.defenders = new uint32[](nd);
         for (uint256 i; i < na; ++i) res.attackers[i] = F.u[i].hp;
         for (uint256 i; i < nd; ++i) res.defenders[i] = F.u[na + i].hp;
+        if (S.genesis.present) res.genesis = F.u[na + nd].hp;
         res.walls = F.whp;
+    }
+
+    /// @dev the field at the first turn: every Friend on its spot, the Genesis if there is one, every wall whole
+    function _field(Rules memory R, Setup memory S, bytes32 word, uint256 fightId) private pure returns (Field memory F) {
+        uint256 na = S.attackers.length;
+        uint256 nd = S.defenders.length;
+        uint256 nw = S.walls.length;
+        F.u = new Unit[](na + nd + (S.genesis.present ? 1 : 0));
+        F.wx = new int256[](nw);
+        F.wy = new int256[](nw);
+        F.wv = new bool[](nw);
+        F.whp = new uint32[](nw);
+        F.word = word;
+        F.fightId = fightId;
+        for (uint256 i; i < na; ++i) F.u[i] = _attacker(R, S, i);
+        for (uint256 i; i < nd; ++i) F.u[na + i] = _defender(R, S.defenders[i]);
+        if (S.genesis.present) {   // last in the line-up, never ready: it never fights
+            int256 gx = int256(S.genesis.x);
+            int256 gy = int256(S.genesis.y);
+            Unit memory gu = _unit(0, false, false, gx, gy, S.genesis.hp, HOLD, gx, gy);
+            gu.ready = type(uint32).max;
+            gu.genesis = true;
+            F.u[na + nd] = gu;
+            F.genesisHp = S.genesis.hp;
+        }
+        for (uint256 k; k < nw; ++k) {
+            F.wx[k] = int256(S.walls[k].x);
+            F.wy[k] = int256(S.walls[k].y);
+            F.wv[k] = S.walls[k].vert;
+            F.whp[k] = S.walls[k].hp != 0 ? S.walls[k].hp : R.wallHp;
+        }
+    }
+
+    /// @dev attacker i at entry + along x off(i), off = 0, 1, -1, 2, -2 ...
+    function _attacker(Rules memory R, Setup memory S, uint256 i) private pure returns (Unit memory) {
+        uint8 g = _gen(S.attackers[i]);
+        int256 o = i % 2 == 1 ? int256((i + 1) / 2) : -int256(i / 2);
+        int256 ax = int256(S.entry.x) + int256(S.entry.ax) * o;
+        int256 ay = int256(S.entry.y) + int256(S.entry.ay) * o;
+        return _unit(g, true, false, ax, ay, R.hp[g], HOLD, ax, ay);
+    }
+
+    /// @dev a defender on its post, up its tower unless it carries a catapult
+    function _defender(Rules memory R, Defender memory d) private pure returns (Unit memory) {
+        uint8 g = _gen(d.gen);
+        return _unit(g, false, d.tower && !R.siege[g], int256(d.x), int256(d.y), R.hp[g], d.order, int256(d.fx), int256(d.fy));
+    }
+
+    /// @dev a unit on its post (hx, hy) = (x, y), ready at 0, breaking no wall
+    function _unit(uint8 g, bool att, bool tower, int256 x, int256 y, uint32 hp, uint8 order, int256 fx, int256 fy)
+        private
+        pure
+        returns (Unit memory v)
+    {
+        v.gen = g;
+        v.att = att;
+        v.tower = tower;
+        v.x = x;
+        v.y = y;
+        v.hp = hp;
+        v.wall = NONE;
+        v.order = order;
+        v.hx = x;
+        v.hy = y;
+        v.fx = fx;
+        v.fy = fy;
     }
 
     /// @dev one Friend's turn: an attacker breaks a wall in its way, shoots, or steps; a defender shoots or waits
@@ -292,9 +353,11 @@ library RareCombat {
         if (atWall) {
             bps = R.landVsBuildingBps;
         } else {
-            bps = uint256(R.hp[u.gen]) * 10_000 / (uint256(R.hp[u.gen]) + R.hp[F.u[tgt].gen]);
+            uint256 str = F.u[tgt].genesis ? F.genesisHp : R.hp[F.u[tgt].gen];
+            bps = uint256(R.hp[u.gen]) * 10_000 / (uint256(R.hp[u.gen]) + str);
             if (!F.u[tgt].att && _wallAt(F, F.u[tgt].x, F.u[tgt].y) != NONE) bps = bps / R.coverDiv;   // ON a wall: its crew
         }
+        bool sh = _shielded(F.u);   // judged once, before this shot hurts anyone
         uint256 roll = RareChance.roll(F.word, address(this), block.chainid, F.fightId, F.rolls);
         ++F.rolls;
         ++F.shots;
@@ -309,14 +372,14 @@ library RareCombat {
         _hurt(F.u[tgt], dm);
         uint256 through = NONE;
         if (R.pierce[u.gen]) {
-            through = _behind(F, k, tgt);
+            through = _behind(F, k, tgt, sh);
             if (through != NONE) _hurt(F.u[through], dm);
         }
-        if (R.area[u.gen] > 0) _splash(R, F, k, tgt, through, dm);
+        if (R.area[u.gen] > 0) _splash(R, F, k, tgt, through, dm, sh);
     }
 
     /// @dev the next enemy right behind the target: within a spot of it, further from the shooter
-    function _behind(Field memory F, uint256 k, uint256 tgt) private pure returns (uint256 best) {
+    function _behind(Field memory F, uint256 k, uint256 tgt, bool sh) private pure returns (uint256 best) {
         Unit memory u = F.u[k];
         Unit memory tg = F.u[tgt];
         uint256 sd = _cheb(u.x, u.y, tg.x, tg.y);
@@ -324,7 +387,7 @@ library RareCombat {
         best = NONE;
         for (uint256 j; j < F.u.length; ++j) {
             Unit memory v = F.u[j];
-            if (v.att == u.att || v.hp == 0 || j == tgt) continue;
+            if (v.att == u.att || v.hp == 0 || j == tgt || (v.genesis && sh)) continue;
             uint256 d = _cheb(tg.x, tg.y, v.x, v.y);
             if (d > 1 || _cheb(u.x, u.y, v.x, v.y) <= sd) continue;
             if (d < bd) { bd = d; best = j; }
@@ -332,13 +395,13 @@ library RareCombat {
     }
 
     /// @dev a catapult stone's splash: full on the same spot, halved for every spot away, out to `area`
-    function _splash(Rules memory R, Field memory F, uint256 k, uint256 tgt, uint256 through, uint32 dm) private pure {
+    function _splash(Rules memory R, Field memory F, uint256 k, uint256 tgt, uint256 through, uint32 dm, bool sh) private pure {
         bool side = F.u[k].att;
         int256 gx = F.u[tgt].x;
         int256 gy = F.u[tgt].y;
         for (uint256 j; j < F.u.length; ++j) {
             Unit memory v = F.u[j];
-            if (v.att == side || v.hp == 0 || j == tgt || j == through) continue;
+            if (v.att == side || v.hp == 0 || j == tgt || j == through || (v.genesis && sh)) continue;
             uint256 d = _cheb(gx, gy, v.x, v.y);
             if (d > R.area[F.u[k].gen]) continue;
             uint32 n = dm >> d;
@@ -355,12 +418,13 @@ library RareCombat {
         return NONE;
     }
 
-    /// @dev the nearest living enemy of unit k, ties to the lower index
+    /// @dev the nearest living enemy of unit k, ties to the lower index; an attacker passes over a shielded Genesis
     function _nearest(Unit[] memory u, uint256 k) private pure returns (uint256 best) {
         best = NONE;
         uint256 bd = type(uint256).max;
+        bool sh = u[k].att && _shielded(u);
         for (uint256 j; j < u.length; ++j) {
-            if (u[j].att == u[k].att || u[j].hp == 0) continue;
+            if (u[j].att == u[k].att || u[j].hp == 0 || (u[j].genesis && sh)) continue;
             uint256 d = _cheb(u[k].x, u[k].y, u[j].x, u[j].y);
             if (d < bd) { bd = d; best = j; }
         }
@@ -369,6 +433,14 @@ library RareCombat {
     function _reach(Rules memory R, Unit memory u) private pure returns (uint256) {
         if (!u.tower || u.x != u.hx || u.y != u.hy) return R.reach[u.gen];   // a tower counts only while up it
         return R.melee[u.gen] ? R.dropReach : R.reach[u.gen] + R.towerReach;
+    }
+
+    /// @dev the Genesis is shielded while any defending Friend lives (M13 item 3). A fight without one (it is always
+    /// last in the line-up) answers at once, so it pays nothing for the rule.
+    function _shielded(Unit[] memory u) private pure returns (bool) {
+        if (!u[u.length - 1].genesis) return false;
+        for (uint256 i; i < u.length; ++i) if (!u[i].att && !u[i].genesis && u[i].hp > 0) return true;
+        return false;
     }
 
     function _alive(Unit[] memory u, bool att) private pure returns (bool) {
@@ -390,6 +462,28 @@ library RareCombat {
     function _hurt(Unit memory x, uint32 n) private pure {
         x.hp = x.hp > n ? x.hp - n : 0;
     }
+
+    // ---------- THE TRAP (ruling 55; M17 item 11) ----------
+
+    /// @notice a 1/1 Doopie's chance of winning a trap on a tile, a tree or a crystal bed, in bps:
+    /// hp[0] x 10000 / (hp[0] + hp[victim's generation]) - 6003 / 6925 / 7718 / 8351 / 8837 / 9193 at 1140
+    function trapBps(Rules memory R, uint8 victimGen) internal pure returns (uint256) {
+        uint8 g = _gen(victimGen);
+        if (R.hp[0] == 0) revert NoDoopieStrength();
+        return uint256(R.hp[0]) * 10_000 / (uint256(R.hp[0]) + R.hp[g]);
+    }
+
+    /// @notice ONE chance roll decides a trap: play 0 off the trap's word under its own id, as combat.js trap().
+    /// A terminal is not decided here: it is the duel, under RareDuel's terminal terms.
+    function trap(Rules memory R, uint8 victimGen, bytes32 word, uint256 trapId)
+        internal
+        view
+        returns (bool doopieWins, uint256 roll, uint256 bps)
+    {
+        bps = trapBps(R, victimGen);
+        roll = RareChance.roll(word, address(this), block.chainid, trapId, 0);
+        doopieWins = roll < bps;
+    }
 }
 
 /// @notice A view wrapper, for the parity check and for anyone replaying a fight from its word.
@@ -400,5 +494,13 @@ contract RareCombatLab {
         returns (RareCombat.Result memory)
     {
         return RareCombat.fight(R, S, word, fightId);
+    }
+
+    function trap(RareCombat.Rules memory R, uint8 victimGen, bytes32 word, uint256 trapId)
+        external
+        view
+        returns (bool doopieWins, uint256 roll, uint256 bps)
+    {
+        return RareCombat.trap(R, victimGen, word, trapId);
     }
 }

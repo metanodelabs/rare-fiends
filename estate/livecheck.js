@@ -7,7 +7,7 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
   const prof=fs.mkdtempSync(path.join(os.tmpdir(),'lv-'));
   require("./pagewatch.js").guard(prof);            // close it even if this check throws, or is killed
   const ch=spawn(CHROME,['--headless=new','--enable-unsafe-swiftshader','--hide-scrollbars','--remote-debugging-port='+PORT,
-    '--user-data-dir='+prof,'--window-size=1000,700','http://localhost:8765/base.html?seams=1&purse=2000'],{stdio:'ignore'});
+    '--user-data-dir='+prof,'--window-size=1000,700','http://localhost:8765/base.html?seams=1&purse=2000&pace=demo'],{stdio:'ignore'});
   let send, sock;
   for(let i=0;i<160&&!send;i++){await sleep(250);try{
     const t=(await(await fetch(`http://127.0.0.1:${PORT}/json`)).json()).find(x=>x.type==='page');

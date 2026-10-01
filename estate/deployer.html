@@ -177,10 +177,11 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
   <div id="out"></div>
   </div>
 </main>
-<!-- The two probes carry no `src`. Nothing is read out of the game until the gate above is open:
+<!-- The three probes carry no `src`. Nothing is read out of the game until the gate above is open:
      a page that refuses to show a stranger its values should not be reading them either. -->
 <iframe class="probe" id="pBase" data-src="base.html?econ=1" tabindex="-1" aria-hidden="true" title=""></iframe>
 <iframe class="probe" id="pEra" data-src="start.html" tabindex="-1" aria-hidden="true" title=""></iframe>
+<iframe class="probe" id="pDuel" data-src="challenge.html" tabindex="-1" aria-hidden="true" title=""></iframe>
 <script src="chance.js"></script>
 <script src="chainlive.js"></script>
 <script src="mapgen.js"></script>
@@ -223,6 +224,21 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
     fightSpeed:   { v: 1,   u: 'tiles/s', src: 'Ruling 44 (2026-10-01): every Friend walks at the same speed, 1 tile a second - the starting value, and a deployer setting, so it can be tuned after testing.' },
     coverDiv:     { v: 2,   u: '÷', src: 'Ruling 45 (2026-10-01): standing BEHIND a wall gives no protection; standing ON a standing wall - the wall\'s crew - gives 50%, read as halving the chance a shot lands. A wall keeps its strength and can be broken, and its crew lose the cover when it falls.' },
     defendReach:  { v: 5,   u: 'tiles', src: 'Ruling 46 (2026-10-01): an ENGAGE + DEFEND Friend strays at most 5 tiles from its post.' },
+    // RULING 64, sweep row 24: the raise time is a RATE, and every level's time is derived from its materials.
+    raisePerUnit: { v: 4,   u: 's per unit', src: 'Ruling 64 (2026-10-01), sweep row 24: 4 s per unit of the rung\'s materials, wood and crystals added together, by one Friend, by hand - a hut I 4 min, a Hall 10 min.' },
+    places:       { v: 3,   u: 'places', src: 'Ruling 32 (2026-10-01): "places starts at 3" - a new game pays three places unless the deployer or the gamemaster changes it. The cap is still 10.' },
+    // RULING 57 (2026-10-01): the terminal cut's HARD CEILING - 1% of the sale price, immutable at deploy, never more than the fee.
+    terminalCeiling: { v: 1, u: '% of the sale', src: 'Ruling 57 (2026-10-01): a planted terminal\'s cut has a hard ceiling of 1% of the sale price, immutable at deploy, and is never more than the fee taken.' },
+    // RULING 62 (2026-10-01): storage with no depot and no silo is set by the keep - 240.00 while it stands (sweep row 45).
+    keepStore:    { v: 240, u: 'crystals', src: 'Ruling 62 (2026-10-01): a base with no depot and no silo standing holds 240.00 while its keep stands, at every keep level. A FLOOR, not an addition: once a depot or silo stands the cap is the best depot plus every silo. With the keep gone and nothing else storing, the cap is 0.' },
+    // RULING 64 (2026-10-01), sweep row 42: approved, and PERMANENT at the M20 deploy.
+    duelCounter:  { v: 70,  u: '%', src: 'Ruling 64 (2026-10-01), sweep row 42: the duel odds 70 / 50 / 30 are approved and become PERMANENT at the M20 deploy. 70% when your pick beats theirs.' },
+    duelSame:     { v: 50,  u: '%', src: 'Ruling 64 (2026-10-01), sweep row 42: 50% when both pick the same. The 30% when theirs beats yours is what is left of 100, not a field.' },
+  };
+  // PROPOSED, NOT DECIDED - a number somebody has proposed and the deployer has not decided. Shown as a proposal,
+  // compared with the chain as one, and never tagged DECIDED. Each carries who proposed it and where.
+  const PROP = {
+    terminalShare: { v: 33.33, u: '% of the fee', src: 'PROPOSED, not decided (ruling 57 (c)): the default share is a third of our fee - terminalShareBps 3333, about 0.5% of a sale at the 1.5% fee. The chain engineer\'s starting argument in deploy.mjs; the size is the economist\'s and is still open.' },
   };
   // The two thresholds behind the game-length warning. M4 item 13, and both are decided.
   const CAP_USEFUL = 96, CAP_BUILD = 64;
@@ -335,6 +351,64 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
     } catch (e) { return { c: 'no', t: 'DISAGREES — the game\'s Combat.fight threw: ' + e.message }; }
   }
   const eraWin = () => { try { const e = $('pEra').contentWindow.era; return (e && e.S) ? e : null; } catch (e) { return null; } };
+  // THE DUEL, as the game runs it: challenge.html is where demo mode is READ (RareRoles.demoMode(), M17 item 9) and
+  // where the duel's odds and stake presets live. A probe of its own, so what is shown is what the duel reads.
+  const duelWin = () => { try { const w = $('pDuel').contentWindow; return (w && w.challenge && w.challenge.DEMO) ? w : null; } catch (e) { return null; } };
+  // THE RECORD'S RULES, as the game loaded them (record.js in the probed game): storage, hauls, hands. A rule is
+  // proved by calling the game's own function on a ledger made up here, never by re-deriving it on this page.
+  const REC = () => { try { const w = $('pBase').contentWindow; return (w && w.base && w.Record && w.Record.storeCap) ? w.Record : null; } catch (e) { return null; } };
+  const bldg = (kind, level) => ({ kind, level, startedAt: null, hands: [] });
+  // a storage cap in whole crystals, or the word the game's answer means
+  const capOf = (kinds) => { const R = REC(), u = cu(); if (!R || !u) return undefined;
+    try { const c = R.storeCap({ buildings: kinds.map(([k, l]) => bldg(k, l)) }, 0); return c === Infinity ? 'uncapped' : c / u; } catch (e) { return 'THREW: ' + e.message; } };
+  // RULING 62, PROVED: the keep alone at each level holds 240; nothing standing holds 0; a depot I beside the keep
+  // holds the depot's 240 and not 480, because the keep is a floor and not an addition.
+  function keepProof() {
+    if (!REC() || !cu()) return null;
+    const keep = [1, 2, 3].map((l) => capOf([['keep', l]])), none = capOf([]), withDepot = capOf([['keep', 1], ['collectionDepot', 1]]);
+    const depotI = (G().kinds.collectionDepot.capacity || [])[0] / cu();
+    const good = keep.every((c) => c === DEC.keepStore.v) && none === 0 && withDepot === depotI;
+    return { c: good ? 'ag' : 'no', t: (good ? 'AGREES — THE GAME\'S storeCap: ' : 'DISAGREES WITH RULING 62 — THE GAME\'S storeCap: ') +
+      'keep I / II / III alone ' + keep.join(' / ') + ' · nothing standing ' + none + ' · keep + depot I ' + withDepot + ' (the depot\'s ' + depotI + (withDepot === depotI ? ', a floor and not an addition' : '') + ')' };
+  }
+  // SWEEP ROW 21, PROVED: two silos I and a depot I add up - 240 + 300 + 300 - rather than the largest silo capping.
+  function siloProof() {
+    if (!REC() || !cu()) return null;
+    const k = G().kinds, u = cu(), want = k.collectionDepot.capacity[0] / u + 2 * k.silo.capacity[0] / u;
+    const got = capOf([['collectionDepot', 1], ['silo', 1], ['silo', 1]]);
+    return { c: got === want ? 'ag' : 'no', t: (got === want ? 'AGREES — SILOS ADD UP: ' : 'DISAGREES WITH SWEEP ROW 21 — ') + 'a depot I and two silos I hold ' + got + ' in the game\'s storeCap; added up they are ' + want };
+  }
+  // SWEEP ROWS 25 AND 27, PROVED on record.js's own progress(): n Friends finish in time / n, up to the ceiling.
+  function handsProof() {
+    const R = REC(); if (!R || !R.progress || !R.raiseMs) return null;
+    try {
+      const t = R.raiseMs('hut', 1), cap = R.ceiling('hut');
+      const at = (n, f) => R.progress({ kind: 'hut', level: 1, startedAt: 0, hands: [[0, n]] }, Math.ceil(t * f));
+      const two = at(2, 1 / 2), capd = at(cap, 1 / cap), over = at(cap + 2, 1 / (cap + 1));
+      const good = two === 1 && capd === 1 && over < 1;
+      return { c: good ? 'ag' : 'no', t: (good ? 'AGREES — LINEAR UP TO THE CEILING: ' : 'DISAGREES WITH SWEEP ROWS 25 AND 27 — ') +
+        'a hut I with 2 Friends is done at half the time (' + two + '), with ' + cap + ' at a ' + cap + 'th (' + capd + '), and ' + (cap + 2) + ' are no faster than ' + cap + ' (' + over.toFixed(2) + ' done at a ' + (cap + 1) + 'th)' };
+    } catch (e) { return { c: 'no', t: 'DISAGREES — record.js threw: ' + e.message }; }
+  }
+  // SWEEP ROW 24, PROVED against record.js's own materials(): every level of every kind takes 4 s per unit of what it is built of.
+  function raiseProof() {
+    const R = REC(), g = G(), u = cu(); if (!R || !R.materials || !g || !u) return null;
+    const RAISE_PER_UNIT_MS = DEC.raisePerUnit.v * 1000, off = [];
+    if (g.demoPace && g.demoPace.on) return { c: 'no', t: 'DISAGREES — THE GAME IS AT THE DEMO PACE (pace=demo): every level ' + g.demoPace.buildMs / 1000 + ' s, not 4 s a unit' };
+    Object.entries(g.kinds).forEach(([k, row]) => (row.buildMs || []).forEach((ms, i) => {
+      let m; try { m = R.materials(k, i + 1); } catch (e) { return; }
+      const units = Object.values(m).reduce((a, b) => a + b, 0) / u;
+      if (units > 0 && ms !== units * RAISE_PER_UNIT_MS) off.push(k + ' ' + (i + 1) + ': ' + ms / 1000 + ' s for ' + units + ' units');
+    }));
+    return { c: off.length ? 'no' : 'ag', t: off.length
+      ? 'DISAGREES WITH SWEEP ROW 24 — ' + off.length + ' levels do not take 4 s a unit, e.g. ' + off.slice(0, 3).join('; ')
+      : 'AGREES — EVERY LEVEL TAKES 4 s PER UNIT OF ITS MATERIALS (record.js materials())' };
+  }
+  // a list the game reads, against the list ruling 64 decided: numbers, at the levels they describe
+  const nums = (s) => String(s).split(/[^0-9.]+/).filter((x) => x !== '').map(Number);
+  const sameList = (got, want) => { const a = nums(got); return a.length === want.length && a.every((v, i) => Math.abs(v - want[i]) < 1e-9); };
+  const kindList = (col, scale) => { const g = G(); if (!g || !g.kinds) return undefined;
+    return Object.entries(g.kinds).map(([k, v]) => k + ' ' + (Array.isArray(v[col]) ? v[col].map((x) => scale ? x / scale : x).join(' / ') : v[col] === undefined ? '—' : v[col])).join(' · '); };
 
   // amounts are stored in hundredths; the divisor is the game's own crystalUnit, read and never typed. No unit, no number.
   const cu = () => { const g = G(); return g && g.crystalUnit > 0 ? g.crystalUnit : null; };
@@ -353,16 +427,20 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
   const R = [
     // ---- the map: M4 item 3 -------------------------------------------------
     { g: 'map', id: 'groves', k: 'Groves of trees on a map', e: 'map', f: 'groves', u: 'groves',
-      read: () => { const g = GMG(); return g ? g.ECON_DEFAULT.groves : undefined; }, where: 'the game\'s MapGen.ECON_DEFAULT.groves' },
+      read: () => { const g = GMG(); return g ? g.ECON_DEFAULT.groves : undefined; }, where: 'the game\'s MapGen.ECON_DEFAULT.groves',
+      sweep: { row: 35, t: 'keep 7 groves', v: 7 } },
     { g: 'map', id: 'treesPerGrove', k: 'Trees in a grove', e: 'map', f: 'groves', u: 'trees',
-      read: () => { const g = GMG(); return g ? g.ECON_DEFAULT.treesPerGrove : undefined; }, where: 'the game\'s MapGen.ECON_DEFAULT.treesPerGrove' },
+      read: () => { const g = GMG(); return g ? g.ECON_DEFAULT.treesPerGrove : undefined; }, where: 'the game\'s MapGen.ECON_DEFAULT.treesPerGrove',
+      sweep: { row: 35, t: 'keep 3 trees a grove', v: 3 } },
     { g: 'map', id: 'homeSeams', k: 'Crystal seams inside a base', e: 'map', f: 'seams', u: 'seams',
-      read: () => { const g = GMG(); return g ? g.ECON_DEFAULT.homeSeams : undefined; }, where: 'the game\'s MapGen.ECON_DEFAULT.homeSeams' },
+      read: () => { const g = GMG(); return g ? g.ECON_DEFAULT.homeSeams : undefined; }, where: 'the game\'s MapGen.ECON_DEFAULT.homeSeams',
+      sweep: { row: 35, t: 'keep 4 home seams', v: 4 } },
     { g: 'map', id: 'wildSeams', k: 'Crystal seams out in the frontier', e: 'map', f: 'seams', u: 'seams',
-      read: () => { const g = GMG(); return g ? g.ECON_DEFAULT.wildSeams : undefined; }, where: 'the game\'s MapGen.ECON_DEFAULT.wildSeams' },
-    { g: 'map', id: 'creeks', k: 'Creek density', e: 'map', f: 'baseSites', u: 'creeks per base', open: true,
-      read: () => undefined, where: 'nothing',
-      s: 'The generator gives every base exactly one creek and takes no option for it. There is no number to set until it does — and the economist proposes none (sweep row 38: <i>a field with one legal value is a field that lies</i>).' },
+      read: () => { const g = GMG(); return g ? g.ECON_DEFAULT.wildSeams : undefined; }, where: 'the game\'s MapGen.ECON_DEFAULT.wildSeams',
+      sweep: { row: 35, t: 'keep 2 wild seams', v: 2 } },
+    { g: 'map', id: 'creeks', k: 'Creek density', e: 'map', f: 'baseSites', u: 'creeks per base', ro: true,
+      read: () => undefined, where: 'nothing', sweep: { row: 38, t: 'keep 1 creek a base, and no field' },
+      s: 'The generator gives every base exactly one creek and takes no option for it, so there is no number to read or set - <b>and by ruling 64 there is no field</b> (sweep row 38: <i>a field with one legal value is a field that lies</i>).' },
     // MapGen.MAP_DEFAULT is exported since M12's merge (c9bf0a0), so the last three are READ rather than NOT DECIDED.
     // Their home is the map: they are frozen into a map when it is generated, so an edit here is a change to the NEXT
     // map with no setter - and changing a default in mapgen.js is a generation change, which item 9 below catches.
@@ -403,46 +481,74 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
       sweep: { row: 12, t: 'keep 1.4 s a log', v: 1.4 } },
     { g: 'econ', id: 'regrowMs', k: 'Time for a tree to grow back', e: 'economy', f: 'regrowMs', u: 's', scale: 1000,
       read: () => { const g = G(); return g && g.regrowMs / 1000; }, where: 'base.ECON.regrowMs',
-      sweep: { row: 13, t: '15 min (900 s) - the game runs at demo pace', v: 900 } },
+      sweep: { row: 13, t: '15 min (900 s)', v: 900 } },
     { g: 'econ', id: 'handYield', k: 'What a Friend cuts from a ripe seam by hand', e: 'economy', f: 'handYield', u: 'crystals',
       read: () => { const g = G(); return g && g.handYield; }, where: 'base.ECON.handYield',
       sweep: { row: 15, t: 'keep 1.00 at full growth', v: 1 },
       s: 'It was labelled <i>what a harvester brings back</i>. It is not: the schema and the game both call it a hand harvest. The harvester\'s haul is the next card.' },
-    { g: 'econ', id: 'harvHaul', k: 'What a harvester brings back in a load', u: 'crystals', open: true,
+    // RULING 64 decided rows 16, 17, 19 and 20, and the game now carries each - so these READ where the game reads them
+    // rather than sitting NOT DECIDED on an empty field. The haul is record.js's haulOf, the rule a depot is paid by.
+    { g: 'econ', id: 'harvHaul', k: 'What a harvester brings back in a load', e: 'economy', f: 'stageYieldBps', u: 'crystals', tab: true,
+      read: () => { const R = REC(), g = G(), u = cu(); if (!R || !R.haulOf || !g || !u) return undefined;
+        return (g.kinds.collectionDepot.tiers || []).map((_, i) => R.haulOf(i + 1, 1) / u).join(', '); },
+      where: 'Record.haulOf(depot level, ripe) ÷ crystalUnit in the game - what bank() is paid for a ripe load, by depot level',
+      sweep: { row: 17, t: 'keep 1 / 2 / 3 by depot level', v: [1, 2, 3] },
+      s: 'Read by calling the game\'s own <code>Record.haulOf</code> for a seam cut at full growth, so this is the number a depot is actually paid, not a copy of it.' },
+    { g: 'econ', id: 'harvPerLevel', k: 'Harvesters a depot runs, by level', u: 'harvesters', ro: true,
       read: () => undefined, where: 'nothing',
-      sweep: { row: 17, t: 'keep 1 / 2 / 3 by depot level' },
-      // TODO(M8): read it once base.ECON carries the haul as a key. Today it is a rule in code, not a number.
-      s: 'The game pays the depot\'s level in crystals per ripe load, but as a rule written into its code (index.html <code>bank()</code>), <b>not a number in <code>base.ECON</code></b>, so there is nothing here to read. Waits on M8 giving it a key.' },
+      sweep: { row: 19, t: 'keep 1 / 2 / 3', v: [1, 2, 3] },
+      s: 'A rule written into the game\'s code - a depot runs as many harvesters as its level (index.html, the depot panel\'s <code>harvesters &gt;= tier</code>) - <b>not a number in <code>base.ECON</code></b>, so there is nothing to read. It matches the decision; a key for it is owed before a deployer can change it.' },
     { g: 'econ', id: 'growMs', k: "A seam's full growth cycle", e: 'economy', f: 'growMs', u: 's', scale: 1000,
       read: () => { const g = G(); return g && g.growMs / 1000; }, where: 'base.ECON.growMs',
-      sweep: { row: 14, t: '15 min (900 s), one clock with the trees - the game runs at demo pace', v: 900 } },
+      sweep: { row: 14, t: '15 min (900 s), one clock with the trees', v: 900 } },
     { g: 'econ', id: 'harvCost', k: 'What a harvester costs', e: 'economy', f: 'harvCost', u: 'crystals',
       read: () => { const g = G(); return g ? hund(g.harvCost) : undefined; }, where: 'base.ECON.harvCost ÷ crystalUnit',
       sweep: { row: 18, t: 'keep 20.00', v: 20 } },
-    { g: 'econ', id: 'seamStages', k: 'What a seam gives at each stage of its growth', u: 'crystals', open: true,
-      read: () => undefined, where: 'nothing',
-      sweep: { row: 16, t: '0.25 / 0.50 / 0.75 / 1.00 at stages 0 to 3' },
-      // TODO(M8): read it once base.ECON carries a per-stage yield.
-      s: 'The stages exist - a quarter of the growth cycle each - and <b>what each one gives is not decided</b>. No key in <code>base.ECON</code> carries it.' },
-    { g: 'econ', id: 'depotCap', k: "The collection depot's cap", u: 'crystals', open: true,
-      read: () => undefined, where: 'nothing',
-      sweep: { row: 20, t: '240.00 / 720.00 / 2,160.00 by depot level' },
-      // TODO(M8): read it once base.ECON carries a depot cap.
-      s: 'No cap on the depot exists in the game, and no key in <code>base.ECON</code> carries one.' },
-    { g: 'econ', id: 'siloCap', k: 'What a silo holds, by level', e: 'buildingType', f: 'capacity', u: 'crystals', tab: true,
+    { g: 'econ', id: 'seamStages', k: 'What a seam gives at each stage of its growth', e: 'economy', f: 'stageYieldBps', u: '× a full haul', tab: true,
+      read: () => { const g = G(); return g && Array.isArray(g.stageYieldBps) ? g.stageYieldBps.map((b) => b / 10000).join(', ') : undefined; },
+      where: 'base.ECON.stageYieldBps ÷ 10000 - what record.js haulOf multiplies a full haul by, stage by stage',
+      sweep: { row: 16, t: '0.25 / 0.50 / 0.75 / 1.00 at stages 0 to 3', v: [0.25, 0.5, 0.75, 1] },
+      s: 'The stages are quarters of the growth cycle. Cutting resets the seam, so cutting young is a choice about patience.' },
+    { g: 'econ', id: 'depotCap', k: "The collection depot's cap", e: 'buildingType', f: 'capacity', u: 'crystals', tab: true,
+      read: () => { const g = G(), u = cu(); return g && u && g.kinds && g.kinds.collectionDepot && g.kinds.collectionDepot.capacity ? g.kinds.collectionDepot.capacity.map((c) => c / u).join(', ') : undefined; },
+      where: 'base.ECON.kinds.collectionDepot.capacity ÷ crystalUnit - what record.js storeCap takes for the best standing depot',
+      sweep: { row: 20, t: '240.00 / 720.00 / 2,160.00 by depot level', v: [240, 720, 2160] } },
+    { g: 'econ', id: 'siloCap', k: 'What a silo holds, by level', e: 'buildingType', f: 'capacity', u: 'crystals', tab: true, verify: siloProof,
       read: () => { const g = G(); return g && g.siloCap && cu() ? g.siloCap.map(hund).join(', ') : undefined; }, where: 'base.ECON.siloCap ÷ crystalUnit',
-      sweep: { row: 21, t: '+300 / +900 / +3,000 per silo level, added up over every standing silo' },
-      s: 'The game takes these as a cap, from the largest silo standing. The proposal is that every silo adds to it.' },
+      sweep: { row: 21, t: '+300 / +900 / +3,000 per silo level, added up over every standing silo', v: [300, 900, 3000] },
+      s: 'The line above calls the game\'s own <code>storeCap</code> with two silos standing, so it proves the <b>adding up</b> and not only the three numbers.' },
+    // RULING 62, sweep row 45. Its home is a `capacity` on the keep's row (ruling 62 (3)); what is READ is the cap the
+    // game's own storeCap gives a base with only a keep standing - the one place a storage cap is enforced.
+    { g: 'econ', id: 'keepStore', k: 'What a keep holds when no depot or silo stands', e: 'buildingType', f: 'capacity', u: 'crystals', dec: 'keepStore', ro: true,
+      exp: () => DEC.keepStore.v, verify: keepProof,
+      read: () => capOf([['keep', 1]]),
+      where: 'Record.storeCap in the game, for a base with only a keep I standing - the cap gathering and refunds are refused against',
+      s: '<b>Gathering, refunds and knock-downs are held to this cap.</b> <b>A floor, not an addition</b>, at every keep level; <b>0 once the keep is gone</b> and nothing else stores - gathering is then refused and what is held is kept. Ruling 56\'s knock-down test uses it, and a player knocking down their own keep is exempt. <code>uncapped</code> means the game still treats a bare base as holding anything.' },
+    { g: 'econ', id: 'satchel', k: "The satchel's cap and fill rate", u: '', ro: true,
+      read: () => undefined, where: 'nothing',
+      sweep: { row: 22, t: 'no cap and no rate - both are rules, not numbers: selling drops the satchel, and it fills by pick-ups' },
+      s: 'Decided as <b>no number at all</b>, so there is no field and nothing to read. The card is here so the decision is on the page rather than missing from it.' },
 
     // ---- the fight: M4 item 5 ----------------------------------------------
     { g: 'fight', id: 'hp', k: "A Friend's hit points, by generation", e: 'rules', f: 'hp', tab: true,
       read: () => { const g = G(); return g && list(g.hp); }, where: 'base.ECON.hp' },
     { g: 'fight', id: 'wallHp', k: 'A wall section\'s hit points', e: 'rules', f: 'wallHp', u: 'HP',
       read: () => { const g = G(); return g && g.wallHp; }, where: 'base.ECON.wallHp' },
-    { g: 'fight', id: 'hpCeiling', k: 'The most hit points a building can have', e: 'rules', f: 'hp', u: 'HP', open: true,
-      read: () => undefined, where: 'nothing', sweep: { row: 7, t: '6,000 - the Citadel\'s own number, so nothing out-lasts the keep' },
-      // TODO(M8): read it once base.ECON carries building strength and its ceiling.
-      s: 'The deployer\'s table requires it. No number for it exists in the game.' },
+    { g: 'fight', id: 'strength', k: "A building's strength, by level", e: 'buildingType', f: 'strength', u: 'HP', tab: true,
+      read: () => kindList('strength'), where: 'base.ECON.kinds[*].strength - 0 is what the game treats as not a target',
+      sweep: { row: 6, t: 'as economy.html has them, plus Cell IV 2,000, capacitor 200 / 400 / 800 / 1,600, harvester 150 - each level doubles' },
+      s: 'Not compared number by number here: the decision is the ladder on <code>economy.html</code> plus three additions, and this page does not keep a second copy of that ladder. A <b>0</b> above is a level the game still treats as not a target.' },
+    { g: 'fight', id: 'harvStrength', k: "A harvester's strength", e: 'buildingType', f: 'strength', u: 'HP', ro: true,
+      read: () => { const g = G(); return g && typeof g.harvStrength === 'number' ? g.harvStrength : undefined; }, where: 'base.ECON.harvStrength',
+      sweep: { row: 6, t: 'a harvester 150', v: 150 } },
+    { g: 'fight', id: 'hpCeiling', k: 'The most hit points a building can have', e: 'rules', f: 'hp', u: 'HP', ro: true,
+      read: () => { const g = G(); return g && typeof g.strengthMax === 'number' ? g.strengthMax : undefined; },
+      where: 'base.ECON.strengthMax - values.js refuses to load a row above it', sweep: { row: 7, t: '6,000 - the Citadel\'s own number, so nothing out-lasts the keep', v: 6000 },
+      s: '<b>A rule, not a note</b>: values.js throws at load if any building\'s strength, or a harvester\'s, is above it. NOT READABLE means the game predates the ceiling.' },
+    // Rows 8 and 44 are the one fight number ruling 64 did NOT decide: nobody has proposed a size. Blank, and it stays blank.
+    { g: 'fight', id: 'captureHit', k: "The capturing Friend's strength hit when the window expires", u: 'strength', open: true,
+      read: () => undefined, where: 'nothing',
+      s: '<b>NOT DECIDED, and no number is proposed</b> (sweep rows 8 and 44, still open after ruling 64). The deployer named the rule and no size. Ruling 63 also leaves open whether the five-minute window it belongs to survives.' },
     { g: 'fight', id: 'weapons', k: 'Weapon damage and range, by generation', e: 'rules', f: 'dmg', tab: true,
       read: () => { const g = G(); return g && Object.entries(g.weapons).map(([k, w]) => 'gen ' + k + ' ' + w.n + ' ' + w.dmg + ' dmg / ' + w.rng + ' tiles').join(' · '); },
       where: 'base.ECON.weapons' },
@@ -459,16 +565,16 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
     // this page cannot set them yet: nothing the game reads carries them except combat.js's own defaults.
     { g: 'fight', id: 'speed', k: 'Walking pace in a fight', e: 'rules', f: 'stepMs', u: 'tiles/s', dec: 'fightSpeed', ro: true, exp: () => DEC.fightSpeed.v,
       read: () => { const R = CR(); return R ? 1000 / (2 * R.stepMs) : undefined; }, where: 'Combat.rulesFrom in the game (combat.js), read back out of stepMs: a spot is half a tile',
-      s: '<b>Every Friend, 1 tile a second.</b> It decides the free shots a longer weapon gets while the other closes: catapult (5 tiles) over club (0.5) is 4.5 s of walking. <b>A deployer setting by ruling 44, and not settable from this page yet:</b> the game calls <code>Combat.rulesFrom</code> with no settings, so the pace it runs is combat.js\'s own default, and changing it today means changing that file.' },
+      s: '<b>Every Friend, 1 tile a second.</b> It decides the free shots a longer weapon gets while the other closes: catapult (5 tiles) over club (0.5) is 4.5 s of walking. <b>A deployer setting by ruling 44, and not settable from this page yet.</b> <code>Combat.rulesFrom(E, settings)</code> already takes <code>{ speed, defendTiles, coverDiv }</code>, but the game calls it as <code>Combat.rulesFrom(V)</code> (index.html, the capture fight) with none, so the pace it runs is combat.js\'s own default. A setting needs the game to pass one, from a home this page can write.' },
     { g: 'fight', id: 'coverDiv', k: 'Cover on a wall', e: 'rules', f: 'coverDiv', u: '÷', dec: 'coverDiv', ro: true, exp: () => DEC.coverDiv.v, verify: coverProof,
       read: () => { const R = CR(); return R ? R.coverDiv : undefined; }, where: 'Combat.rulesFrom in the game (combat.js): coverDiv, applied in Combat.fight only to a defender ON a standing wall (onWall)',
       s: '<b>A defender standing ON a standing wall\'s spot - the wall\'s crew - is hit half as often. Standing behind a wall gives nothing.</b> The line above is the game\'s own fight run three ways, so it proves where the cover applies, not only the divisor. Not settable from this page yet, for the same reason as the pace.' },
     { g: 'fight', id: 'defendReach', k: 'How far ENGAGE + DEFEND strays', e: 'rules', f: 'defendReach', u: 'tiles', dec: 'defendReach', ro: true, exp: () => DEC.defendReach.v,
       read: () => { const R = CR(); return R ? R.defendReach / 2 : undefined; }, where: 'Combat.rulesFrom in the game (combat.js), read back out of defendReach in spots',
       s: '<b>5 tiles</b> - the longest weapon range (catapult), so a DEFEND Friend can reach an attacker shelling its post from the far edge of any range in the game. Decided by ruling 46 and kept here as a deployer setting; not settable from this page yet, for the same reason as the pace.' },
-    { g: 'fight', id: 'splashFalloff', k: 'What splash loses with distance', e: 'rules', f: 'splashFalloff', open: true,
-      read: () => undefined, where: 'nothing', sweep: { row: 5, t: '÷2 per spot, as a field of RareCombat.Rules' },
-      s: 'Named in DESIGN and <b>missing from the rules table altogether</b>: <code>combat.js</code> halves it per spot in its own code, so there is no number to read.' },
+    { g: 'fight', id: 'splashFalloff', k: 'What splash loses with distance', e: 'rules', f: 'splashFalloff', u: '÷ per spot', ro: true,
+      read: () => undefined, where: 'nothing', sweep: { row: 5, t: '÷2 per spot, as a field of RareCombat.Rules', v: 2 },
+      s: 'The decision kept the value the sweep found in the fight; <b>what is missing is its home</b>: <code>combat.js</code> halves splash per spot in its own code (sweep row 5\'s <i>today</i>) and <code>RareCombat.Rules</code> has no field, so there is no number to read. The field is the chain engineer\'s.' },
 
     // ---- the buildings: M4 item 6 ------------------------------------------
     { g: 'build', id: 'costs', k: 'What each building costs', e: 'buildingType', f: 'crystalCost', tab: true,
@@ -476,28 +582,51 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
       read: () => { const g = G(); if (!g || !g.kinds || !cu()) return undefined;
         return Object.entries(g.kinds).map(([k, v]) => k + ' ' + (v.cost || []).map((c, i) => hund(c) + (v.wood && v.wood[i] ? '+' + hund(v.wood[i]) + 'w' : '')).join(' / ')).join(' · '); },
       where: 'base.ECON.kinds[*].cost and .wood ÷ crystalUnit - crystals per level, then +Nw for wood',
-      sweep: { row: 23, t: 'question 22: level 1 wood only, level 2 half and half, level 3 crystals - each rung keeps its total' } },
-    { g: 'build', id: 'buildMs', k: 'How long a building takes to raise', e: 'buildingType', f: 'buildMs', u: 's', scale: 1000,
-      read: () => { const g = G(); return g && g.buildMs / 1000; }, where: 'base.ECON.buildMs',
+      // Row 23 IS decided - as "see question 22" - and question 22's table is not named in ruling 64's approval, so the
+      // mix itself is still a proposal. The one sweep line on this page that stays PROPOSED, and it says why.
+      sweep: { row: 23, prop: 'question 22', t: 'level 1 wood only, level 2 half and half, level 3 crystals - each rung keeps its total. Row 23 is approved as "see question 22"; question 22\'s table is not named in ruling 64 and is asked in Still open for the deployer' } },
+    // RULING 64, row 24: ONE rate, and every level's time derived from it. values.js's scalar `buildMs` is the DEMO
+    // pace's flat 2.8 s and is not read here: it is what loads under pace=demo, never the decided raise time.
+    { g: 'build', id: 'raisePerUnit', k: 'Raise time per unit of materials', e: 'buildingType', f: 'buildMs', u: 's per unit', dec: 'raisePerUnit', ro: true,
+      exp: () => DEC.raisePerUnit.v,
+      read: () => { const g = G(); return g && typeof g.buildMsPerUnit === 'number' ? g.buildMsPerUnit / 1000 : undefined; },
+      where: 'base.ECON.buildMsPerUnit ÷ 1000 - the rate values.js derives every level\'s raise time from',
+      s: 'The rate, read where the game keeps it. <code>base.ECON.buildMs</code>, the single number, is the <b>demo pace\'s</b> flat time and is deliberately not read: it loads only with <code>pace=demo</code>. NOT READABLE here means the game predates the rate.' },
+    { g: 'build', id: 'buildMs', k: 'How long a building takes to raise', e: 'buildingType', f: 'buildMs', u: 's', tab: true, verify: raiseProof,
+      read: () => kindList('buildMs', 1000), where: 'base.ECON.kinds[*].buildMs ÷ 1000 - seconds for ONE Friend, level by level, what record.js raiseMs reads',
       sweep: { row: 24, t: '4 s per unit of the rung\'s materials, one Friend, by hand - a hut I 4 min, a Hall 10 min' },
-      s: '<b>One number for every building and every level in the game today.</b> The deployer\'s table wants one per building per level.' },
-    { g: 'build', id: 'handsOff', k: 'What a second pair of hands takes off the time', u: '%', open: true,
-      read: () => undefined, where: 'nothing', sweep: { row: 25, t: 'linear: the time divided by the Friends on it, up to the ceiling' },
-      // TODO(M8): read it once base.ECON carries how hands divide the time.
-      s: 'No key in <code>base.ECON</code> carries it.' },
-    { g: 'build', id: 'handsCap', k: 'The most Friends that can usefully work on one building', u: 'Friends', open: true,
-      read: () => undefined, where: 'nothing', sweep: { row: 27, t: '4 for every one-tile building; a wall 2; the capacitor 4' },
-      // TODO(M8): read it once base.ECON carries the ceiling on hands.
-      s: 'No key in <code>base.ECON</code> carries it.' },
+      s: 'The line above holds every level of every kind to the rule, against <b>the game\'s own</b> <code>Record.materials</code> for that level - so it stays right whatever the materials are, and question 22\'s mix is still a proposal.' },
+    { g: 'build', id: 'handsOff', k: 'What a second pair of hands takes off the time', u: '', ro: true, verify: handsProof,
+      read: () => { const R = REC(); return R && R.progress ? 'time ÷ Friends on it, up to the ceiling' : undefined; },
+      where: 'record.js progress() in the game - how much of a level n Friends have raised by a given time',
+      sweep: { row: 25, t: 'linear: the time divided by the Friends on it, up to the ceiling' },
+      s: 'A rule, not a number, so the line above proves it by running the game\'s own <code>Record.progress</code> on a hut with 2, 4 and 6 Friends.' },
+    { g: 'build', id: 'handsCap', k: 'The most Friends that can usefully work on one building', e: 'buildingType', f: 'hands', u: 'Friends', tab: true,
+      read: () => kindList('hands'), where: 'base.ECON.kinds[*].hands - what record.js ceiling() reads',
+      sweep: { row: 27, t: '4 for every one-tile building; a wall 2; the capacitor 4', each: (k) => (k === 'wall' ? 2 : 4) } },
     { g: 'build', id: 'footprint', k: 'Tiles a building takes up', e: 'buildingType', f: 'footprint', tab: true,
       read: () => { const g = G(); return g && g.kinds ? Object.entries(g.kinds).map(([k, v]) => k + ' ' + (Array.isArray(v.footprint) ? v.footprint.length : '?')).join(' · ') : undefined; },
       where: 'base.ECON.kinds[*].footprint - the number of tiles each one covers',
       sweep: { row: 28, t: 'keep: one tile for all nine, a wall an edge' },
       s: 'Read as the count of tile offsets in each row\'s footprint. A wall is counted as the one tile it is placed on; that it stands on an edge is a placement rule, not a footprint.' },
-    { g: 'build', id: 'energy', k: 'What energy each building draws', e: 'buildingType', f: 'capacity', u: 'P', open: true,
-      read: () => undefined, where: 'nothing', sweep: { row: 29, t: 'as economy.html proposes it, plus the capacitor 0 at every level' },
-      // TODO(M8): read it once base.ECON carries an energy draw.
-      s: 'Proposed on <code>economy.html</code> only. No key in <code>base.ECON</code> carries it.' },
+    { g: 'build', id: 'energy', k: 'What energy each building draws while it runs', e: 'buildingType', f: 'energy', u: 'P', tab: true,
+      read: () => kindList('energy'), where: 'base.ECON.kinds[*].energy - what the energy loop in index.html draws',
+      sweep: { row: 29, t: 'the ladder economy.html has, plus the capacitor 0 at every level' },
+      s: 'Not compared number by number: the decision is <code>economy.html</code>\'s ladder and this page keeps no second copy of it. A row of <b>0</b>s above is a building the game still lets draw nothing.' },
+    { g: 'build', id: 'energyBuild', k: 'What energy a building draws while it goes up', u: 'P', ro: true,
+      read: () => undefined, where: 'nothing',
+      sweep: { row: 30, t: '3 / 6 / 12 / 20 by level', v: [3, 6, 12, 20] },
+      s: 'No key in <code>base.ECON</code> carries it, so there is nothing to read.' },
+    { g: 'build', id: 'supply', k: 'What a generator makes, by level', e: 'buildingType', f: 'supply', u: 'P', tab: true,
+      read: () => { const g = G(); return g && g.kinds && g.kinds.generator && g.kinds.generator.supply ? g.kinds.generator.supply.join(', ') : undefined; },
+      where: 'base.ECON.kinds.generator.supply',
+      sweep: { row: 31, t: '10 / 25 / 60 P - a level-1 base runs on its water wheel, just', v: [10, 25, 60] } },
+    { g: 'build', id: 'capacitor', k: 'The capacitor: cost, store and release, by level', e: 'buildingType', f: 'capacity', tab: true,
+      read: () => { const g = G(), u = cu(), c = g && g.kinds && g.kinds.capacitor; if (!c || !u) return undefined;
+        return c.cost.map((x) => x / u).join(' / ') + ' crystals · ' + c.capacity.join(' / ') + ' P·h · ' + c.release.join(' / ') + ' P'; },
+      where: 'base.ECON.kinds.capacitor - cost ÷ crystalUnit, capacity, release',
+      sweep: { row: 32, t: '300 / 800 / 2,000 / 4,500 crystals; 500 / 1,500 / 4,000 / 10,000 P·h; 15 / 40 / 100 / 250 P', v: [300, 800, 2000, 4500, 500, 1500, 4000, 10000, 15, 40, 100, 250] },
+      s: 'Not a log building: 0 wood at every level. How fast it charges is set by its source, not by this row.' },
     { g: 'build', id: 'cellReach', k: 'How far a cell reaches at each level', e: 'buildingType', f: 'reach', tab: true,
       read: () => { const g = G(); return g && list(g.cellReach); }, where: 'base.ECON.cellReach',
       doc: [2, 3, 4, 5], against: '2, 3, 4, 5 tiles to start',
@@ -506,6 +635,14 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
       // an EMPTY table is an answer, not a blank: the operator gate is struck (M8 item 7) and no level needs anyone
       read: () => { const g = G(); if (!g || !g.cellNeeds) return undefined; return Object.keys(g.cellNeeds).length ? list(g.cellNeeds) : 'none at any level'; },
       where: 'base.ECON.cellNeeds', s: 'The operator gate is struck in DESIGN (M8 item 7), so the game asks for no one at any level.' },
+    { g: 'build', id: 'cellLevels', k: "What a cell's levels need: time and buildings", u: '', ro: true,
+      read: () => undefined, where: 'nothing',
+      sweep: { row: 34, t: 'time from row 24 (II 10 min, III 27 min, IV 60 min); a hut for II, a standing generator for III and IV; resources from question 22' },
+      s: 'The times follow row 24 and are held by the raise-time card above. The building each level needs is a placement rule <b>no key in <code>base.ECON</code> carries</b>, so nothing is read. The economist\'s own marking stands: the hut for II is the weakest number in the sweep.' },
+    { g: 'build', id: 'powerBuild', k: 'Building with power', u: '', ro: true,
+      read: () => undefined, where: 'nothing',
+      sweep: { row: 26, t: 'keep economy.html\'s: hand, hand, power, power, ×2 faster - levels 3 and 4 and the capacitor need power' },
+      s: 'A rule, not a number, and no key in <code>base.ECON</code> carries it.' },
 
     // ---- the switches: M4 item 7 - the four that are typed web addresses today
     { g: 'sw', id: 'seams', k: 'Crystals on this map', e: 'map', f: 'seams', sw: true, put: 'url', q: 'seams',
@@ -523,6 +660,13 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
     { g: 'sw', id: 'world', k: 'The two-base test map', sw: true, put: 'url', q: 'world',
       read: () => { const w = gameWin(); return w ? (w.BASES.length > 1 ? 'on' : 'off') : undefined; },
       where: 'base.BASES.length', s: 'A generated map with more than one base on it. <code>?world=1</code> today.' },
+    // THE DEMO PACE (values.js, 2026-10-01): the held seconds load only when the address asks for them. Read here so
+    // the deployer can see which pace the game this page is reading runs - the decided one, or the demo's.
+    { g: 'sw', id: 'pace', k: 'The pace the game runs', u: '', ro: true,
+      read: () => { const g = G(); if (!g) return undefined; if (!g.demoPace) return 'held seconds - this game predates the decided pace';
+        return g.demoPace.on ? 'DEMO (pace=demo): a seam ' + g.demoPace.growMs / 1000 + ' s, a tree ' + g.demoPace.regrowMs / 1000 + ' s, a level ' + g.demoPace.buildMs / 1000 + ' s' : 'DECIDED (ruling 64)'; },
+      where: 'base.ECON.demoPace.on - values.js loads the demo pace only under pace=demo',
+      s: '<b>A typed web address, and not delivered from this page:</b> <code>pace=demo</code> is for clips and checks. Every economy and building card above reads the pace the game reports here.' },
     { g: 'sw', id: 'seed', k: 'The seed the map is generated from', e: 'map', f: 'seed', put: 'url', q: 'seed', u: '',
       read: () => { const w = gameWin(); return w && w.WORLDGEN ? w.WORLDGEN.seed : undefined; }, where: 'base.WORLDGEN.seed - the seed the generated map was drawn from',
       s: 'Read back out of the map the game generated, so it is NOT READABLE while the game plays its one hand-drawn base. Delivered with the two-base switch, which is M12 item 8\'s.' },
@@ -546,10 +690,9 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
       s: 'The share of the pot that covers the game\'s fees. Set per game, frozen once the first player has paid, and <b>refused outside its floor and ceiling</b>.' },
     { g: 'money', id: 'cutFloor', k: "The cut's floor", e: 'game', f: 'cutBps', u: '%', dec: 'cutFloor', read: () => undefined, where: 'nothing' },
     { g: 'money', id: 'cutCeiling', k: "The cut's ceiling", e: 'game', f: 'cutBps', u: '%', dec: 'cutCeiling', read: () => undefined, where: 'nothing' },
-    { g: 'money', id: 'places', k: 'How many places pay out', e: 'game', f: 'places', u: 'places', open: true, cap: PLACES_CAP,
-      sweep: { row: 40, t: '3 - the number the deployer once gave; still open for the deployer', v: 3 },
-      read: () => undefined, where: 'nothing',
-      s: '<b>A count, with a ceiling of ' + PLACES_CAP + ' and no fixed value.</b> The split is not a field: it is a rule, and it is derived below.' },
+    { g: 'money', id: 'places', k: 'How many places pay out', e: 'game', f: 'places', u: 'places', dec: 'places', cap: PLACES_CAP,
+      read: () => undefined, where: 'RareGame.defaultPlaces — read back from the chain, never kept here',
+      s: '<b>3 to start, with a ceiling of ' + PLACES_CAP + '.</b> The split is not a field: it is a rule, and it is derived below.' },
     { g: 'money', id: 'mktFee', k: 'The marketplace fee', e: 'listing', f: 'feeBps', u: '%', dec: 'mktFee', live: true,
       read: () => undefined, where: 'RareMarket.feeBps — read back from the chain, never kept here',
       s: '<b>The one number on this page that may be changed while a game runs.</b> The deployer\'s word was "no need" for the freeze: the cut comes out of money already handed over, the fee out of a sale nobody has agreed to yet. ' +
@@ -557,10 +700,21 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
     { g: 'money', id: 'maxFeeBps', k: "The marketplace fee's ceiling", e: 'listing', f: 'maxFeeBps', u: '%', dec: 'maxFeeBps', ro: true,
       read: () => undefined, where: 'RareMarket.maxFeeBps — read back from the chain, never kept here',
       s: '<b>10% (1000 bps), ruling 1 of 2026-09-30, and IMMUTABLE:</b> <code>RareMarket.maxFeeBps</code> is a constructor argument, so it is chosen once at deployment and <b>can never be changed afterwards</b>. No setter exists and this page offers none; the row is read-only and the read-back is compared with the decided 10%.' },
+    // ---- a planted terminal's cut: rulings 54 and 57 (2026-10-01), M20 item 20 ---------------------------
+    // The cut is paid OUT OF OUR FEE to whoever holds the 1/1's shadow at the moment of sale, and only on a trade
+    // carrying a server-signed slip: min(fee × terminalShareBps / 10000, price × maxTerminalPriceBps / 10000, fee).
+    // `schema.json`'s listing has no terminal field yet, so the home is the listing entity's own - the chain.
+    { g: 'money', id: 'terminalShare', k: "A planted terminal's share of our fee", e: 'listing', f: 'terminalShareBps', u: '% of the fee', prop: 'terminalShare',
+      read: () => undefined, where: 'RareMarket.terminalShareBps — read back from the chain, never kept here',
+      s: '<b>Out of our fee, never out of the seller\'s money or the buyer\'s price.</b> A 1/1 holder trading at their own terminal is paid it too (ruling 57 (b)). Whatever the share, what is paid is capped by the ceiling below and by the fee itself. ' +
+        'Changing it is <code>setTerminalShareBps(uint16)</code>, a transaction under the <code>SET_TERMINAL</code> power. <b>The default is still PROPOSED</b> and it is the economist\'s; nothing on this page decides it.' },
+    { g: 'money', id: 'terminalCeiling', k: "The terminal cut's hard ceiling", e: 'listing', f: 'maxTerminalPriceBps', u: '% of the sale', dec: 'terminalCeiling', ro: true,
+      read: () => undefined, where: 'RareMarket.maxTerminalPriceBps — read back from the chain, never kept here',
+      s: '<b>1% of the sale price, IMMUTABLE</b> (ruling 57 (a)): <code>maxTerminalPriceBps</code> is a constructor argument, chosen once at deployment, and no setter exists, so this row is read-only. It holds whatever the fee is set to: a terminal\'s owner never receives more than 1% of a sale, and never more than the fee taken.' },
     { g: 'money', id: 'partnerWait', k: 'The waiting period for a paused partnership', e: 'partnership', f: 'splitBps', u: 'h', dec: 'partnerWait',
       read: () => undefined, where: 'nothing' },
     { g: 'money', id: 'roleDelay', k: 'Role change delay', e: 'roles', f: 'roleChangeDelay', u: 'h', dec: 'roleDelay',
-      read: () => undefined, where: 'nothing',
+      read: () => undefined, where: 'RareRoles.roleChangeDelay — read back from the chain, never kept here',
       s: '<b>Zero for v1</b>, decided 2026-09-30. Held by <code>RareRoles.roleChangeDelay</code> as chain state; the value shown is read from the contract when deployed and compared with the decided 0.' },
     // ---- the launch whitelist: M4 item 15, ruling 21 (2026-09-30) --------------
     { g: 'money', id: 'whitelistOpen', k: 'The launch whitelist: open to everyone', e: 'roles', f: 'whitelistOpen', sw: true, decSw: false, decT: 'CLOSED at launch - ruling 21',
@@ -584,9 +738,30 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
       s: 'Whether meme attack cards are listable is <b>not</b> settled by ruling 29 (M15 item 4).' },
     { g: 'money', id: 'tradeBuildings', k: 'Trading: a building sold back', e: 'listing', f: 'state', sw: true, decSw: true, decT: 'ON at launch - ruling 29', read: () => undefined, where: 'nothing' },
     { g: 'money', id: 'tradeBase', k: 'Trading: a whole base', e: 'listing', f: 'state', sw: true, decSw: true, decT: 'ON at launch - ruling 29', read: () => undefined, where: 'nothing' },
+    // ---- the duel: sweep rows 42 and 43, ruling 64 ------------------------------------------------------
+    // What the duel plays by is read out of challenge.html in its probe (duel.js's TERMS as the duel loaded them,
+    // and its own stake presets); the odds are also RareDuel state, read off the chain once an address is recorded.
+    { g: 'money', id: 'duelCounter', k: 'Duel odds: your pick beats theirs', e: 'duel', f: 'odds', u: '%', dec: 'duelCounter', ro: true, exp: () => DEC.duelCounter.v,
+      read: () => { const w = duelWin(); return w && w.Duel && w.Duel.TERMS ? w.Duel.TERMS.counterBps / 100 : undefined; },
+      where: 'Duel.TERMS.counterBps in challenge.html (duel.js, as the duel loaded it) ÷ 100',
+      s: '<b>PERMANENT at the M20 deploy</b> by ruling 64, so this page offers no setter. <b>Not settled by this page, and flagged:</b> ruling 64 calls them constructor arguments, while <code>RareDuel.sol</code> keeps <code>counterBps</code> and <code>sameBps</code> as stored state with setters (M20 item 11). Which one the deploy ships is the chain engineer\'s to reconcile.' },
+    { g: 'money', id: 'duelSame', k: 'Duel odds: the same pick', e: 'duel', f: 'odds', u: '%', dec: 'duelSame', ro: true, exp: () => DEC.duelSame.v,
+      read: () => { const w = duelWin(); return w && w.Duel && w.Duel.TERMS ? w.Duel.TERMS.sameBps / 100 : undefined; },
+      where: 'Duel.TERMS.sameBps in challenge.html (duel.js, as the duel loaded it) ÷ 100',
+      s: 'The 30% when their pick beats yours is what is left of 100, so it has no row of its own.' },
+    { g: 'money', id: 'stakes', k: 'Challenge stake presets', u: 'crystals', tab: true,
+      read: () => { const w = duelWin(); return w && Array.isArray(w.challenge.STAKES) ? w.challenge.STAKES.join(', ') : undefined; },
+      where: 'challenge.STAKES in challenge.html - the presets the stake picker offers',
+      sweep: { row: 43, t: 'keep 10 / 25 / 50 / 100 / 200 - the largest is under the 240 start', v: [10, 25, 50, 100, 200] },
+      s: 'A list the duel\'s picker offers. <code>schema.json</code> gives a duel\'s stake a home and <b>no home to the presets</b>, so this card says NO HOME rather than guessing one.' },
 
     // ---- demo mode: M4 item 14 --------------------------------------------
-    { g: 'demo', id: 'demo', k: 'Demo mode', e: 'game', f: 'entry', sw: true, read: () => undefined, where: 'nothing',
+    // WHERE THE GAME READS IT: challenge.html asks RareRoles.demoMode() at the rareRoles address bridge-config.json
+    // records (falling back to `roles`, as this page does), and with no address lets `?demo=1` stand in. This card
+    // reads THAT - the duel probe's own DEMO - and only counts it when the duel says it came from the chain.
+    { g: 'demo', id: 'demo', k: 'Demo mode', e: 'game', f: 'demo', sw: true, gameChain: true,
+      read: () => { const w = duelWin(); return w && w.challenge.DEMO.src === 'chain' ? (w.challenge.DEMO.on ? 'on' : 'off') : undefined; },
+      where: 'challenge.html\'s DEMO, read by the duel itself from RareRoles.demoMode() at the rareRoles address bridge-config.json records',
       s: '<b>Demo mode forces every game free</b> - no fee, no stake, no payout. It is not a money field beside the cut; it is the field that turns the money off.' },
   ];
 
@@ -654,6 +829,12 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
       dec: (w) => parseInt(String(w).replace(/^0x/, '') || '0', 16) / 100 },
     maxFeeBps: { at: 'rareMarket', sig: 'maxFeeBps()', src: 'RareMarket.maxFeeBps()',
       dec: (w) => parseInt(String(w).replace(/^0x/, '') || '0', 16) / 100 },
+    // the terminal cut (rulings 54 and 57): the share is bps OF THE FEE, the ceiling bps OF THE PRICE; both shown as %
+    terminalShare: { at: 'rareMarket', sig: 'terminalShareBps()', src: 'RareMarket.terminalShareBps()', dec: (w) => word(w) / 100 },
+    terminalCeiling: { at: 'rareMarket', sig: 'maxTerminalPriceBps()', src: 'RareMarket.maxTerminalPriceBps()', dec: (w) => word(w) / 100 },
+    // the duel's odds (sweep row 42): RareDuel holds them in bps, under the key deploy.mjs writes for it
+    duelCounter: { at: 'rareDuel', sig: 'counterBps()', src: 'RareDuel.counterBps()', dec: (w) => word(w) / 100 },
+    duelSame: { at: 'rareDuel', sig: 'sameBps()', src: 'RareDuel.sameBps()', dec: (w) => word(w) / 100 },
     demo: { at: 'rareRoles', sig: 'demoMode()', src: 'RareRoles.demoMode()',
       dec: (w) => (/[1-9a-f]/i.test(String(w).replace(/^0x/, '')) ? 'on' : 'off') },
     whitelistOpen: { at: 'rareRoles', sig: 'whitelistOpen()', src: 'RareRoles.whitelistOpen()',
@@ -674,6 +855,8 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
       word: (v) => Math.round(v * 3600), power: 'the MANAGE_ROLES power, root only' },
     mktFee: { at: 'rareMarket', sig: 'setFeeBps(uint16)', src: 'RareMarket.setFeeBps(uint16)',
       word: (v) => Math.round(v * 100), power: 'the SET_MARKET_FEE power; the contract refuses anything above maxFeeBps' },
+    terminalShare: { at: 'rareMarket', sig: 'setTerminalShareBps(uint16)', src: 'RareMarket.setTerminalShareBps(uint16)',
+      word: (v) => Math.round(v * 100), power: 'the SET_TERMINAL power; the contract refuses a share above 100% of the fee, and the 1% ceiling caps what is paid whatever the share' },
     demo: { at: 'rareRoles', sig: 'setDemoMode(bool)', src: 'RareRoles.setDemoMode(bool)',
       word: (v) => (v ? 1 : 0), power: 'the SET_DEMO_MODE power, which is root only and cannot be granted' },
     whitelistOpen: { at: 'rareRoles', sig: 'setWhitelistOpen(bool)', src: 'RareRoles.setWhitelistOpen(bool)',
@@ -686,7 +869,9 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
   // bridge-config.json is this project's one record of where the chain things live. It carries
   // shadowFriends and attestor and NO rareRoles key, which is the address this page needs.
   let CFG = null;
-  const at = (k) => (CFG && CFG[k]) || null;
+  // `roles` is the second key the registry may be recorded under - registry() below and challenge.html both accept
+  // it - so the reads take it too, or the gate and the duel would ask a contract this page calls undeployed.
+  const at = (k) => (CFG && (CFG[k] || (k === 'rareRoles' && CFG.roles))) || null;
 
   // The eth_call goes to the public RPC chainlive.js already names. No wallet is needed to VERIFY
   // state and a wallet would be no better evidence: what matters is that the answer comes from the
@@ -717,8 +902,39 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
         why: 'read with <code>' + c.src + '</code> at <code>' + a + '</code>, over the chain\'s own RPC.' }; }
       catch (e) { CHAINVAL[id] = { state: 'error', why: 'the chain did not answer: ' + esc(e.message) }; }
     }
+    await readRunning();
     paintAll();
   }
+
+  // ---------------------------------------------------------------------------
+  // IS A GAME RUNNING - ASKED OF THE CHAIN. M4 item 12. `RareGame.runningGames()` counts the games started and
+  // not yet declared; it is what `RareRoles.requireNoGameRunning` asks before any guarded setter moves. So once
+  // a RareGame address is recorded this page asks the same counter rather than asking the deployer to swear to
+  // it. With no address, or no answer, it falls back to the lock below exactly as before: fail closed.
+  // The setters' own guard asks RareRoles, which asks whatever `RareRoles.game()` points at - and answers 0 when
+  // it points at nothing. So that is read too: a guard pointed at nothing refuses nobody, and the page says so.
+  // ---------------------------------------------------------------------------
+  const RUN = { state: 'nodeploy', n: null, at: null, guard: undefined, why: '' };
+  const RUN_EVERY = 10000;                              // ms between asks while the page is open and an address is recorded
+  async function readRunning() {
+    const a = at('rareGame');
+    if (!a) { Object.assign(RUN, { state: 'nodeploy', n: null, at: null, guard: undefined, why: 'bridge-config.json records no rareGame address' }); return RUN; }
+    try { const n = word(await rpc('eth_call', [{ to: a, data: sel('runningGames()') }, 'latest']));
+      Object.assign(RUN, { state: Number.isFinite(n) ? 'read' : 'error', n, at: a, why: Number.isFinite(n) ? '' : 'the answer was not a number' }); }
+    catch (e) { Object.assign(RUN, { state: 'error', n: null, at: a, why: 'the chain did not answer: ' + e.message }); }
+    const r = at('rareRoles');
+    if (!r) RUN.guard = undefined;
+    else { try { RUN.guard = '0x' + String(await rpc('eth_call', [{ to: r, data: sel('game()') }, 'latest'])).replace(/^0x/, '').padStart(64, '0').slice(-40); }
+      catch (e) { RUN.guard = null; } }
+    return RUN;
+  }
+  const guardNote = () => {
+    if (RUN.guard === undefined) return '';
+    if (RUN.guard === null) return 'RareRoles.game() did not answer, so whether the setters\' own guard asks this game contract is not known.';
+    if (/^0x0{40}$/.test(RUN.guard)) return 'BUT RareRoles.game() IS UNSET: the setters\' own guard asks nothing and answers 0, so on chain every guarded setter would move under a running game. Root sets it with RareRoles.setGame.';
+    if (RUN.at && RUN.guard.toLowerCase() !== RUN.at.toLowerCase()) return 'BUT RareRoles.game() POINTS AT ' + RUN.guard + ', NOT AT THIS RareGame: the setters\' own guard asks a different counter from the one this page reads.';
+    return 'RareRoles.game() points at the same contract, so the setters\' own guard asks the same counter.';
+  };
 
   // THE CHAIN'S ANSWER for one row, or null when the chain is not its home.
   function chainback(r) {
@@ -922,17 +1138,24 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
   // running would leave the page reading a game for somebody it has stopped showing it to.
   function signOut() { const was = GATE.open ? 'open' : 'shut';
     GATE.addr = ''; GATE.sig = ''; GATE.signer = ''; GATE.open = false; GATE.claimed = false; GATE.why = '';
-    attested = false; ['pBase', 'pEra'].forEach((id) => { $(id).src = 'about:blank'; });
+    attested = false; ['pBase', 'pEra', 'pDuel'].forEach((id) => { $(id).src = 'about:blank'; });
     // and a new session does not inherit the last one's staged changes, or the screen it was shown
     Object.keys(PEND).forEach((k) => delete PEND[k]); CONFIRM = null;
     log('the gate', was, 'shut', false); paintAll(); }
 
   // Nothing in the game is read until the gate is open. The probes carry no src until here.
   function openBody() {
-    ['pBase', 'pEra'].forEach((id) => { const f = $(id); if (f.getAttribute('src') !== f.dataset.src) f.src = f.dataset.src; });
+    ['pBase', 'pEra', 'pDuel'].forEach((id) => { const f = $(id); if (f.getAttribute('src') !== f.dataset.src) f.src = f.dataset.src; });
     readChain();                                        // and only now is the chain asked anything
     paintAll();
     waitForBase(() => { $('status').textContent = 'THE GAME ANSWERED.'; paintAll(); });
+    waitForDuel();
+  }
+  // the duel answers on its own time, and its demo read only once it has asked the chain (or found nothing to ask)
+  // `not` is the duel that answered before a reload: the window proxy survives a reload, its `challenge` does not
+  function waitForDuel(not) {
+    let n = 0;
+    (function go() { const w = duelWin(); if (w && w.challenge !== not && w.challenge.DEMO.chain !== null) return paintAll(); if (++n > 120) return; setTimeout(go, 250); })();
   }
 
   function paintGate() {
@@ -1011,28 +1234,38 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
   // lock on a door with no wall.
   // ---------------------------------------------------------------------------
   let attested = false, lockOpen = false;
+  // A THIRD STATE, once a RareGame address is recorded: NONE - the chain itself says no game is running. Then
+  // the lock opens without the deployer's word, because the one place that can answer has answered. A running
+  // count from the chain locks hard, the same as a running era; the era still locks on its own, since a tab
+  // that knows of a game is not overruled by a chain that has not heard of it yet.
   function lifecycle() {
-    const e = eraWin();
-    if (!e) return { known: false, running: false, src: 'the start screen has not answered yet', era: null };
-    if (!e.S.era) return { known: false, running: false, src: "the start screen's era, which lives in one browser tab", era: null };
-    return { known: true, running: true, src: "the start screen's era", era: e.S.era };
+    const e = eraWin(), era = e && e.S ? e.S.era : null;
+    const onChain = 'RareGame.runningGames() at ' + RUN.at;
+    if (RUN.state === 'read' && RUN.n > 0) return { known: true, running: true, chain: true, n: RUN.n, src: onChain + ', which reads ' + RUN.n, era };
+    if (era) return { known: true, running: true, src: "the start screen's era", era };
+    if (RUN.state === 'read') return { known: true, running: false, chain: true, n: 0, src: onChain + ', which reads 0', era: null };
+    const why = RUN.state === 'error' ? ' — and the chain was asked and ' + RUN.why : '';
+    if (!e) return { known: false, running: false, src: 'the start screen has not answered yet' + why, era: null };
+    return { known: false, running: false, src: "the start screen's era, which lives in one browser tab" + why, era: null };
   }
   // The gate is part of being locked and it is the outer one: a page nobody has identified
-  // themselves to is locked whatever the lifecycle says.
-  const state = () => { const l = lifecycle(); return { l, gate: GATE.open, locked: !GATE.open || l.running || !attested }; };
+  // themselves to is locked whatever the lifecycle says. A lifecycle that KNOWS no game runs needs no confirmation.
+  const state = () => { const l = lifecycle(); return { l, gate: GATE.open, locked: !GATE.open || l.running || (!l.known && !attested) }; };
 
   function paintLock() {
     const { l, locked } = state();
     const b = $('lock');
     b.className = 'bar' + (locked ? '' : ' off');
     if (l.running) {
-      const e = l.era, left = Math.max(0, e.lockAt - Date.now());
+      const e = l.era, left = e ? Math.max(0, e.lockAt - Date.now()) : 0;
       b.innerHTML = '<div class="hd"><b>A GAME IS RUNNING. NOTHING HERE CAN BE CHANGED.</b></div>' +
         '<p>A running game keeps the table it was created with. This page edits what the <b>next</b> game is created with.</p>' +
+        (l.chain ? '<p class="src">THE CHAIN SAYS SO: ' + esc(l.src) + '.</p>' : '') +
         '<div class="row"><button class="btn" id="lockMore">' + (lockOpen ? 'LESS' : 'WHY') + '</button></div>' +
         (lockOpen ? '<p>While a game is live this page edits nothing at all, which is what makes a recorded fight replayable: the table it was fought under cannot have moved. ' +
           'The refusal here is a convenience — the guarded setter on chain has to refuse it too, because nothing stops somebody calling the contract directly.</p>' +
-          '<p class="src">Read from ' + esc(l.src) + '. Joining closes in ' + Math.round(left / 60000) + ' min.</p>' : '');
+          (guardNote() ? '<p class="src">' + esc(guardNote()) + '</p>' : '') +
+          '<p class="src">Read from ' + esc(l.src) + '.' + (e ? ' Joining closes in ' + Math.round(left / 60000) + ' min.' : '') + '</p>' : '');
       $('lockMore').onclick = () => { lockOpen = !lockOpen; paintLock(); };
       attested = false;
       return;
@@ -1040,15 +1273,27 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
     if (locked) {
       b.innerHTML = '<div class="hd"><b>LOCKED.</b> THIS PAGE CANNOT TELL WHETHER A GAME IS RUNNING.</div>' +
         '<p>No number may change under a running game, so it refuses every change by default.</p>' +
-        '<div class="row"><button class="btn big" id="attest">NO REGISTRY — I CONFIRM NO GAME IS RUNNING</button>' +
+        '<div class="row"><button class="btn big" id="attest">' + (RUN.state === 'error' ? 'NO ANSWER' : 'NO REGISTRY') + ' — I CONFIRM NO GAME IS RUNNING</button>' +
         '<button class="btn" id="lockMore">' + (lockOpen ? 'LESS' : 'WHY') + '</button></div>' +
         (lockOpen ?
-          '<p>The rule is every number, not the money ones. The one place that could answer is <code>game.state</code> on chain, and it does not exist: ' +
-          'the schema gives it a home and a later milestone writes it. The only lifecycle that exists today lives in one browser tab, and a silent tab is not the same as no game — ' +
-          'so this page fails closed rather than guessing.</p>' +
+          '<p>The rule is every number, not the money ones. The one place that can answer is <code>game.state</code> on chain, counted by <code>RareGame.runningGames()</code> - ' +
+          'the same counter every guarded setter asks through <code>RareRoles.requireNoGameRunning</code>. ' +
+          (RUN.state === 'error' ? '<b>A RareGame address is recorded and it did not answer</b>, ' : '<b>No RareGame address is recorded in <code>bridge-config.json</code></b>, because it is written and not deployed, ') +
+          'so the only lifecycle left is the start screen\'s, which lives in one browser tab - and a silent tab is not the same as no game. ' +
+          'So this page fails closed rather than guessing. The moment the chain answers, it asks the chain instead of you.</p>' +
           '<p class="src">Read from ' + esc(l.src) + '. Every change made after the confirmation is logged as made under it.</p>' : '');
       $('attest').onclick = () => { attested = true; log('the lock', 'refusing every change', 'open under the deployer\'s confirmation', false); paintAll(); };
       $('lockMore').onclick = () => { lockOpen = !lockOpen; paintLock(); };
+      return;
+    }
+    if (l.known) {                                         // the chain answered 0: no confirmation is asked for or needed
+      const gn = guardNote();
+      b.innerHTML = '<div class="hd">OPEN — THE CHAIN READS NO GAME RUNNING</div>' +
+        '<p>Changes are accepted and every one of them is on the record below. This page asks the chain again every ' + RUN_EVERY / 1000 + ' s and before anything is signed; the moment it reads a game, it locks.</p>' +
+        (gn ? '<p class="src">' + (/^BUT /.test(gn) ? '<b>' + esc(gn) + '</b>' : esc(gn)) + '</p>' : '') +
+        '<div class="row"><button class="btn" id="reread">ASK THE CHAIN AGAIN</button></div>' +
+        '<p class="src">Read from ' + esc(l.src) + '.</p>';
+      $('reread').onclick = async () => { await readRunning(); paintAll(); };
       return;
     }
     b.innerHTML = '<div class="hd">OPEN — UNDER THE DEPLOYER\'S CONFIRMATION THAT NO GAME IS RUNNING</div>' +
@@ -1102,6 +1347,7 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
     if (r.dec) return DEC[r.dec].v;
     if (r.sw) return !!val[r.id];
     if (r.id in val) return val[r.id];
+    if (r.prop && PROP[r.prop]) return PROP[r.prop].v;   // a PROPOSED row starts at the proposal, tagged as one
     return r.read ? r.read() : undefined;                 // a READ row starts at what the game reads
   }
   // ---------------------------------------------------------------------------
@@ -1120,6 +1366,24 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
     const zero = nums.length === r.doc.length + 1 && nums[0] === 0;
     const lv = zero ? nums.slice(1) : nums;
     return { agree: lv.length === r.doc.length && lv.every((v, i) => v === r.doc[i]), lv, zero, nums };
+  }
+
+  // A sweep row against what the game reads: { cmp: true | false | null (nothing to compare), t: the line shown }.
+  // `v` a number or a list compared as numbers; `each(kind)` a value every kind's entry must hold.
+  function sweepCheck(r, got) {
+    const sw = r.sweep, head = sw.prop
+      ? 'PROPOSED, NOT DECIDED (SWEEP ROW ' + sw.row + ', ' + sw.prop.toUpperCase() + '): '
+      : 'DECIDED, RULING ' + (sw.rul || 64) + ' (SWEEP ROW ' + sw.row + '): ';
+    let cmp = null, off = '';
+    if (got != null && got !== '') {
+      if (Array.isArray(sw.v)) { cmp = sameList(got, sw.v); off = String(got); }
+      else if (typeof sw.v === 'number' && !isNaN(Number(got))) { cmp = Math.abs(Number(got) - sw.v) < 1e-9; off = got + (r.u ? ' ' + r.u : ''); }
+      else if (sw.each) {
+        const bad = String(got).split(' · ').map((p) => p.split(' ')).filter(([k, n]) => Number(n) !== sw.each(k));
+        cmp = bad.length === 0; off = bad.map((p) => p.join(' ')).join(', ');
+      }
+    }
+    return { cmp, t: head + sw.t + (cmp === null ? '' : cmp ? ' · THE GAME READS THE SAME' : ' · THE GAME READS ' + off + ' - THEY DIFFER') };
   }
 
   function readback(r) {
@@ -1245,6 +1509,9 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
     const l = guard('the contract changes'); if (!l) return false;
     const tx = l.filter((x) => x.kind.k === 'tx'); if (!tx.length) return false;
     const e = eth(); if (!e) { log('the contract changes', 'confirmed', 'REFUSED — no wallet to sign with', false); paintAll(); return false; }
+    // asked once more at the last moment: a game may have started since the lock was last read
+    if (at('rareGame')) { await readRunning();
+      if (lifecycle().running) { log('the contract changes', 'confirmed', 'REFUSED — ' + lifecycle().src + ': a game is running', false); CONFIRM = null; paintAll(); return false; } }
     for (const x of tx) {
       const w = CHAIN_WRITE[x.r.id];
       const data = sel(w.sig) + window.Chance.hex(window.Chance.encode(...[].concat(w.word(val[x.r.id])))).slice(2);
@@ -1253,7 +1520,11 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
         log(x.r.k, x.from, x.to + ' — sent as ' + h, true); delete PEND[x.r.id];
       } catch (err) { log(x.r.k, x.from, x.to + ' — REFUSED by the wallet', false); }
     }
-    CONFIRM = null; readChain(); paintAll(); return true;
+    CONFIRM = null; readChain();
+    // the duel reads demo mode once, when it opens - so it is opened again, and what it reads then is the read-back
+    if (tx.some((x) => x.r.id === 'demo')) { const was = duelWin();
+      try { $('pDuel').contentWindow.location.reload(); waitForDuel(was && was.challenge); } catch (err) { /* not loaded */ } }
+    paintAll(); return true;
   }
 
   function paintConfirm() {
@@ -1296,8 +1567,8 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
     { id: 'econ', n: '4', t: 'THE ECONOMY', q: 'What a player starts with, what the land gives back, and how long it takes. Read out of the game rather than typed here.' },
     { id: 'fight', n: '5', t: 'THE FIGHT', q: 'A client belief today and chain state the moment a fight settles on chain. The page says which, and it says plainly that it is editing something the client believes rather than something the game enforces.' },
     { id: 'build', n: '6', t: 'THE BUILDINGS', q: 'What each one costs, how long it takes, and what it draws. <b>Do not assume crystals</b>: a first level should mostly be wood, and working that out is its own deliverable.' },
-    { id: 'sw', n: '7', t: 'THE SWITCHES', q: 'Four things that are typed web addresses today and belong here. <b>These are the ones that really reach the game</b>, so they are where the read-back is proved.' },
-    { id: 'money', n: '8 · 13', t: 'THE MONEY AND THE CLOCK', q: 'The cut, the fee, the places that pay out, and the three lifecycle timings. The prize split is not in here, because it is a rule and not a field.' },
+    { id: 'sw', n: '7', t: 'THE SWITCHES', q: 'Four things that are typed web addresses today and belong here. <b>These are the ones that really reach the game</b>, so they are where the read-back is proved. Beside them, read only: which pace the game is running.' },
+    { id: 'money', n: '8 · 13', t: 'THE MONEY AND THE CLOCK', q: 'The cut, the fee and a planted terminal\'s share of it, the places that pay out, the three lifecycle timings, and the duel\'s odds and stakes. The prize split is not in here, because it is a rule and not a field.' },
     { id: 'demo', n: '14', t: 'DEMO MODE', q: 'One switch that says <i>this is a test, not a real game</i>.' },
   ];
 
@@ -1310,9 +1581,11 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
     else if (r.prop) tags.push('<span class="tag prop">PROPOSED</span>');
     else if (r.open) tags.push('<span class="tag open">NOT DECIDED</span>');
     else if (CHAIN_READ[r.id]) tags.push('<span class="tag ph">READ FROM THE CONTRACT</span>');
-    else tags.push('<span class="tag ph">READ FROM THE GAME</span>');
-    // a proposal from the economist's sweep sits BESIDE whatever the card is, never in place of a decision
-    if (r.sweep && !r.dec && !r.prop) tags.push('<span class="tag prop">PROPOSED</span>');
+    // a row that reads nothing is not READ FROM THE GAME: its sweep line below says what was decided, and that is all
+    else if (r.where !== 'nothing') tags.push('<span class="tag ph">READ FROM THE GAME</span>');
+    // RULING 64 decided the sweep's rows as starting values, so a sweep row is DECIDED - all but the one whose
+    // value is question 22's table, which the approval did not name and which stays PROPOSED.
+    if (r.sweep && !r.dec && !r.prop) tags.push(r.sweep.prop ? '<span class="tag prop">PROPOSED</span>' : '<span class="tag dec">DECIDED</span>');
     const locked = state().locked;
     let ctl;
     if (r.sw) {
@@ -1333,13 +1606,12 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
     if (r.bound) extra += '<div class="s">Refused below <b>' + DEC.cutFloor.v + '%</b> or above <b>' + DEC.cutCeiling.v + '%</b>.</div>' +
       '<div class="refuse" id="refuse_' + r.id + '"' + (REFUSE[r.id] ? '' : ' hidden') + '>' + esc(REFUSE[r.id] || '') + '</div>';
     if (r.decSw !== undefined) extra += '<div class="s">DECIDED: <b>' + esc(r.decT || (r.decSw ? 'ON' : 'OFF')) + '</b>. The switch starts there.</div>';
-    // THE ECONOMIST'S PROPOSAL (DESIGN, The number sweep, proposed - question 21). Shown as a proposal and never as
-    // a decision; where it is a number and the game reads one, the two are compared so a gap cannot hide.
+    // THE SWEEP'S STARTING VALUE (DESIGN, The number sweep - question 21). Ruling 64 decided rows 5 to 43 as starting
+    // values, so each line says DECIDED and cites its row; where the game reads a number or a list, the two are
+    // compared so a gap between what was decided and what the game runs cannot hide. Row 23 stays PROPOSED.
     if (r.sweep) {
-      const pv = r.sweep.v, cur = rb.got, num = pv !== undefined && cur != null && cur !== '' && !isNaN(Number(cur));
-      const same = num && Math.abs(Number(cur) - pv) < 1e-9;
-      extra += '<div class="rb nr" data-sweep="' + r.sweep.row + '">' + esc('PROPOSED, NOT DECIDED (SWEEP ROW ' + r.sweep.row + '): ' + r.sweep.t +
-        (num ? (same ? ' · THE GAME READS THE SAME' : ' · THE GAME READS ' + cur + (r.u ? ' ' + r.u : '') + ' - THEY DIFFER') : '')) + '</div>';
+      const sc = sweepCheck(r, rb.got);
+      extra += '<div class="rb ' + (sc.cmp === null ? 'nr' : sc.cmp ? 'ag' : 'no') + '" data-sweep="' + r.sweep.row + '">' + esc(sc.t) + '</div>';
     }
     if (r.live) extra += '<div class="s"><b>Editable while a game runs</b> — the one exemption on this page.</div>';
     if (r.pv !== undefined) {                              // a PROPOSED row: the proposal beside what the fight runs today, compared live
@@ -1356,13 +1628,17 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
     // a row that proves a rule rather than compares a number (item 9: the version against what it draws)
     const vf = r.verify ? (r.verify() || { c: 'nr', t: 'NOT READABLE — the game has not answered yet' }) : null;
     if (vf) extra = '<div class="rb ' + vf.c + '" data-verify="' + r.id + '">' + esc(vf.t) + '</div>' + extra;
-    const gameLine = cb
+    const gc = r.gameChain ? gameChainLine(r, rb, cb) : null;
+    const gameLine = gc ? '<div class="rb ' + gc.c + '" data-gamechain="' + r.id + '">' + esc(gc.t) + '</div>'
+      : cb
       ? '<div class="rb nr">' + esc('THE GAME\'S OWN COPY, WHICH IS NOT THE CHAIN: ' +
           (rb.got === null ? 'NOT READ THERE EITHER' : String(rb.got))) + '</div>' +
         // a read-only row that says what it expects is still compared, chain home or not (the game year)
         (r.exp && rb.got !== null ? '<div class="rb ' + rb.c + '">' + esc(rb.t) + '</div>' : '')
       : '<div class="rb ' + rb.c + '">' + esc(rb.t) + '</div>';
-    return '<div class="p' + ((cb ? cb.c : rb.c) === 'no' || (r.exp && rb.c === 'no') || (dk && !dk.agree) || (vf && vf.c === 'no') ? ' dis' : '') + '">' +
+    const sc = r.sweep ? sweepCheck(r, rb.got) : null;
+    const w = CHAIN_WRITE[r.id];
+    return '<div class="p' + ((cb ? cb.c : rb.c) === 'no' || (r.exp && rb.c === 'no') || (dk && !dk.agree) || (vf && vf.c === 'no') || (sc && sc.cmp === false) || (gc && gc.c === 'no') ? ' dis' : '') + '">' +
       '<div class="k">' + r.k + '</div>' +
       '<div class="tags">' + tags.join('') + '</div>' +
       '<div class="f">' + ctl + '</div>' +
@@ -1373,10 +1649,25 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
         '<div class="s">Compared at the four levels the document sets: the game reads <b>' + esc(dk.lv.join(', ')) + '</b> there' +
         (dk.zero ? ', and its table also carries a <b>level-0 entry of 0</b> — a cell that is not built reaches nothing, which the document does not set and this comparison does not count.' : '.') + '</div>') +
       '<div class="s">Reads from <b>' + (r.where === 'nothing' ? 'nothing — no setter and no reader' : esc(r.where)) + '</b>' +
-        (r.put === 'url' ? ' · <b>a change here reaches the game</b>' : ' · <b>no setter</b>') + '</div>' +
+        (r.put === 'url' ? ' · <b>a change here reaches the game</b>' : w ? ' · <b>set by a transaction, <code>' + esc(w.src) + '</code></b>' : ' · <b>no setter</b>') + '</div>' +
       (r.dec ? '<div class="s">' + esc(DEC[r.dec].src) + '</div>' : '') +
+      (r.prop && PROP[r.prop] ? '<div class="s">' + esc(PROP[r.prop].src) + '</div>' : '') +
       (r.s ? '<div class="s">' + r.s + '</div>' : '') +
       extra + '</div>';
+  }
+
+  // A number the GAME ITSELF reads off the chain (demo mode: challenge.html asks RareRoles.demoMode()). Its game line is
+  // not "the game's own copy" - there is no copy - so it says where the game got its answer, and holds it to the chain's.
+  function gameChainLine(r, rb, cb) {
+    const w = duelWin();
+    if (!w) return { c: 'nr', t: 'THE GAME (challenge.html): NOT ANSWERED YET' };
+    const D = w.challenge.DEMO;
+    if (D.src !== 'chain') return { c: 'nr', t: 'THE GAME (challenge.html) DID NOT READ THE CHAIN: ' + (D.chain || 'not asked yet') +
+      (D.src === 'url' ? ' — ?demo= STANDS IN, AND READS ' + (D.on ? 'on' : 'off') : '') };
+    const chainSays = CHAINVAL[r.id] && CHAINVAL[r.id].state === 'read' ? CHAINVAL[r.id].got : null;
+    const agree = chainSays === null || chainSays === rb.got;
+    return { c: agree ? 'ag' : 'no', t: (agree ? 'THE GAME READS THE SAME GETTER: ' : 'DISAGREES — THE GAME READS ') + rb.got + ' — ' + D.why +
+      (chainSays !== null && !agree ? ' WHERE THE CHAIN NOW READS ' + chainSays + ' (the duel reads it once, when it opens)' : '') };
   }
 
   // M4 item 13 - a warning beside the game-length field, and never a refusal
@@ -1397,7 +1688,7 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
   }
 
   function splitTable() {
-    const n = Number(val.places);
+    const n = Number(fieldOf(R.find((r) => r.id === 'places')));   // the decided 3 until the field is changed
     const rows = (m) => { const s = shares(m); return s ? s.map((x, i) => '<tr><td>' + (i + 1) + '</td><td>' + round(x) + '%</td><td class="sig">' + round(x * CUT_FREE / 100) + '%</td></tr>').join('') : ''; };
     const round = (x) => Number(x.toFixed(2)).toString();
     let out = '<h3>THE PRIZE SPLIT — DERIVED, NOT TYPED</h3>' +
@@ -1408,7 +1699,7 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
     if (shares(n)) {
       out += '<div class="tw"><table><thead><tr><th>PLACE</th><th>SHARE OF THE 95%</th><th>SHARE OF THE POT</th></tr></thead><tbody>' + rows(n) + '</tbody></table></div>';
     } else {
-      out += '<div class="note">No count is set, so there is nothing to derive. <b>The count has no decided value</b> — only a ceiling of ' + PLACES_CAP + '. ' +
+      out += '<div class="note">No count is set, so there is nothing to derive. <b>The count is empty</b> — its ceiling is ' + PLACES_CAP + '. ' +
         'Set it above and the shares appear.</div>' +
         '<div class="tw"><table><thead><tr><th>PLACES</th><th>SHARES OF THE 95%</th></tr></thead><tbody>' +
         [1, 2, 3, 4, PLACES_CAP].map((m) => '<tr><td>' + m + '</td><td>' + shares(m).map(round).join(' / ') + '</td></tr>').join('') +
@@ -1423,10 +1714,11 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
       'anyone can call a contract from an explorer, so a gate that lives in a web application is a hidden button and not a gate. ' +
       '<b>That half is now written</b>: <code>RareRoles.sol</code> holds <code>demoMode</code> as stored state and <code>setAllowed</code> as the allowlist, and ' +
       '<code>setDemoMode</code> is root only and cannot be granted. <b>It is not deployed</b>, so until it is, <i>demo mode protects us</i> is still false.</div>' +
-      '<div class="note"><b>This is the one number on this page a contract really holds.</b> It is read with <code>RareRoles.demoMode()</code> and written with ' +
-      '<code>RareRoles.setDemoMode(bool)</code> — a transaction, signed by the wallet, instant and irreversible. ' +
+      '<div class="note"><b>A contract holds it, and the game reads it from there.</b> It is read with <code>RareRoles.demoMode()</code> and written with ' +
+      '<code>RareRoles.setDemoMode(bool)</code> — a transaction, signed by the wallet, instant and irreversible. The duel (<code>challenge.html</code>) asks the same getter at the same address, ' +
+      'and the card shows both: what the chain says, and what the duel read. A change is proved when the duel, opened again, reads it. ' +
       (a ? 'The registry answers at <code>' + a + '</code>, so the read-back above is the chain talking.'
-         : '<b>And there is no address to call</b>: <code>bridge-config.json</code> has no <code>rareRoles</code> key, so the read-back above says NO CONTRACT DEPLOYED and the confirm screen refuses to pretend a transaction is possible.') + '</div>' +
+         : '<b>And there is no address to call</b>: <code>bridge-config.json</code> has no <code>rareRoles</code> key, so the read-back above says NO CONTRACT DEPLOYED, the duel lets <code>?demo=</code> stand in, and the confirm screen refuses to pretend a transaction is possible.') + '</div>' +
       '<div class="note"><b>It refuses to change while a game is running</b>, which is the standing rule applied here rather than a new one: ' +
       'flipping it mid-game does not change a number, it changes what kind of game the people in it are playing.</div>';
   }
@@ -1449,8 +1741,13 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
 
   function readbackSection() {
     const g = verifiedSplit(), N = R.length;
-    const rows = R.map((r) => { const rb = readback(r); return { r, cb: chainback(r), rb, dk: docCheck(r, rb.got), vf: r.verify ? r.verify() : null }; });
-    const dis = rows.filter((x) => (x.cb && x.cb.c === 'no') || (x.dk && !x.dk.agree) || (x.vf && x.vf.c === 'no'));
+    const rows = R.map((r) => { const rb = readback(r); return { r, cb: chainback(r), rb, dk: docCheck(r, rb.got), vf: r.verify ? r.verify() : null,
+      sc: r.sweep ? sweepCheck(r, rb.got) : null, gc: r.gameChain ? gameChainLine(r, rb) : null }; });
+    const dis = rows.filter((x) => (x.cb && x.cb.c === 'no') || (x.dk && !x.dk.agree) || (x.vf && x.vf.c === 'no') || (x.sc && x.sc.cmp === false) ||
+      (x.gc && x.gc.c === 'no') || (x.r.exp && x.rb.c === 'no'));
+    const why = (x) => x.cb && x.cb.c === 'no' ? x.cb.t : x.vf && x.vf.c === 'no' ? x.vf.t : x.gc && x.gc.c === 'no' ? x.gc.t
+      : x.r.exp && x.rb.c === 'no' ? x.rb.t : x.sc && x.sc.cmp === false ? x.sc.t
+      : 'THE DOCUMENT SAYS ' + x.r.against + ' — THE GAME READS ' + (x.dk ? x.dk.lv.join(', ') : x.rb.got) + ' at those levels';
     const signable = R.filter((r) => CHAIN_WRITE[r.id] && at(CHAIN_WRITE[r.id].at)).length;
     const held = R.filter((r) => CHAIN_WRITE[r.id]).length;
     const getters = R.filter((r) => CHAIN_READ[r.id]);
@@ -1480,8 +1777,7 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
       '<b>NO CONTRACT DEPLOYED</b> means one does and there is no address to call. <b>NOT READ THERE EITHER</b> means the game\'s own copy does not carry it. ' +
       'A page that showed one sentence for all three would be hiding which of the three is true.</div>' +
       (dis.length ? '<h3>WHAT DISAGREES</h3><div class="tw"><table><thead><tr><th>NUMBER</th><th>THE DISAGREEMENT</th></tr></thead><tbody>' +
-        dis.map((x) => '<tr><td class="wrap">' + x.r.k + '</td><td class="wrap">' +
-          esc(x.cb && x.cb.c === 'no' ? x.cb.t : x.vf && x.vf.c === 'no' ? x.vf.t : 'THE DOCUMENT SAYS ' + x.r.against + ' — THE GAME READS ' + (x.dk ? x.dk.lv.join(', ') : x.rb.got) + ' at those levels') + '</td></tr>').join('') +
+        dis.map((x) => '<tr><td class="wrap">' + x.r.k + '</td><td class="wrap">' + esc(why(x)) + '</td></tr>').join('') +
         '</tbody></table></div>' : '') +
       '</section>';
   }
@@ -1552,7 +1848,7 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
       }
       delete REFUSE[r.id];
       if (r.cap && v !== null && v > r.cap) {
-        i.value = r.cap; val[id] = r.cap; log(r.k, String(was), r.cap + ' — clamped to the ceiling of ' + r.cap, false);
+        i.value = r.cap; val[id] = r.cap; if (r.dec) DEC[r.dec].v = r.cap; log(r.k, String(was), r.cap + ' — clamped to the ceiling of ' + r.cap, false);
         stage(r, was, r.cap); paintAll(); return;
       }
       if (r.dec) DEC[r.dec].v = v;
@@ -1583,6 +1879,8 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
     const l = lifecycle();
     if (l.running !== wasRunning || l.known !== wasKnown) { wasRunning = l.running; wasKnown = l.known; paintAll(); }
   }, 1000);
+  // the chain's count, re-asked on its own slower clock; the one-second tick above repaints when it moves
+  setInterval(() => { if (GATE.open && at('rareGame')) readRunning(); }, RUN_EVERY);
 
   // A handle for the checks, read-only apart from the things a deployer does. IT IS GATED TOO:
   // a stranger who opens the console gets null out of every value-bearing getter, for the same
@@ -1598,6 +1896,11 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
     chainback: ifOpen(chainback), kind: ifOpen(kind), split: ifOpen(verifiedSplit),
     get pending() { return GATE.open ? pending() : null; }, get confirm() { return GATE.open ? CONFIRM : null; },
     get chainvals() { return GATE.open ? CHAINVAL : null; }, get config() { return GATE.open ? CFG : null; },
+    // the lock's chain half: RareGame.runningGames() as last read, and a way to ask again (what the page's own
+    // button and its ten-second clock do), so a check need not wait on the clock
+    get run() { return GATE.open ? Object.assign({}, RUN) : null; }, readRunning: ifOpen(async () => { await readRunning(); paintAll(); return Object.assign({}, RUN); }),
+    readChain: ifOpen(readChain),
+    sweepCheck: ifOpen((id) => { const r = R.find((x) => x.id === id); return r && r.sweep ? sweepCheck(r, readback(r).got) : null; }),
     openConfirm: ifOpen(openConfirm), applyGame: ifOpen(applyGame), signSend: ifOpen(signSend),
     get chainRead() { return Object.keys(CHAIN_READ); }, get chainWrite() { return Object.keys(CHAIN_WRITE); },
     get locked() { return state().locked; },

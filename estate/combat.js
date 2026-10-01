@@ -52,17 +52,33 @@
 // Friend has had a turn and nobody moved or shot, nothing can ever change again ('stalemate'). That is read
 // off the field, not a time limit, and THE INTRUDER WINS IT (ruling of 2026-10-01: the building goes back
 // only when the intruder is killed; a defence that cannot beat or reach it loses the takeover). Before that
-// ruling a stalemate was 'held', the defence's. The chain runs no spared fight. The Genesis never fights.
+// ruling a stalemate was 'held', the defence's. The chain runs no spared fight.
+// THE GENESIS (M13 item 3; DESIGN "The Genesis is the last thing standing"): it can be touched only once every one
+// of its Friends is eliminated, and it still never fights. A setup may carry `genesis: { x, y, hp }`: a unit on the
+// defence's side that never takes a turn. While any defending Friend lives no attacker aims at it, and no crossbow
+// bolt or catapult splash reaches it (judged at the start of the shot). Once they are all down it is the one target
+// left, and the attack wins ('wiped') only when it falls too. Its strength `hp` is the CALLER'S: no figure for a
+// Genesis's strength is decided, so none is written here and a setup that carries a Genesis must say it. A shot at
+// it lands at attacker HP x 10000 / (attacker HP + its hp), the way a shot at a Friend does. Without `genesis` a
+// fight is exactly what it was.
+//
+// THE TRAP (ruling 55; M17 items 10 and 11). A 1/1 Doopie's strength is slot 0 of the HP table, 1140. A trap on a
+// tile, a tree or a crystal bed is ONE chance roll: the Doopie wins if roll < floor(hp[0] x 10000 / (hp[0] +
+// hp[victim's generation])) - 6003 / 6925 / 7718 / 8351 / 8837 / 9193 against Gen 1 to 6. The roll is play 0 of
+// the trap's own id, as a duel takes its one roll. A terminal is not this roll: it is the duel (duel.js TERMINAL).
+// Slot 0 has no weapon (that is still open), so a 1/1 never stands in a full fight: fight() refuses generation 0.
 (function (root) {
   'use strict';
   const Chance = root.Chance || (typeof require !== 'undefined' ? require('./chance.js') : null);
   const MAX_SIDE = 12;                                   // Friends a side: bounds the on-chain gas
-  const MAX_WALLS = 16;
   const DIRS = [[0, -1], [1, -1], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1]];   // N NE E SE S SW W NW
   const SIDES = ['N', 'E', 'S', 'W'];
   const ORDERS = ['hold', 'engage', 'defend', 'fallback'];   // 0, 1, 2, 3 on chain
   const HOLD = 0, ENGAGE = 1, DEFEND = 2, FALLBACK = 3;
   const spots = (tiles) => Math.floor(tiles * 2 + 1e-9);
+  // a wall section's strength: its own, by its level (ruling 64), or the rules' level-1 figure when it carries none
+  const wallHpOf = (R, w) => { if (w.hp != null && !(Number.isInteger(w.hp) && w.hp >= 0)) throw new RangeError('a wall\'s hp is a whole number');
+    return w.hp ? w.hp : R.wallHp; };
 
   // the game's numbers (base.ECON: hp, weapons, wallHp, combat) as the integer tables the fight reads.
   // `proposed` overrides the three fight settings, DECIDED 2026-10-01 and each the deployer's to tune:
@@ -70,7 +86,9 @@
   // often (ruling 45) - and defendTiles 5 (ruling 46). There is no clock to set (ruling 47).
   function rulesFrom(E, proposed) {
     const P = Object.assign({ speed: 1, coverDiv: 2, defendTiles: 5 }, proposed || {});
-    const R = { hp: [0], dmg: [0], reach: [0], period: [0], melee: [false], siege: [false], pierce: [false], area: [0], vsBuilding: [1],
+    // slot 0 is a 1/1 Doopie's strength (ruling 55): read, never defaulted, so a table without it cannot hash as 0
+    if (!(Number.isInteger(E.hp[0]) && E.hp[0] > 0)) throw new RangeError('the HP table has no slot 0 - a 1/1 Doopie\'s strength (ruling 55)');
+    const R = { hp: [E.hp[0]], dmg: [0], reach: [0], period: [0], melee: [false], siege: [false], pierce: [false], area: [0], vsBuilding: [1],
       wallHp: E.wallHp, landVsBuildingBps: E.combat.landVsBuildingBps, towerReach: spots(E.combat.towerRange),
       dropReach: spots(E.combat.dropRange), coverDiv: P.coverDiv, defendReach: spots(P.defendTiles),
       stepMs: Math.round(1000 / (2 * P.speed)) };        // a spot is half a tile
@@ -97,7 +115,11 @@
   // setup: { attackers: [gen…], entry: {x, y, ax, ay},
   //          defenders: [{ gen, x, y, tower, order, fx, fy }]   order 0 hold, 1 engage, 2 defend, 3 fall back; (fx, fy)
   //                     the fall-back spot (only read for FALL BACK)
-  //          walls: [{ x, y, vert }] (a section: spots (x, y) and, for vert, (x, y+1), else (x+1, y)) }
+  //          walls: [{ x, y, vert, hp }] (a section: spots (x, y) and, for vert, (x, y+1), else (x+1, y)). hp is the
+  //                     section's own strength - its kind's registry row, strength[level - 1] (ruling 64: a wall is
+  //                     400 / 800 / 1,600 by level). Absent or 0, it is R.wallHp: the chain cannot tell absent from 0,
+  //                     so neither does this file.
+  //          genesis: { x, y, hp } - optional: the Genesis, last thing standing (see the header) }
   // ctx:   { word, contract, chainId, fightId } — the roll's inputs, as on chain
   function fight(R, setup, ctx, opts) {
     const log = opts && opts.log ? [] : null, trace = opts && opts.trace ? [] : null;
@@ -105,16 +127,23 @@
     // for a captured building "doesn't harm the base"). abortMs: the game-clock ms at which the attack
     // leaves the field ("or they abort and try to run away") - the defence holds, reason 'fled'.
     const spare = !!(opts && opts.spare), abortMs = opts && opts.abortMs != null ? opts.abortMs : Infinity;
-    const na = setup.attackers.length, nd = setup.defenders.length;
-    if (!na || !nd || na > MAX_SIDE || nd > MAX_SIDE) throw new RangeError('1 to ' + MAX_SIDE + ' a side');
-    if (setup.walls.length > MAX_WALLS) throw new RangeError('at most ' + MAX_WALLS + ' wall sections');
+    const na = setup.attackers.length, nd = setup.defenders.length, G = setup.genesis || null;
+    if (G && !(Number.isInteger(G.hp) && G.hp > 0)) throw new RangeError('a Genesis in the fight needs its strength: no figure is decided, the caller must give one');
+    // a Genesis may stand alone - nobody home - and is then the one target from the first turn
+    if (!na || (!nd && !G) || na > MAX_SIDE || nd > MAX_SIDE) throw new RangeError('1 to ' + MAX_SIDE + ' a side');
+    // NO LIMIT ON WALL SECTIONS (deployer, 2026-10-01): a base fights with every finished section it has - a
+    // better-walled base is the point, and an attack that can be made is allowed to be made. There was a cap of 16.
+    // generation 1 to 6, as RareCombat's _gen: slot 0 is a 1/1's strength with no weapon (ruling 55 left its weapon open)
+    for (const g of setup.attackers.concat(setup.defenders.map((d) => d.gen))) if (!(Number.isInteger(g) && g >= 1 && g <= 6)) throw new RangeError('generation ' + g + ' cannot fight: 1 to 6');
     const U = [];
     setup.attackers.forEach((g, i) => U.push({ gen: g, att: true, i, x: setup.entry.x + setup.entry.ax * off(i), y: setup.entry.y + setup.entry.ay * off(i),
       hp: R.hp[g], ready: 0, tower: false, wall: -1 }));
     setup.defenders.forEach((d, i) => U.push({ gen: d.gen, att: false, i, x: d.x, y: d.y, hp: R.hp[d.gen], ready: 0,
       tower: !!d.tower && !R.siege[d.gen], wall: -1, order: d.order || HOLD, hx: d.x, hy: d.y,
       fx: d.fx == null ? d.x : d.fx, fy: d.fy == null ? d.y : d.fy }));
-    const W = setup.walls.map(w => ({ x: w.x, y: w.y, vert: !!w.vert, hp: R.wallHp }));
+    // the Genesis: last in the line-up, on the defence's side, never ready to act (it never fights)
+    if (G) U.push({ gen: 0, att: false, i: nd, genesis: true, x: G.x, y: G.y, hp: G.hp, hp0: G.hp, ready: Infinity, tower: false, wall: -1, order: HOLD, hx: G.x, hy: G.y, fx: G.x, fy: G.y });
+    const W = setup.walls.map(w => ({ x: w.x, y: w.y, vert: !!w.vert, hp: wallHpOf(R, w) }));
     const rolls = Chance.stream(ctx.word, ctx.contract, ctx.chainId, ctx.fightId);
     const cheb = (ax, ay, bx, by) => Math.max(Math.abs(ax - bx), Math.abs(ay - by));
     // a section runs along x by default and along y when vert: the second spot moves with it
@@ -122,10 +151,13 @@
       if (w.vert ? (w.x === x && (w.y === y || w.y + 1 === y)) : (w.y === y && (w.x === x || w.x + 1 === x))) return k; } return -1; };
     const up = (u) => u.tower && u.x === u.hx && u.y === u.hy;   // on its tower (only defenders have one)
     const reach = (u) => up(u) ? (R.melee[u.gen] ? R.dropReach : R.reach[u.gen] + R.towerReach) : R.reach[u.gen];
-    const tag = (u) => (u.att ? 'A' : 'D') + u.i;
+    const tag = (u) => u.genesis ? 'G' : (u.att ? 'A' : 'D') + u.i;
+    const strength = (v) => v.genesis ? v.hp0 : R.hp[v.gen];          // what a shot at v is weighed against
+    // the Genesis is shielded while any of its Friends lives (M13 item 3)
+    const shielded = () => U.some((v) => !v.att && !v.genesis && v.hp > 0);
     const nearest = (u) => {                              // the nearest living enemy, ties to the lower index
-      let best = null, bd = Infinity;
-      for (const v of U) { if (v.att === u.att || v.hp <= 0) continue; const d = cheb(u.x, u.y, v.x, v.y); if (d < bd) { bd = d; best = v; } }
+      let best = null, bd = Infinity; const sh = u.att && shielded();
+      for (const v of U) { if (v.att === u.att || v.hp <= 0 || (v.genesis && sh)) continue; const d = cheb(u.x, u.y, v.x, v.y); if (d < bd) { bd = d; best = v; } }
       return best;
     };
     const onWall = (d) => wallAt(d.x, d.y) >= 0;          // ruling 45: cover is standing ON a standing wall, never behind one
@@ -135,8 +167,9 @@
     function shoot(u, tgt, wk) {                          // tgt a Friend, or wk a wall section's index
       u.ready = t + R.period[u.gen];
       const atWall = wk >= 0, cover = !atWall && !tgt.att && onWall(tgt);
-      let bps = atWall ? R.landVsBuildingBps : Math.floor(R.hp[u.gen] * 10000 / (R.hp[u.gen] + R.hp[tgt.gen]));
+      let bps = atWall ? R.landVsBuildingBps : Math.floor(R.hp[u.gen] * 10000 / (R.hp[u.gen] + strength(tgt)));
       if (cover) bps = Math.floor(bps / R.coverDiv);
+      const sh = shielded();                              // judged once, before this shot hurts anyone
       const roll = rolls(), landed = roll < bps, killed = [], also = [];
       shots++;
       if (landed) {
@@ -148,13 +181,13 @@
           let through = null;
           if (R.pierce[u.gen]) {                          // the next enemy right behind the target
             let bd = Infinity; const sd = cheb(u.x, u.y, tgt.x, tgt.y);
-            for (const v of U) { if (v.att === u.att || v.hp <= 0 || v === tgt) continue;
+            for (const v of U) { if (v.att === u.att || v.hp <= 0 || v === tgt || (v.genesis && sh)) continue;
               const k = cheb(tgt.x, tgt.y, v.x, v.y); if (k > 1 || cheb(u.x, u.y, v.x, v.y) <= sd) continue;
               if (k < bd) { bd = k; through = v; } }
             if (through) { hurt(through, dm, killed); also.push([tag(through), dm]); }
           }
           if (R.area[u.gen]) for (const v of U) {         // the splash: halved for every spot away
-            if (v.att === u.att || v.hp <= 0 || v === tgt || v === through) continue;
+            if (v.att === u.att || v.hp <= 0 || v === tgt || v === through || (v.genesis && sh)) continue;
             const k = cheb(tgt.x, tgt.y, v.x, v.y); if (k > R.area[u.gen]) continue;
             const n = dm >> k; if (n > 0) { hurt(v, n, killed); also.push([tag(v), n]); }
           }
@@ -215,7 +248,7 @@
     // so RareCombat.sol needs no copy.
     const still = new Set();
     for (;;) {
-      if (!U.some(u => !u.att && u.hp > 0)) { reason = 'wiped'; break; }
+      if (!U.some(u => !u.att && u.hp > 0)) { reason = 'wiped'; break; }      // every Friend AND the Genesis, if there is one
       if (!U.some(u => u.att && u.hp > 0)) { reason = 'repelled'; break; }
       let next = Infinity; for (const u of U) if (u.hp > 0 && u.ready < next) next = u.ready;
       t = next;
@@ -226,10 +259,11 @@
         if (u.x !== x0 || u.y !== y0 || shots !== s0) still.clear(); else still.add(u);
       }
       snap();
-      if (still.size === U.filter(u => u.hp > 0).length) { reason = 'stalemate'; break; }
+      if (still.size === U.filter(u => u.hp > 0 && !u.genesis).length) { reason = 'stalemate'; break; }   // the Genesis never takes a turn
     }
     return { winner: reason === 'wiped' || reason === 'stalemate' ? 'attack' : 'defence', reason, t, shots, hits, rolls: rolls.used,
-      attackers: U.filter(u => u.att).map(u => u.hp), defenders: U.filter(u => !u.att).map(u => u.hp), walls: W.map(w => w.hp),
+      attackers: U.filter(u => u.att).map(u => u.hp), defenders: U.filter(u => !u.att && !u.genesis).map(u => u.hp), walls: W.map(w => w.hp),
+      genesis: G ? U[U.length - 1].hp : null,
       at: U.map(u => [u.x, u.y]), log, trace };
   }
 
@@ -262,7 +296,8 @@
   // object's key order or a float.
   const sw = (n) => BigInt.asUintN(256, BigInt(Math.trunc(n)));   // an abi word for a signed integer
   const H = (...vals) => Chance.hex(Chance.keccak256(Chance.encode(...vals)));
-  // rulesHash: every table of R, generation 0..6 in order, then the scalars.
+  // rulesHash: every table of R, generation 0..6 in order, then the scalars. Slot 0 of hp is a 1/1 Doopie's
+  // strength (ruling 55) and hashes like any other entry; the other tables' slot 0 is 0 / false.
   function rulesHash(R) {
     const v = [];
     for (const k of ['hp', 'dmg', 'reach', 'period', 'melee', 'siege', 'pierce', 'area', 'vsBuilding'])
@@ -274,11 +309,14 @@
   function setupHash(setup, word) {
     const v = [sw(setup.attackers.length)]; for (const g of setup.attackers) v.push(sw(g));
     v.push(sw(setup.entry.x), sw(setup.entry.y), sw(setup.entry.ax), sw(setup.entry.ay));
-    v.push(sw(setup.walls.length)); for (const w of setup.walls) v.push(sw(w.x), sw(w.y), sw(w.vert ? 1 : 0));
+    // each section's own hp as RareCombat.Wall carries it: 0 when it has none (the rules' wallHp then applies)
+    v.push(sw(setup.walls.length)); for (const w of setup.walls) v.push(sw(w.x), sw(w.y), sw(w.vert ? 1 : 0), sw(w.hp || 0));
     v.push(sw(setup.defenders.length));
     for (const d of setup.defenders) v.push(sw(d.gen), sw(d.x), sw(d.y), sw(d.tower ? 1 : 0), sw(d.order || HOLD),
       sw(d.fx == null ? d.x : d.fx), sw(d.fy == null ? d.y : d.fy));
     v.push(word);
+    // the Genesis (M13 item 3), only when the fight has one, so a fight without it hashes as it always did
+    if (setup.genesis) v.push(sw(1), sw(setup.genesis.x), sw(setup.genesis.y), sw(setup.genesis.hp));
     return H(...v);
   }
   // resultHash: the outcome - who won and why, when it ended, each unit's final hp, each wall's, and the
@@ -289,6 +327,7 @@
     v.push(sw(r.attackers.length)); for (const h of r.attackers) v.push(sw(h));
     v.push(sw(r.defenders.length)); for (const h of r.defenders) v.push(sw(h));
     v.push(sw(r.walls.length)); for (const h of r.walls) v.push(sw(h));
+    if (r.genesis != null) v.push(sw(1), sw(r.genesis));   // the Genesis's strength left, only when it fought
     return H(...v);
   }
   // ctx: { fightLog, chainId, gameId, fightId, word, rulesHash } or { …, rules: R } - the roll's ctx plus the
@@ -310,7 +349,7 @@
   //   D: base.defense() (tiles, walls, defenders);  intruder: { gen, x, y } in spots;  ctx as for fight()
   function captureSetup(D, intruder) {
     return { attackers: [intruder.gen], entry: { x: intruder.x, y: intruder.y, ax: 0, ay: 0 },
-      walls: D.walls.map(w => ({ x: w.x, y: w.y, vert: !!w.vert })),
+      walls: D.walls.map(w => ({ x: w.x, y: w.y, vert: !!w.vert, hp: w.hp || 0 })),
       defenders: D.defenders.map(d => ({ gen: d.gen, x: d.x, y: d.y, tower: !!d.tower, order: d.order || HOLD, fx: d.fx, fy: d.fy })) };
   }
   function captureFight(R, D, intruder, ctx, opts) {
@@ -320,13 +359,47 @@
     // defender is down at t 0, 'wiped', the intruder untouched, no roll taken.
     const r = setup.defenders.length ? fight(R, setup, ctx, Object.assign({}, opts || {}, { spare: true }))
       : { winner: 'attack', reason: 'wiped', t: 0, shots: 0, hits: 0, rolls: 0, attackers: [R.hp[intruder.gen]], defenders: [],
-          walls: setup.walls.map(() => R.wallHp), at: [[intruder.x, intruder.y]], log: opts && opts.log ? [] : null, trace: opts && opts.trace ? [] : null };
-    const wallsBefore = setup.walls.map(() => R.wallHp);
+          walls: setup.walls.map((w) => wallHpOf(R, w)), at: [[intruder.x, intruder.y]], log: opts && opts.log ? [] : null, trace: opts && opts.trace ? [] : null };
+    const wallsBefore = setup.walls.map((w) => wallHpOf(R, w));
     if (r.walls.some((h, i) => h !== wallsBefore[i])) throw new Error('a capture fight harmed the base');
     return Object.assign(r, { setup, intruderHp: r.attackers[0], fled: r.reason === 'fled', beaten: r.attackers[0] === 0,
       won: r.winner === 'attack', undefended: !setup.defenders.length });
   }
 
-  const api = { rulesFrom, fight, sample, entry, proving, spots, rulesHash, setupHash, resultHash, fightHash, captureSetup, captureFight, REASONS, MAX_SIDE, MAX_WALLS, SIDES, DIRS, ORDERS, HOLD, ENGAGE, DEFEND, FALLBACK };
+  // ---------- THE TRAP (ruling 55; M17 items 10 and 11) ----------
+  // One chance roll decides a trap on a tile, a tree or a crystal bed. The Doopie's chance, in basis points, is
+  // weighed the way a shot is: hp[0] (a 1/1, 1140) against the victim's generation's strength from the same table.
+  // The roll is play 0 off the trap's word under its own id - ctx is { word, contract, chainId, trapId } - which is
+  // RareCombat.trap's RareChance.roll(word, address(this), block.chainid, trapId, 0) line for line.
+  // The victim's strength is its generation's table value, as a shot reads it; how strength comes back after a trap
+  // takes some is still open (the row "The trap: what ruling 55 left"), so nothing here tracks a reduced strength.
+  const DISGUISES = ['tile', 'tree', 'crystalBed', 'terminal'];
+  function trapBps(R, victimGen) {
+    if (!(Number.isInteger(victimGen) && victimGen >= 1 && victimGen <= 6)) throw new RangeError('a trap\'s victim is generation 1 to 6');
+    if (!(R.hp[0] > 0)) throw new RangeError('no 1/1 strength in slot 0 (ruling 55)');
+    return Math.floor(R.hp[0] * 10000 / (R.hp[0] + R.hp[victimGen]));
+  }
+  function trap(R, victimGen, ctx) {
+    const bps = trapBps(R, victimGen), roll = Chance.roll(ctx.word, ctx.contract, ctx.chainId, ctx.trapId, 0);
+    return { roll, bps, doopieWins: roll < bps };
+  }
+  // WHAT A SPRUNG TRAP DOES, as ruling 55 decided it - the outcome, not its application. The stakes settle on our
+  // server in v1, like every fight; applying them to a base's record is record.js's (M13 MOVES), not this file's.
+  // Each fraction is [numerator, denominator]. `tenth` is ruling 55's "a tenth": the SIZE of a tenth is still open
+  // (the row "The trap: what ruling 55 left", part 3), so it is the caller's to pass and has no default here.
+  // A terminal is settled by the duel at duel.js TERMINAL, not by trap(); its stake is listed here for one home.
+  function trapStakes(disguise, doopieWins, tenth) {
+    const T = () => { if (!(Array.isArray(tenth) && tenth.length === 2 && tenth.every(Number.isInteger) && tenth[1] > 0)) throw new RangeError('the size of "a tenth" is not decided (ruling 55 left it open): pass it as [num, den]'); return tenth; };
+    switch (disguise) {
+      case 'crystalBed': return doopieWins ? { victim: { crystals: T() } }                                // the victim loses a tenth of what it carries
+        : { doopieOwner: { crystals: [T()[0], T()[1] * 2] } };                                              // its owner pays half of that
+      case 'tree': return doopieWins ? { victim: { strengthOfRemaining: [1, 2] } } : { doopie: { strength: [1, 4] } };
+      case 'tile': return doopieWins ? { victim: { out: true } } : { doopie: { strength: [1, 2] } };     // out of the game, not gone for good (ruling 53)
+      case 'terminal': return { eachStakes: { ofSmallerPurse: T() }, winnerTakes: true };               // either way: the duel's winner takes both stakes
+      default: throw new RangeError('a Doopie hides as ' + DISGUISES.join(', '));
+    }
+  }
+
+  const api = { rulesFrom, fight, wallHpOf, trapBps, trap, trapStakes, DISGUISES, sample, entry, proving, spots, rulesHash, setupHash, resultHash, fightHash, captureSetup, captureFight, REASONS, MAX_SIDE, SIDES, DIRS, ORDERS, HOLD, ENGAGE, DEFEND, FALLBACK };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.Combat = api;
 })(typeof window !== 'undefined' ? window : globalThis);

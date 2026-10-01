@@ -426,10 +426,12 @@ if (lifted) {
     ok('the page and the parity check agree on every generation\'s HP: '
       + gens.map((g) => g + '=' + pageHp[g]).join(' '),
       norm(pageHp) === norm(parityHp), 'page ' + norm(pageHp) + ' vs paritycheck ' + norm(parityHp));
-    ok('the table is exactly generations 1 to 6 - the same 1..6 the library\'s `_gen` guard allows, and one short of `uint32[7]`',
-      norm(Object.fromEntries(gens.map((g) => [g, 0]))) === norm({ 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 }),
-      'generations on the page: ' + gens.join(', '));
-    ok('and it falls the whole way, so generation 1 is the dearest AND the strongest ('
+    // ruling 55 filled slot 0 with a 1/1 Doopie at 1140 (trap only - no weapon, never a full fight), so the table is
+    // slots 0 to 6: slot 0 plus the 1..6 the library's `_gen` guard allows, exactly the seven of `uint32[7]`
+    ok('the table is exactly slots 0 to 6 - slot 0 the 1/1 Doopie at 1140 (ruling 55), then the 1..6 the library\'s `_gen` guard allows, filling `uint32[7]`',
+      norm(Object.fromEntries(gens.map((g) => [g, 0]))) === norm({ 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 }) && pageHp[0] === 1140,
+      'slots on the page: ' + gens.map((g) => g + '=' + pageHp[g]).join(', '));
+    ok('and it falls the whole way, so the 1/1 is the strongest and, of the generations, generation 1 the dearest AND the strongest ('
       + pageHp[gens[0]] + ' HP down to ' + pageHp[gens[gens.length - 1]] + ')',
       gens.every((g, i) => i === 0 || pageHp[g] < pageHp[gens[i - 1]]),
       gens.map((g) => pageHp[g]).join(' > ') + ' is not strictly falling: if a later generation is '

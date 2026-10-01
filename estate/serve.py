@@ -9,6 +9,7 @@ own cache entry. This one says no-store on everything, so the browser always ask
     python3 estate/serve.py            # port 8765, serving site/
     python3 estate/serve.py 8788       # another port
     python3 estate/serve.py --api 8790 # THE PUBLISHED SHAPE: api/ only, on 127.0.0.1, nothing from disk
+    --records=<dir>  --whitelist=<file>  where the game records and the landing page's whitelist are kept
 
 The `--api` form is M21 item 6, the server side a published bridge needs. rarefiends.com is Apache serving
 static files with system python3 beside it (see deploy/rarefiends.com.conf and run.sh), and the deploy
@@ -23,6 +24,7 @@ NOTHING RUNS THIS ON THE SERVER TODAY - running it there is M21 item 2's go-ahea
 import base64
 import functools
 import glob
+import hashlib
 import http.server
 import json
 import os
@@ -125,6 +127,73 @@ def record_heads():
     return out
 
 
+# ---------------------------------------------------------------- the whitelist: one JSON file, beside the records
+# The landing page's JOIN THE WHITELIST HERE form POSTs { address, contact? } to /api/whitelist. One file, a JSON
+# list of { address, contact, at }, written whole and renamed into place like a record. It lives in the DATA root,
+# beside the records directory - never in the repository and never under site/, so nothing serves it:
+#   on the test server  /srv/rarefriends/data/whitelist/whitelist.json   (deploy/rf-test-record.service passes it)
+#   locally             ~/.cache/rare-fiends-local/whitelist/whitelist.json
+# --whitelist=<file> moves it; with no flag it follows --records (<records>/../whitelist/whitelist.json).
+# What is NOT kept: an IP. The rate limit holds a salted hash of one, in memory only, with a salt made fresh each
+# start, so not even the hash can be matched to anything after a restart. What is never sent back: anything in the
+# file. A new address and one already on the list get the SAME answer, so the endpoint cannot be used to ask
+# whether somebody else's wallet is on it.
+WHITELIST = None                                        # set in __main__; None means "follow RECORDS"
+_WL_LOCK = threading.Lock()
+WL_MAX = 50000                                          # the file's size cap, in entries
+WL_RATE = (8, 600)                                      # at most 8 POSTs from one address in 600 s
+_WL_SALT = secrets.token_bytes(16)
+_WL_HITS = {}                                           # ip hash -> [times], in memory only
+EVM_ADDR = re.compile(r'0x[0-9a-fA-F]{40}')
+X_HANDLE = re.compile(r'@?[A-Za-z0-9_]{1,15}')
+EMAIL = re.compile(r'[^@\s]{1,64}@[^@\s.]{1,63}(\.[^@\s.]{1,63})+')
+
+
+def whitelist_path():
+    return WHITELIST or os.path.join(os.path.dirname(os.path.normpath(RECORDS)), 'whitelist', 'whitelist.json')
+
+
+def whitelist_read():
+    try:
+        with open(whitelist_path(), encoding='utf8') as f:
+            out = json.load(f)
+        return out if isinstance(out, list) else []
+    except (OSError, ValueError):
+        return []
+
+
+def whitelist_write(rows):
+    p = whitelist_path()
+    os.makedirs(os.path.dirname(p), mode=0o700, exist_ok=True)
+    tmp = p + '.tmp'
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, 'w', encoding='utf8') as f:
+        json.dump(rows, f, separators=(',', ':'))
+    os.replace(tmp, p)
+
+
+def whitelist_check(body):
+    """(address, contact) from the POST body, or (None, why). The page checks the same things first; this is
+    the one that counts."""
+    try:
+        j = json.loads(body.decode('utf8'))
+    except (ValueError, UnicodeDecodeError):
+        return None, 'the request is not JSON'
+    if not isinstance(j, dict):
+        return None, 'the request is not JSON'
+    if j.get('website'):                                # the form's trap field: only a robot fills it
+        return None, 'refused'
+    addr = str(j.get('address') or '').strip()
+    if not EVM_ADDR.fullmatch(addr) or int(addr, 16) == 0:
+        return None, 'that is not a Robinhood Chain wallet address (0x and 40 hex characters)'
+    contact = str(j.get('contact') or '').strip()
+    if contact and not (len(contact) <= 120 and (X_HANDLE.fullmatch(contact) or EMAIL.fullmatch(contact))):
+        return None, 'the contact is neither an X handle nor an email address'
+    if contact and X_HANDLE.fullmatch(contact) and not contact.startswith('@'):
+        contact = '@' + contact
+    return (addr.lower(), contact), None
+
+
 class NoCache(http.server.SimpleHTTPRequestHandler):
     """Serves site/, and proxies the three things the bridge page needs and a browser can't do itself:
     the Solana NFT listing (its API sends no CORS header), the art on Arweave (a redirect the page can't
@@ -150,6 +219,9 @@ class NoCache(http.server.SimpleHTTPRequestHandler):
         parts = urllib.parse.urlsplit(self.path)
         if parts.path.startswith('/api/record/'):
             self.record_post(parts.path)
+            return
+        if parts.path == '/api/whitelist':
+            self.whitelist_post()
             return
         if parts.path not in ('/api/claim', '/api/convert'):
             self.send_error(404, 'nothing here takes a POST')
@@ -219,11 +291,20 @@ class NoCache(http.server.SimpleHTTPRequestHandler):
     #   GET  /api/record/<id>         -> { ok, record } or { ok: false, reason: 'NoRecord' }
     #   POST /api/record/<id>/commit  -> apply(record, batch), written to disk when it takes
     #   POST /api/record/<id>/forget  -> the record is dropped (local development only; nothing here is published)
+    #   POST /api/record/<id>/attack  -> M13: base <id> attacks; record.js settle() resolves the fight and both
+    #                                    records are written, or neither (see fight_post)
+    #   GET  /api/record/fights       -> { ok, count, fights } - M13 item 6, the fight counter: every fight this
+    #                                    server has settled, one line each in fights.jsonl beside the records
     def record_get(self):
         path = urllib.parse.urlsplit(self.path).path.rstrip('/')
         if path == '/api/record':
             with _REC_LOCK:
                 self.send_json(json.dumps({'ok': True, 'records': record_heads()}).encode('utf8'))
+            return
+        if path == '/api/record/fights':
+            with _REC_LOCK:
+                fights = self.fights_read()
+            self.send_json(json.dumps({'ok': True, 'count': len(fights), 'fights': fights[-50:]}).encode('utf8'))
             return
         m = re.fullmatch(r'/api/record/(%s)' % BASE_ID, path)
         if not m:
@@ -235,7 +316,7 @@ class NoCache(http.server.SimpleHTTPRequestHandler):
         self.send_json(json.dumps(out).encode('utf8'))
 
     def record_post(self, path):
-        m = re.fullmatch(r'/api/record/(%s)/(commit|forget)' % BASE_ID, path)
+        m = re.fullmatch(r'/api/record/(%s)/(commit|forget|attack)' % BASE_ID, path)
         if not m:
             self.send_error(404, 'no such record route')
             return
@@ -261,8 +342,18 @@ class NoCache(http.server.SimpleHTTPRequestHandler):
         except ValueError:
             self.send_error(400, 'the batch is not JSON')
             return
+        if verb == 'attack':
+            self.fight_post(base, batch)
+            return
         if not isinstance(batch, dict) or str(batch.get('base')) != base:
             self.send_error(400, 'the batch is for another base than the route names')
+            return
+        # A FIGHT'S RESULT IS NEVER A CLIENT'S TO WRITE (M13; rulings 3 and 7): a batch carrying one of
+        # record.js's SERVER_MOVES is refused in apply()'s own shape, before apply is asked - only fight_post
+        # below writes those, after settling the fight itself.
+        forged = [mv.get('kind') for mv in (batch.get('moves') or []) if isinstance(mv, dict) and mv.get('kind') in self.server_moves()]
+        if forged:
+            self.send_json(json.dumps({'ok': False, 'reason': 'Invalid', 'why': 'a fight is settled by our server, never written by a client: ' + ', '.join(forged)}).encode('utf8'))
             return
         try:
             with _REC_LOCK:                             # read, apply, write: one at a time, so the second of two is StaleParent
@@ -274,8 +365,127 @@ class NoCache(http.server.SimpleHTTPRequestHandler):
             return
         self.send_json(json.dumps(out).encode('utf8'))
 
-    def send_json(self, body):
-        self.send_response(200)
+    # AN ATTACK (M13). The attacker's client sends { on, sent, side, parent }: the base it attacks, the roster
+    # ids of the Friends it sends, the side they come in from, and the head it chose them on. Under the one
+    # lock: both records are read, the fight is numbered (one past the count in the log) and its word drawn
+    # here, record.js settles it, and only if BOTH writes took are both records written and the fight logged.
+    # The defender is never asked (decision 2: an attack cannot be refused); its next write off the head it
+    # held is StaleParent, which is how its page learns the record moved.
+    def fight_post(self, base, order):
+        if not isinstance(order, dict) or not re.fullmatch(BASE_ID, str(order.get('on'))):
+            self.send_error(400, 'an attack names the base it attacks')
+            return
+        on = str(order.get('on'))
+        try:
+            with _REC_LOCK:
+                att, dfn = record_read(base), record_read(on)
+                draw = {'word': '0x' + secrets.token_hex(32), 'fightId': len(self.fights_read()) + 1}
+                out = self.record_settle(att, dfn, {k: order.get(k) for k in ('sent', 'side', 'parent')}, draw)
+                if out.get('ok'):
+                    record_write(base, out['attacker'])
+                    record_write(on, out['defender'])
+                    self.fights_append(dict(out['fight'], loggedAt=time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())))
+        except Exception as e:
+            self.send_error(502, str(e))
+            return
+        self.send_json(json.dumps(out).encode('utf8'))
+
+    # The attack's helpers, beside the routes that use them. record.js holds every rule; these only carry
+    # records to it and the log to disk.
+    @staticmethod
+    def record_settle(att, dfn, order, draw):
+        """record.js's settle(), and nothing else - both records, the order and the draw in, its answer out."""
+        run = subprocess.run(['node', RECORD_JS, 'attack'], input=json.dumps({'attacker': att, 'defender': dfn, 'order': order, 'draw': draw}).encode('utf8'),
+                             capture_output=True, timeout=30)
+        out = run.stdout.strip()
+        if run.returncode != 0 or not out:
+            raise RuntimeError('record.js attack failed: ' + (run.stderr.decode('utf8', 'replace')[-300:] or 'no output'))
+        return json.loads(out)
+
+    _SERVER_MOVES = None
+
+    @classmethod
+    def server_moves(cls):
+        """record.js's SERVER_MOVES, read off that file once - the list has one home and it is not here."""
+        if cls._SERVER_MOVES is None:
+            run = subprocess.run(['node', '-e', 'process.stdout.write(JSON.stringify(require(process.argv[1]).SERVER_MOVES))', RECORD_JS],
+                                 capture_output=True, timeout=30)
+            cls._SERVER_MOVES = frozenset(json.loads(run.stdout))
+        return cls._SERVER_MOVES
+
+    # M13 item 6, THE FIGHT COUNTER: one JSON line per fight settled, appended under the record lock, beside
+    # the records. The count is the number of lines - a count of fights that happened, never a figure typed in.
+    @staticmethod
+    def fights_read():
+        try:
+            with open(os.path.join(RECORDS, 'fights.jsonl'), encoding='utf8') as f:
+                return [json.loads(line) for line in f if line.strip()]
+        except OSError:
+            return []
+
+    @staticmethod
+    def fights_append(fight):
+        os.makedirs(RECORDS, mode=0o700, exist_ok=True)
+        with open(os.path.join(RECORDS, 'fights.jsonl'), 'a', encoding='utf8') as f:
+            f.write(json.dumps(fight, separators=(',', ':')) + '\n')
+
+    # POST /api/whitelist { address, contact?, website? } -> { ok: true } or { ok: false, error }.
+    #   400 the address or contact is not one, 413 the body is over 2 KB, 429 too many from one address,
+    #   507 the list is at WL_MAX. A duplicate is { ok: true } and writes nothing (see WHITELIST above).
+    def whitelist_post(self):
+        def say(code, out):
+            self.send_json(json.dumps(out).encode('utf8'), code)
+        # Who is asking, for the rate limit only. Behind Apache every request comes from loopback, and mod_proxy
+        # APPENDS the real peer to X-Forwarded-For - so the last entry is Apache's, and anything before it is
+        # whatever the client chose to send. Only a loopback peer's header is believed.
+        ip = self.client_address[0]
+        if ip in ('127.0.0.1', '::1') and self.headers.get('X-Forwarded-For'):
+            ip = self.headers['X-Forwarded-For'].split(',')[-1].strip()
+        who = hashlib.sha256(_WL_SALT + ip.encode('utf8')).hexdigest()[:20]
+        now = time.time()
+        with _WL_LOCK:
+            hits = [t for t in _WL_HITS.get(who, []) if now - t < WL_RATE[1]]
+            if len(hits) >= WL_RATE[0]:
+                _WL_HITS[who] = hits
+                say(429, {'ok': False, 'error': 'too many tries from here - wait a few minutes'})
+                return
+            hits.append(now)
+            _WL_HITS[who] = hits
+            if len(_WL_HITS) > 20000:                   # bounded: forget whoever has gone quiet
+                for k in [k for k, v in _WL_HITS.items() if not v or now - v[-1] >= WL_RATE[1]]:
+                    _WL_HITS.pop(k, None)
+        try:
+            n = int(self.headers.get('Content-Length') or 0)
+        except ValueError:
+            n = -1
+        if n <= 0 or n > 2048:
+            say(413, {'ok': False, 'error': 'the request is empty or too large'})
+            return
+        got, why = whitelist_check(self.rfile.read(n))
+        if not got:
+            say(400, {'ok': False, 'error': why})
+            return
+        addr, contact = got
+        try:
+            with _WL_LOCK:
+                rows = whitelist_read()
+                if any(isinstance(r, dict) and r.get('address') == addr for r in rows):
+                    say(200, {'ok': True})              # already on it: the same answer, nothing written
+                    return
+                if len(rows) >= WL_MAX:
+                    say(507, {'ok': False, 'error': 'the list is full'})
+                    return
+                rows.append({'address': addr, 'contact': contact,
+                             'at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())})
+                whitelist_write(rows)
+        except OSError as e:
+            self.log_message('whitelist: could not write %s: %s', whitelist_path(), e)
+            say(503, {'ok': False, 'error': 'the list could not be written - try again later'})
+            return
+        say(200, {'ok': True})
+
+    def send_json(self, body, code=200):
+        self.send_response(code)
         self.send_header('Content-Type', 'application/json')
         self.send_header('Content-Length', str(len(body)))
         self.end_headers()
@@ -480,9 +690,10 @@ class ApiOnly(NoCache):
 
     # M7's record routes are local development only: holding players' records on the VPS is a publish, and
     # a publish is the deployer's to start (M20-M23). `forget` especially must never be reachable there.
+    # The whitelist likewise: holding wallet addresses on the VPS is a publish (M23), not this shape's to start.
     def do_POST(self):                                 # noqa: N802
-        if self.path.startswith('/api/record'):
-            self.send_error(404, 'the record is not served in the published shape')
+        if self.path.startswith('/api/record') or self.path.startswith('/api/whitelist'):
+            self.send_error(404, 'the record and the whitelist are not served in the published shape')
             return
         super().do_POST()
 
@@ -579,7 +790,12 @@ if __name__ == '__main__':
     recdirs = [a for a in args if a.startswith('--records=')]
     if recdirs:
         RECORDS = os.path.abspath(recdirs[0][len('--records='):])
-    ports = [a for a in args if a not in ('--api', '--local') and not a.startswith('--fixture=') and not a.startswith('--records=')]
+    # --whitelist=<file>: where the landing page's whitelist is kept; without it, beside the records (see WHITELIST)
+    wls = [a for a in args if a.startswith('--whitelist=')]
+    if wls:
+        WHITELIST = os.path.abspath(wls[0][len('--whitelist='):])
+    ports = [a for a in args if a not in ('--api', '--local') and not a.startswith('--fixture=') and not a.startswith('--records=')
+             and not a.startswith('--whitelist=')]
     if api_only and not ports:
         # The port is the deployer's to choose, not this file's to default: a number typed here would be
         # the one every future reader copied.

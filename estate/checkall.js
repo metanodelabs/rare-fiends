@@ -344,8 +344,9 @@ const CHECKS = [
                         + 'defense() - is still in index.html\'s memory and waits on M6'],
   ['artcheck',          'the Friend art in base-data.json is the chain\'s: every non-drawn idle/walk clip of every '
                         + 'spriteSets and friendRoster entry equals the registry\'s frames(family, seed), and every '
-                        + 'Genesis px equals tokenURI\'s pixels (sprites/chain-art.mjs --check); no RPC is `skip`, not a pass',
-                        '`friendSprites` (no token recorded, origin unknown) and the 8 drawn family-6 clips (drawnFacings, '
+                        + 'Genesis px equals tokenURI\'s pixels (sprites/chain-art.mjs --check); `friendSprites` is gone '
+                        + '(retired, M11 item 10) and a file carrying it again FAILS; no RPC is `skip`, not a pass',
+                        'the 8 drawn family-6 clips (drawnFacings, '
                         + 'skipped by design); anything about how the art RENDERS - no browser is opened'],
   ['recordcheck',       "M6, state that survives: record.js's one rule for taking a session's write, refusal by refusal "
                         + '(Replayed, StaleParent from two sessions off one head and from a batch out of order, Invalid '

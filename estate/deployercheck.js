@@ -79,6 +79,10 @@ const MARKET_ANSWERS = { [SEL_('feeBps()')]: 150, [SEL_('maxFeeBps()')]: 1000,
   [SEL_('defaultLength()')]: 604800, [SEL_('joinWindow()')]: 86400, [SEL_('startDelay()')]: 3600, [SEL_('minPlayers()')]: 2,
   [SEL_('defaultCutBps()')]: 500, [SEL_('MIN_CUT_BPS()')]: 500, [SEL_('MAX_CUT_BPS()')]: 1000, [SEL_('defaultPlaces()')]: 3 };
 const GAME = '0x00000000000000000000000000000000000000af';       // where the stub RareGame answers
+const DUEL = '0x00000000000000000000000000000000000000b0';       // where the stub RareDuel answers
+Object.assign(MARKET_ANSWERS, { [SEL_('terminalShareBps()')]: 3333, [SEL_('maxTerminalPriceBps()')]: 100,
+  [SEL_('counterBps()')]: 7000, [SEL_('sameBps()')]: 5000, [SEL_('game()')]: parseInt(GAME, 16) });
+const SEL_RUNNING = SEL_('runningGames()');
 // Hoisted so the crash path below can clean up too: it used to exit(1) without touching the profile,
 // which is the one path that leaks even when the happy path is perfect.
 let PROF = null, CH = null;
@@ -107,6 +111,14 @@ let PROF = null, CH = null;
   const ev = async (e) => { const r = await send('Runtime.evaluate', { expression: e, returnByValue: true, awaitPromise: true });
     return r.exceptionDetails ? 'THREW: ' + r.exceptionDetails.exception.description.split('\n')[0] : r.result.value; };
   const watch = await require('./pagewatch.js').attach(sock, send);
+  await send('Page.enable');
+  await send('Page.addScriptToEvaluateOnNewDocument', { source: `(function(){
+    if (window.top === window) return;
+    const real = window.fetch.bind(window);
+    window.fetch = (u, i) => { const s = String(u), T = window.top;
+      const rpc = T.ChainLive && T.ChainLive.RPC && T.ChainLive.RPC.indexOf(s) >= 0;
+      if (T.__stubFetch && (s.indexOf('bridge-config') >= 0 || rpc)) return T.__stubFetch(u, i);
+      return real(u, i); }; })();` });
   let bad = 0; const ok = (n, c, v) => { console.log((c ? '  ok  ' : 'FAIL  ') + n + (c ? '' : '   -> ' + v)); if (!c) bad++; };
   const click = (sel) => ev(`(()=>{const e=document.querySelector(${JSON.stringify(sel)}); if(!e) return 'no such control'; e.click(); return 'ok';})()`);
 
@@ -134,7 +146,7 @@ let PROF = null, CH = null;
     if (!window.__realFetch) window.__realFetch = window.fetch.bind(window);
     // the stub chain's one piece of state, so a transaction has a visible effect to read back
     if (window.__demo === undefined) window.__demo = ${o.demoOn ? 'true' : 'false'};
-    const cfg = ${JSON.stringify(o.registry ? { chainId: 4663, shadowFriends: null, attestor: null, rareRoles: o.registry, rareMarket: MARKET, rareGame: GAME }
+    const cfg = ${JSON.stringify(o.registry ? { chainId: 4663, shadowFriends: null, attestor: null, rareRoles: o.registry, rareMarket: MARKET, rareGame: GAME, rareDuel: DUEL }
                                             : { chainId: 4663, shadowFriends: null, attestor: null })};
     // THE CHAIN, ANSWERED HERE. The page reads contract state with a JSON-RPC eth_call over
     // ChainLive.RPC - not through the wallet - so this is where a chain has to be stood in for.
@@ -147,7 +159,10 @@ let PROF = null, CH = null;
       if ((window.ChainLive ? window.ChainLive.RPC : []).some((r) => url === r)) {
         let body = {}; try { body = JSON.parse((i && i.body) || '{}'); } catch (e) {}
         window.__rpc.push(body);                          // every call, so "none was made" is checkable
-        const MA = ${JSON.stringify(MARKET_ANSWERS)}, cd = String(((body.params || [])[0] || {}).data || '').slice(0, 10).toLowerCase();
+        const MA = Object.assign({}, ${JSON.stringify(MARKET_ANSWERS)}, window.__answers || {}), cd = String(((body.params || [])[0] || {}).data || '').slice(0, 10).toLowerCase();
+        if (body.method === 'eth_call' && cd === '${SEL_RUNNING}') return Promise.resolve({ ok: true, json: () => Promise.resolve(window.__running == null
+          ? { jsonrpc: '2.0', id: 1, error: { code: -32000, message: 'the stub answers runningGames() only when window.__running is set' } }
+          : { jsonrpc: '2.0', id: 1, result: '0x' + Number(window.__running).toString(16).padStart(64, '0') }) });
         if (body.method === 'eth_call' && MA[cd] !== undefined)           // RareMarket's two getters, RareGame's eight
           return Promise.resolve({ ok: true, json: () => Promise.resolve({ jsonrpc: '2.0', id: 1,
             result: '0x' + MA[cd].toString(16).padStart(64, '0') }) });
@@ -156,6 +171,7 @@ let PROF = null, CH = null;
       }
       return window.__realFetch(u, i);
     };
+    window.__stubFetch = window.fetch;
     ${o.none ? 'delete window.ethereum; return "no wallet";' : `
     window.ethereum = { isStub: true, request: async ({ method, params }) => {
       if (method === 'eth_requestAccounts') { if (${!!o.rejectConnect}) throw { code: 4001, message: 'User rejected the request' }; return [W.addr(key)]; }
@@ -184,7 +200,7 @@ let PROF = null, CH = null;
     cfm: document.getElementById('confirm').innerHTML.length, pend: deployerPage.pending,
     fields: document.querySelectorAll('#out input,#out button[data-sw]').length,
     handle: [deployerPage.rows, deployerPage.log, deployerPage.DEC, deployerPage.val].every((x) => x === null),
-    probes: [document.getElementById('pBase').getAttribute('src'), document.getElementById('pEra').getAttribute('src')],
+    probes: [document.getElementById('pBase').getAttribute('src'), document.getElementById('pEra').getAttribute('src'), document.getElementById('pDuel').getAttribute('src')],
     open: deployerPage.gate.open, claimed: deployerPage.gate.claimed, signer: deployerPage.gate.signer,
     gate: (document.getElementById('gate').textContent || '').replace(/\\s+/g, ' ').trim(),
     text: document.body.innerText.replace(/\\s+/g, ' ').trim()
@@ -197,7 +213,7 @@ let PROF = null, CH = null;
   // a probe is dark if it was never given a src, or was put back to about:blank on the way out
   const dark = (p) => p === null || p === 'about:blank';
   const nothing = (v) => v.hidden === true && v.out === 0 && v.toc === 0 && v.fields === 0 && v.handle === true &&
-    v.open === false && dark(v.probes[0]) && dark(v.probes[1]) && !shows(v).length && !/\d+\s*%/.test(v.text) &&
+    v.open === false && dark(v.probes[0]) && dark(v.probes[1]) && dark(v.probes[2]) && !shows(v).length && !/\d+\s*%/.test(v.text) &&
     v.cfm === 0 && v.pend === null;                     // and no from-and-to left lying in the document
   const told = (v) => JSON.stringify({ hidden: v.hidden, out: v.out, cfm: v.cfm, pend: v.pend, fields: v.fields, handle: v.handle,
     probes: v.probes, shows: shows(v), text: v.text.slice(0, 200) });
@@ -423,7 +439,7 @@ let PROF = null, CH = null;
   ok('THE DEPLOYER SIGNS AND THE PAGE OPENS: signed by the address the registry holds in the role, and not under a claim',
     v.open === true && v.hidden === false && v.signer.toLowerCase() === NODEW.addr(TEST_VECTOR_KEY_DEPLOYER) && v.claimed === false,
     JSON.stringify({ open: v.open, hidden: v.hidden, signer: v.signer, claimed: v.claimed }));
-  ok('and only now does it start reading the game', v.probes[0] === 'base.html?econ=1' && v.probes[1] === 'start.html', JSON.stringify(v.probes));
+  ok('and only now does it start reading the game', v.probes[0] === 'base.html?econ=1' && v.probes[1] === 'start.html' && v.probes[2] === 'challenge.html', JSON.stringify(v.probes));
   ok('the gate is on the record, naming who signed it', await ev('deployerPage.log.some(e=>/^the gate$/.test(e.what) && /deployer role/.test(e.to))'),
     await ev('JSON.stringify(deployerPage.log)'));
   ok('the page says plainly that it is a gate and not a lock, and which half is not true yet',
@@ -446,7 +462,7 @@ let PROF = null, CH = null;
   await click('#signout'); await sleep(500);
   v = await seen();
   ok('SIGNING OUT shuts it again: nothing shown, and the game is dropped rather than left running behind a hidden screen',
-    v.hidden === true && v.out === 0 && v.cfm === 0 && v.handle === true && v.probes[0] === 'about:blank' && v.probes[1] === 'about:blank', told(v));
+    v.hidden === true && v.out === 0 && v.cfm === 0 && v.handle === true && v.probes[0] === 'about:blank' && v.probes[1] === 'about:blank' && v.probes[2] === 'about:blank', told(v));
   await click('#doconnect'); await sleep(500); await click('#dosign'); await sleep(900);
   ok('and the deployer can sign back in', await ev('deployerPage.gate.open === true'), await ev('deployerPage.gate.why'));
 
@@ -454,6 +470,11 @@ let PROF = null, CH = null;
   for (let i = 0; i < 120 && !(await ev('(()=>{try{const b=document.getElementById("pBase").contentWindow.base; return !!(b&&b.ECON);}catch(e){return false;}})()')); i++) await sleep(250);
   ok('the game answers the probe, so there is something to read back from',
     await ev('(()=>{try{return !!document.getElementById("pBase").contentWindow.base.ECON;}catch(e){return false;}})()'), 'no base.ECON');
+  // The starting purse is read HERE, before the seams delivery below: the page's startPurse row reads the
+  // probe's LIVE purse, and once seams are on its Friends bank 0.25 crystals every ~6 s of game clock, so a
+  // read taken later is a race the check lost about one -j 4 run in two ("startPurse":240.25). With seams off
+  // the purse holds still (watched for 149 s of game clock), so this is the starting purse and nothing else.
+  const PURSE0 = await ev(`deployerPage.readback(deployerPage.rows.find(x=>x.id==='startPurse')).got`);
 
   // ---- the lock: M4 item 12 ------------------------------------------------
   ok('on load the page is LOCKED', await ev('deployerPage.locked === true'), await ev('JSON.stringify(deployerPage.state().l)'));
@@ -684,13 +705,21 @@ let PROF = null, CH = null;
   // amounts are hundredths in the game and whole on the page: the divisor is the game's crystalUnit
   const EV = JSON.parse(await ev(`JSON.stringify(Object.fromEntries(['startPurse','treeWood','harvCost','siloCap','footprint','cellNeeds'].map(id=>[id, deployerPage.readback(deployerPage.rows.find(x=>x.id===id)).got])))`));
   ok('the economy reads in whole units, not hundredths: 240 crystals, 3 logs a tree, a harvester 20, silos 300 / 900 / 3000',
-    EV.startPurse === 240 && EV.treeWood === 3 && EV.harvCost === 20 && EV.siloCap === '300, 900, 3000', JSON.stringify(EV));
+    PURSE0 === 240 && EV.treeWood === 3 && EV.harvCost === 20 && EV.siloCap === '300, 900, 3000', JSON.stringify(Object.assign({ startPurseAtLoad: PURSE0 }, EV)));
   ok('footprint and the cell\'s operator table are read, not blank', /keep 1/.test(EV.footprint) && EV.cellNeeds === 'none at any level', JSON.stringify(EV));
   const SW = JSON.parse(await ev(`JSON.stringify(['tradeCrystals','tradeItems','tradeBuildings','tradeBase','multiPartner','whitelistOpen'].map(id=>[id, !!deployerPage.val[id]]))`));
   ok('ruling 29: the four trade switches start ON; multiple partnerships and the open whitelist start OFF',
     JSON.stringify(SW) === JSON.stringify([['tradeCrystals',true],['tradeItems',true],['tradeBuildings',true],['tradeBase',true],['multiPartner',false],['whitelistOpen',false]]), JSON.stringify(SW));
   const PROP = JSON.parse(await ev(`JSON.stringify([...document.querySelectorAll('#out [data-sweep]')].map(e=>e.textContent))`));
-  ok('every sweep proposal on the page says PROPOSED, NOT DECIDED (' + PROP.length + ' of them)', PROP.length >= 15 && PROP.every((t) => /^PROPOSED, NOT DECIDED \(SWEEP ROW \d+\)/.test(t)), JSON.stringify(PROP.slice(0, 3)));
+  const SWROWS = JSON.parse(await ev(`JSON.stringify([...document.querySelectorAll('#out [data-sweep]')].map(e=>+e.dataset.sweep))`));
+  const WANT_ROWS = [5, 6, 7, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 34, 35, 36, 37, 38, 43];
+  const badSweep = PROP.map((t, i) => [SWROWS[i], t]).filter(([n, t]) => n === 23
+    ? !/^PROPOSED, NOT DECIDED \(SWEEP ROW 23, QUESTION 22\): /.test(t)
+    : !new RegExp('^DECIDED, RULING 64 \\(SWEEP ROW ' + n + '\\): ').test(t));
+  ok('ruling 64: every sweep line says DECIDED, RULING 64 and cites its row, and only row 23 (question 22) still says PROPOSED (' + PROP.length + ' lines)',
+    PROP.length >= 30 && badSweep.length === 0, JSON.stringify(badSweep.slice(0, 3)));
+  ok('and every row ruling 64 decided that has a number or a rule is on the page: ' + WANT_ROWS.join(', '),
+    WANT_ROWS.every((n) => SWROWS.includes(n)), 'missing ' + JSON.stringify(WANT_ROWS.filter((n) => !SWROWS.includes(n))));
 
   // A READ IS NOT A VALUE. The census above counts a row as verified once its eth_call came back,
   // so a getter answered with the wrong word still counts. The two RareMarket getters are held to
@@ -843,7 +872,204 @@ let PROF = null, CH = null;
   ok('M12 item 2: base.html?world=1 generates its map with MapGen.MAP_DEFAULT.players (' + (WG ? WG.def : '?') + '), not a count of its own',
     !!WG && typeof WG.gen === 'number' && WG.gen === WG.def, 'world=1: ' + wg);
 
-  ok('nothing 404d and nothing was logged as an error, over the page and the two it probes', watch.clean(), watch.why());
+  // =============================================================================================
+  // M4, THE ECONOMIST'S ROWS OF 2026-10-01 - rulings 32, 57, 62 and 64, the duel probe, and the lock asking
+  // the chain. Every assertion here reads a card off the screen and holds it to what the GAME or the CHAIN
+  // answers, and every one is BROKEN ONCE in this run - the game or the chain is changed under the page,
+  // the card is seen to follow, and the change is put back. A card that only agreed would prove nothing.
+  // =============================================================================================
+  const cardOf = async (id) => JSON.parse(await ev(`JSON.stringify((()=>{const r=deployerPage.rows.find(x=>x.id===${JSON.stringify(id)}); if(!r) return null;
+    const p=[...document.querySelectorAll('#out .p')].find(e=>e.querySelector('.k')&&e.querySelector('.k').textContent===r.k); if(!p) return null;
+    return {tags:[...p.querySelectorAll('.tag')].map(t=>t.textContent), rb:[...p.querySelectorAll('.rb')].map(e=>e.textContent),
+      sweep:(p.querySelector('[data-sweep]')||{}).textContent||null, verify:(p.querySelector('[data-verify]')||{}).textContent||null,
+      gamechain:(p.querySelector('[data-gamechain]')||{}).textContent||null, dis:p.classList.contains('dis'), all:p.textContent.replace(/\\s+/g,' ')};})())`));
+  const inDisagrees = async (k) => (await ev(`(()=>{const s=document.getElementById('readback'); return !!s && [...s.querySelectorAll('td')].some(t=>t.textContent===${JSON.stringify(k)});})()`));
+  const PW = 'document.getElementById("pBase").contentWindow', DW = 'document.getElementById("pDuel").contentWindow';
+  const rp = async () => { await ev('deployerPage.readChain()'); await sleep(300); };           // re-reads the chain and repaints
+
+  // ---- the tags: nothing PROPOSED that ruling 64 decided, nothing NOT DECIDED that has been ----------------
+  const TAGS = JSON.parse(await ev(`JSON.stringify(deployerPage.rows.map(r=>{const p=[...document.querySelectorAll('#out .p')].find(e=>e.querySelector('.k')&&e.querySelector('.k').textContent===r.k);
+    return [r.id, p?[...p.querySelectorAll('.tag')].map(t=>t.textContent):null, r.where];}))`));
+  const tagged = (t) => TAGS.filter(([, ts]) => ts && ts.includes(t)).map(([id]) => id);
+  const liars = TAGS.filter(([, ts, w]) => ts && w === 'nothing' && ts.includes('READ FROM THE GAME')).map(([id]) => id);
+  ok('no card that reads nothing is tagged READ FROM THE GAME (' + TAGS.filter(([, , w]) => w === 'nothing').length + ' such cards)', liars.length === 0, JSON.stringify(liars));
+  ok('the only cards tagged PROPOSED are question 22\'s costs and the terminal\'s default share - nothing ruling 64 decided',
+    JSON.stringify(tagged('PROPOSED').sort()) === JSON.stringify(['costs', 'terminalShare']), JSON.stringify(tagged('PROPOSED')));
+  ok('the only card tagged NOT DECIDED is the capturing Friend\'s strength hit (sweep rows 8 and 44, no number proposed)',
+    JSON.stringify(tagged('NOT DECIDED')) === JSON.stringify(['captureHit']), JSON.stringify(tagged('NOT DECIDED')));
+
+  // ---- a decided sweep line follows the game, both ways (row 13, tree regrowth) -----------------------------
+  const regrowWas = await ev(PW + '.base.ECON.regrowMs');
+  let sc = await cardOf('regrowMs');
+  ok('sweep row 13 says DECIDED, RULING 64 and compares with what the game reads (' + regrowWas / 1000 + ' s)',
+    /^DECIDED, RULING 64 \(SWEEP ROW 13\): 15 min \(900 s\)/.test(sc.sweep) &&
+    (regrowWas === 900000 ? /THE GAME READS THE SAME$/.test(sc.sweep) : new RegExp('THE GAME READS ' + regrowWas / 1000 + ' s - THEY DIFFER$').test(sc.sweep)), sc.sweep);
+  await ev(PW + '.base.ECON.regrowMs = ' + (regrowWas === 900000 ? 45000 : 900000)); await repaint();
+  sc = await cardOf('regrowMs');
+  ok('BROKEN ONCE: with the game\'s regrowMs moved to the other side, the line flips' + (regrowWas === 900000 ? ' to THEY DIFFER, and the card is in WHAT DISAGREES' : ' to THE GAME READS THE SAME'),
+    regrowWas === 900000 ? (/THEY DIFFER$/.test(sc.sweep) && sc.dis && await inDisagrees('Time for a tree to grow back')) : /THE GAME READS THE SAME$/.test(sc.sweep), sc.sweep);
+  await ev(PW + '.base.ECON.regrowMs = ' + regrowWas); await repaint();
+
+  // ---- ruling 32: places is DECIDED at 3, and read back off RareGame ----------------------------------------
+  await ev(`(()=>{const i=document.querySelector('[data-in="places"]'); i.value=3; i.dispatchEvent(new Event('change')); return 1;})()`); await sleep(200);
+  sc = await cardOf('places');
+  // Named for what it holds. It said "is DECIDED 3 ... and AGREES", and was broken on purpose with DEC.places at 4:
+  // it stayed green, because the card never shows the decided figure and never compares it with the contract -
+  // there is no AGREES on this card to assert. That comparison is the page's to add, not this line's to claim.
+  ok('ruling 32: "How many places pay out" is tagged DECIDED, cites ruling 32 ("places starts at 3"), and the contract reads 3 - the card compares no decided figure with it',
+    sc.tags.includes('DECIDED') && /Ruling 32 \(2026-10-01\): "places starts at 3"/.test(sc.all) && sc.rb[0] === 'THE CONTRACT READS 3' && !sc.dis, JSON.stringify({ rb: sc.rb.slice(0, 2), dis: sc.dis }));
+
+  // ---- rulings 54 and 57: the terminal cut, read back from RareMarket ----------------------------------------
+  let ts = await cardOf('terminalShare'), tc = await cardOf('terminalCeiling');
+  ok('ruling 57 (c): the terminal\'s share is PROPOSED 33.33% of the fee, and RareMarket.terminalShareBps() reads 33.33 off the chain',
+    ts.tags.includes('PROPOSED') && !ts.tags.includes('DECIDED') && ts.rb[0] === 'THE CONTRACT READS 33.33' && /RareMarket\.terminalShareBps\(\)/.test(ts.all), JSON.stringify(ts.rb.slice(0, 2)));
+  ok('ruling 57 (a): the ceiling is DECIDED 1% of the sale, read-only, and RareMarket.maxTerminalPriceBps() reads 1 and AGREES',
+    tc.tags.includes('DECIDED') && tc.rb[0] === 'THE CONTRACT READS 1' && !/<input/.test(tc.all) && /IMMUTABLE/.test(tc.all), JSON.stringify(tc.rb.slice(0, 2)));
+  await ev(`window.__answers = { '${SEL_('maxTerminalPriceBps()')}': 200 }`); await rp();
+  tc = await cardOf('terminalCeiling');
+  ok('BROKEN ONCE: a contract built with a 2% ceiling reads DISAGREES — THE CONTRACT READS 2', tc.rb[0] === 'DISAGREES — THE CONTRACT READS 2' && tc.dis, JSON.stringify(tc.rb.slice(0, 1)));
+  await ev('window.__answers = {}'); await rp();
+  await ev(`(()=>{const i=document.querySelector('[data-in="terminalShare"]'); i.value=25; i.dispatchEvent(new Event('change')); return 1;})()`); await sleep(200);
+  await click('#applyecon'); await sleep(300);
+  const cfT = await ev("document.getElementById('confirm').textContent.replace(/\\s+/g,' ')");
+  ok('changing the share is A CONTRACT STATE CHANGE through RareMarket.setTerminalShareBps(uint16), under the SET_TERMINAL power',
+    /A CONTRACT STATE CHANGE/.test(cfT) && /RareMarket\.setTerminalShareBps\(uint16\)/.test(cfT) && /SET_TERMINAL power/.test(cfT) && /33\.33/.test(cfT) && /25/.test(cfT), cfT.slice(0, 400));
+  await click('#nocfm'); await sleep(150);
+  await ev(`(()=>{const i=document.querySelector('[data-in="terminalShare"]'); i.value=33.33; i.dispatchEvent(new Event('change')); return 1;})()`); await sleep(200);
+
+  // ---- ruling 64 row 42: the duel's odds, where the duel reads them and on the chain -------------------------
+  let duc = await cardOf('duelCounter');
+  ok('sweep row 42: the duel\'s 70% is DECIDED, the duel (challenge.html, Duel.TERMS) reads 70 and AGREES, and RareDuel.counterBps() reads 70',
+    duc.tags.includes('DECIDED') && duc.rb.includes('AGREES — THE GAME READS 70 % · DECIDED 70 %') && duc.rb[0] === 'THE CONTRACT READS 70', JSON.stringify(duc.rb));
+  await ev(DW + '.Duel.TERMS.counterBps = 6000'); await repaint();
+  duc = await cardOf('duelCounter');
+  ok('BROKEN ONCE: a duel playing 60% reads DISAGREES — THE GAME READS 60 %', duc.rb.includes('DISAGREES — THE GAME READS 60 % · DECIDED 70 %') && duc.dis, JSON.stringify(duc.rb));
+  await ev(DW + '.Duel.TERMS.counterBps = 7000'); await repaint();
+  const stk = await cardOf('stakes');
+  ok('sweep row 43: the duel\'s stake presets read 10, 25, 50, 100, 200 out of challenge.html and THE GAME READS THE SAME', /THE GAME READS THE SAME$/.test(stk.sweep) && stk.tags.includes('NO HOME'), stk.sweep);
+
+  // ---- ruling 62: the keep's 240, read from the game's own storeCap ------------------------------------------
+  const capNow = await ev(`(()=>{const R=${PW}.Record; const c=R.storeCap({buildings:[{kind:'keep',level:1,startedAt:null,hands:[]}]},0); return c===Infinity?'uncapped':c/100;})()`);
+  let ks = await cardOf('keepStore');
+  ok('ruling 62: the keep card is DECIDED 240 and reads the game\'s own Record.storeCap for a bare keep (' + capNow + ')',
+    ks.tags.includes('DECIDED') && new RegExp('THE GAME\'S OWN COPY, WHICH IS NOT THE CHAIN: ' + capNow + '$').test(ks.rb.join('|').split('|').find((t) => /OWN COPY/.test(t)) || '') &&
+    (capNow === 240 ? /^AGREES/.test(ks.verify) : /^DISAGREES WITH RULING 62/.test(ks.verify)), JSON.stringify({ verify: ks.verify, rb: ks.rb }));
+  // the game engineer's ruling-62 storeCap, stood in for inside the probe: the card must follow it to AGREES
+  await ev(`(()=>{const R=${PW}.Record; R.__orig=R.storeCap; R.storeCap=(L,c,w)=>{const v=R.__orig(L,c,w); if(v!==Infinity) return v;
+    return L.buildings.some(b=>b!==w&&b.kind==='keep') ? 24000 : 0;}; return 1;})()`); await repaint();
+  ks = await cardOf('keepStore');
+  ok('BROKEN ONCE, the other way: with storeCap holding a bare keep at 240, nothing at 0 and keep + depot at the depot\'s 240, the card AGREES — and with it the keep\'s read-back',
+    /^AGREES — THE GAME'S storeCap: keep I \/ II \/ III alone 240 \/ 240 \/ 240 · nothing standing 0 · keep \+ depot I 240/.test(ks.verify) && ks.rb.some((t) => t === 'AGREES — THE GAME READS 240 crystals · DECIDED 240 crystals'), JSON.stringify({ verify: ks.verify, rb: ks.rb }));
+  // and an ADDITION rather than a floor is caught: keep + depot reads 480
+  await ev(`(()=>{const R=${PW}.Record; R.storeCap=(L,c,w)=>{const v=R.__orig(L,c,w); const k=L.buildings.some(b=>b!==w&&b.kind==='keep')?24000:0; return v===Infinity?k:v+k;}; return 1;})()`); await repaint();
+  ks = await cardOf('keepStore');
+  ok('and a keep that ADDS 240 instead of being a floor is caught: DISAGREES WITH RULING 62, keep + depot I 480', /^DISAGREES WITH RULING 62 .* keep \+ depot I 480/.test(ks.verify) && ks.dis, ks.verify);
+  await ev(`(()=>{const R=${PW}.Record; R.storeCap=R.__orig; delete R.__orig; return 1;})()`); await repaint();
+
+  // ---- sweep row 21: silos add up, proved on the same storeCap ------------------------------------------------
+  let sl = await cardOf('siloCap');
+  ok('sweep row 21: the silo card proves silos ADD UP in the game\'s storeCap (a depot I and two silos I hold 840)', /^AGREES — SILOS ADD UP: .* hold 840/.test(sl.verify), sl.verify);
+  await ev(`(()=>{const R=${PW}.Record; R.__orig=R.storeCap; R.storeCap=(L)=>{let d=0,s=0; L.buildings.forEach(b=>{if(b.kind==='collectionDepot') d=Math.max(d,24000); if(b.kind==='silo') s=Math.max(s,30000);}); return d+s;}; return 1;})()`); await repaint();
+  sl = await cardOf('siloCap');
+  ok('BROKEN ONCE: a storeCap that takes only the largest silo reads DISAGREES WITH SWEEP ROW 21', /^DISAGREES WITH SWEEP ROW 21 .* hold 540/.test(sl.verify) && sl.dis, sl.verify);
+  await ev(`(()=>{const R=${PW}.Record; R.storeCap=R.__orig; delete R.__orig; return 1;})()`); await repaint();
+
+  // ---- sweep rows 25 and 27: hands, proved on the game's own progress() and ceiling --------------------------
+  let hc = await cardOf('handsCap'), ho = await cardOf('handsOff');
+  ok('sweep row 27: the ceiling on hands is read off base.ECON.kinds and THE GAME READS THE SAME (4 a building, a wall 2)', /THE GAME READS THE SAME$/.test(hc.sweep), hc.sweep);
+  ok('sweep row 25: record.js progress() is linear up to the ceiling - AGREES', /^AGREES — LINEAR UP TO THE CEILING/.test(ho.verify), ho.verify);
+  await ev(PW + '.VALUES.kinds.wall.hands = 3; ' + PW + '.base.ECON.kinds.wall.hands = 3; 1'); await repaint();
+  hc = await cardOf('handsCap');
+  ok('BROKEN ONCE: a wall taking 3 hands reads THE GAME READS wall 3 - THEY DIFFER', /THE GAME READS wall 3 - THEY DIFFER$/.test(hc.sweep) && hc.dis, hc.sweep);
+  await ev(PW + '.VALUES.kinds.wall.hands = 2; ' + PW + '.base.ECON.kinds.wall.hands = 2; 1'); await repaint();
+
+  // ---- sweep row 24: raise time is held to 4 s a unit of the game's own materials ----------------------------
+  const rz = await cardOf('buildMs');
+  const hutNow = await ev(`(()=>{const w=${PW}; const m=w.Record.materials('hut',1); return {ms:w.base.ECON.kinds.hut.buildMs[0], units:Object.values(m).reduce((a,b)=>a+b,0)/100};})()`);
+  ok('sweep row 24: the raise-time card holds every level to 4 s per unit of record.js materials() (a hut I: ' + hutNow.ms / 1000 + ' s for ' + hutNow.units + ' units)',
+    hutNow.ms === hutNow.units * 4000 ? /^AGREES/.test(rz.verify) : /^DISAGREES WITH SWEEP ROW 24 — \d+ levels do not take 4 s a unit/.test(rz.verify), rz.verify);
+  const bwas = JSON.parse(await ev(`JSON.stringify(Object.fromEntries(Object.entries(${PW}.base.ECON.kinds).map(([k,v])=>[k,v.buildMs.slice()])))`));
+  await ev(`(()=>{const w=${PW}; Object.entries(w.base.ECON.kinds).forEach(([k,v])=>{v.buildMs=v.buildMs.map((ms,i)=>{const u=Object.values(w.Record.materials(k,i+1)).reduce((a,b)=>a+b,0)/100; return u>0?u*4000:ms;});}); return 1;})()`); await repaint();
+  const rz2 = await cardOf('buildMs');
+  ok('BROKEN ONCE, the other way: every level set to 4 s a unit, the card AGREES', /^AGREES — EVERY LEVEL TAKES 4 s PER UNIT/.test(rz2.verify), rz2.verify);
+  await ev(`(()=>{const w=${PW}, b=${JSON.stringify(bwas)}; Object.entries(b).forEach(([k,v])=>{w.base.ECON.kinds[k].buildMs=v;}); return 1;})()`); await repaint();
+
+  // ---- the values branch (7a9519b): the rate, the pace, the ceiling and the harvester, read where values.js keeps them --
+  const VB = JSON.parse(await ev(`JSON.stringify((()=>{const g=${PW}.base.ECON; return {unit:g.buildMsPerUnit, pace:g.demoPace||null, max:g.strengthMax, harv:g.harvStrength};})())`));
+  let rpu = await cardOf('raisePerUnit');
+  ok('the raise-time rate card reads base.ECON.buildMsPerUnit, never the demo scalar buildMs (' + (VB.unit === undefined ? 'this game predates it: NOT READABLE' : VB.unit / 1000 + ' s a unit') + ')',
+    rpu.tags.includes('DECIDED') && (VB.unit === undefined ? rpu.rb.some((t) => /NOT READ THERE EITHER/.test(t))
+      : rpu.rb.some((t) => t === (VB.unit === 4000 ? 'AGREES' : 'DISAGREES') + ' — THE GAME READS ' + VB.unit / 1000 + ' s per unit · DECIDED 4 s per unit')), JSON.stringify(rpu.rb));
+  if (VB.unit !== undefined) {
+    await ev(PW + '.base.ECON.buildMsPerUnit = 2800'); await repaint();
+    rpu = await cardOf('raisePerUnit');
+    ok('BROKEN ONCE: a rate of 2.8 s a unit reads DISAGREES — THE GAME READS 2.8 s per unit', rpu.rb.includes('DISAGREES — THE GAME READS 2.8 s per unit · DECIDED 4 s per unit') && rpu.dis, JSON.stringify(rpu.rb));
+    await ev(PW + '.base.ECON.buildMsPerUnit = ' + VB.unit); await repaint();
+  }
+  const pc = await cardOf('pace');
+  ok('the pace card says which pace the probed game runs (' + (VB.pace ? (VB.pace.on ? 'demo' : 'decided') : 'none reported') + ')',
+    VB.pace ? pc.rb.some((t) => t === 'READS ' + (VB.pace.on ? 'DEMO (pace=demo): a seam 36 s, a tree 45 s, a level 2.8 s' : 'DECIDED (ruling 64)')) : pc.rb.some((t) => /predates the decided pace/.test(t)), JSON.stringify(pc.rb));
+  for (const [id, key, want] of [['hpCeiling', 'max', 6000], ['harvStrength', 'harv', 150]]) {
+    const c = await cardOf(id);
+    ok('sweep row ' + (id === 'hpCeiling' ? 7 : 6) + ': "' + id + '" reads base.ECON.' + (key === 'max' ? 'strengthMax' : 'harvStrength') + ' (' + (VB[key] === undefined ? 'not carried by this game' : VB[key]) + ')',
+      VB[key] === undefined ? c.sweep && !/THE GAME READS/.test(c.sweep) : (VB[key] === want ? /THE GAME READS THE SAME$/.test(c.sweep) : /THEY DIFFER$/.test(c.sweep)), c.sweep);
+  }
+
+  // ---- M4 item 14: demo mode, read where the GAME reads it - the duel, asking RareRoles.demoMode() -----------
+  // The earlier block turned it on with a transaction; the page reloaded the duel, and the duel asked the chain.
+  for (let i = 0; i < 40 && !/^THE GAME READS THE SAME GETTER: on/.test((await cardOf('demo')).gamechain || ''); i++) await sleep(250);
+  let dm = await cardOf('demo');
+  ok('the demo card reads the DUEL: challenge.html asked RareRoles.demoMode() at the registry itself, and reads the same on',
+    new RegExp('^THE GAME READS THE SAME GETTER: on — RareRoles\\.demoMode\\(\\) at ' + REGISTRY).test(dm.gamechain || '') && await ev(DW + '.challenge.DEMO.src') === 'chain', dm.gamechain);
+  ok('and the card no longer says it reads from nothing', !/Reads from nothing/.test(dm.all) && /set by a transaction, RareRoles\.setDemoMode\(bool\)/.test(dm.all), dm.all.slice(0, 300));
+  await ev('window.__demo = false'); await rp();
+  dm = await cardOf('demo');
+  ok('BROKEN ONCE: the chain turned off behind the duel\'s back - the duel still reads on, and the card says DISAGREES and why',
+    /^DISAGREES — THE GAME READS on .* WHERE THE CHAIN NOW READS off \(the duel reads it once, when it opens\)/.test(dm.gamechain || '') && dm.dis, dm.gamechain);
+  await ev(DW + '.location.reload()'); await sleep(300);
+  for (let i = 0; i < 60 && !/^THE GAME READS THE SAME GETTER: off/.test((await cardOf('demo')).gamechain || ''); i++) { await sleep(250); if (i % 8 === 7) await repaint(); }
+  dm = await cardOf('demo');
+  ok('and the duel, opened again, reads off - the same getter, the same answer', /^THE GAME READS THE SAME GETTER: off/.test(dm.gamechain || ''), dm.gamechain);
+  await ev('window.__demo = true'); await ev(DW + '.location.reload()'); await sleep(300);
+  for (let i = 0; i < 60 && !/^THE GAME READS THE SAME GETTER: on/.test((await cardOf('demo')).gamechain || ''); i++) { await sleep(250); if (i % 8 === 7) await repaint(); }
+  await rp();
+
+  // ---- M4 item 12: the lock asks RareGame.runningGames() instead of the deployer ------------------------------
+  await click('#relock'); await sleep(200);
+  await click('#lockMore'); await sleep(150);
+  const lk0 = await ev('document.getElementById("lock").textContent');
+  ok('with RareGame recorded and NOT ANSWERING, the lock falls back to the confirmation - fails closed - and WHY says the address did not answer',
+    (await ev('deployerPage.run.state')) === 'error' && (await ev('deployerPage.locked')) === true && /NO ANSWER — I CONFIRM NO GAME IS RUNNING/.test(lk0) &&
+    /A RareGame address is recorded and it did not answer/.test(lk0), lk0.slice(0, 500));
+  await click('#lockMore'); await sleep(150);
+  await ev('window.__running = 0'); await ev('deployerPage.readRunning()'); await sleep(300);
+  let lk = await ev('document.getElementById("lock").textContent');
+  ok('runningGames() reads 0: the page OPENS WITHOUT ANY CONFIRMATION, says the chain answered, and offers no button to swear to it',
+    (await ev('deployerPage.locked')) === false && /OPEN — THE CHAIN READS NO GAME RUNNING/.test(lk) && /RareGame\.runningGames\(\) at 0x0+af, which reads 0/.test(lk) &&
+    (await ev('!document.getElementById("attest")')), lk.slice(0, 300));
+  ok('and it says the setters\' own guard (RareRoles.game()) asks the same contract', /RareRoles\.game\(\) points at the same contract/.test(lk), lk.slice(0, 400));
+  await ev(`window.__answers = { '${SEL_('game()')}': 0 }`); await ev('deployerPage.readRunning()'); await sleep(300);
+  lk = await ev('document.getElementById("lock").textContent');
+  ok('BROKEN ONCE: RareRoles.game() unset - the page says the guard on chain asks nothing and would refuse nobody', /RareRoles\.game\(\) IS UNSET/.test(lk), lk.slice(0, 500));
+  await ev('window.__answers = {}');
+  await ev('window.__running = 2'); await ev('deployerPage.readRunning()'); await sleep(1300);
+  lk = await ev('document.getElementById("lock").textContent');
+  const dis3 = JSON.parse(await ev('JSON.stringify([...document.querySelectorAll("#out input,#out button[data-sw]")].map(e=>e.disabled))'));
+  ok('runningGames() reads 2: HARD LOCKED from the chain, every control refused, no way past it',
+    (await ev('deployerPage.locked')) === true && /A GAME IS RUNNING/.test(lk) && /THE CHAIN SAYS SO: RareGame\.runningGames\(\) at 0x0+af, which reads 2/.test(lk) &&
+    dis3.length > 20 && dis3.every((d) => d === true) && (await ev('!document.getElementById("attest")')), lk.slice(0, 300));
+  // and a game starting between the confirm screen and the signature is caught at the signature
+  await ev('window.__running = 0'); await ev('deployerPage.readRunning()'); await sleep(300);
+  const sentBefore = await ev('(window.__sent||[]).length');
+  await click('[data-sw="demo"]'); await sleep(200); await click('#applysw'); await sleep(300);
+  await ev('window.__running = 1');
+  await click('#dotx'); await sleep(800);
+  ok('a game that starts after the confirm screen is drawn is caught AT THE SIGNATURE: nothing is sent, and the record says why',
+    (await ev('(window.__sent||[]).length')) === sentBefore && await ev('deployerPage.log.some(e=>/REFUSED — RareGame\\.runningGames\\(\\) at 0x0+af, which reads 1: a game is running/.test(e.to))'),
+    await ev('JSON.stringify(deployerPage.log.slice(0,2))'));
+  await ev('window.__running = null'); await ev('deployerPage.readRunning()'); await sleep(300);
+
+  ok('nothing 404d and nothing was logged as an error, over the page and the three it probes', watch.clean(), watch.why());
   console.log(bad ? '\n' + bad + ' step(s) failed' : '\nthe deployer page refuses, derives and reads back');
   await done(bad ? 1 : 0);
 })().catch(async (e) => { console.error(e);

@@ -336,8 +336,15 @@ contract RareRoles {
     /// purpose - long enough for a player to leave a game before a change lands - reaches neither,
     /// because by `requireMayJoin` above neither direction changes a game in flight. The event is the
     /// record; announcement is the landing page's job.
+    /// **FROZEN WHILE A GAME RUNS - ruling 74 (2026-10-01), M20 item 22**: "once it starts.. it's a no".
+    /// Asked after the power, so a stranger learns nothing about the game. This is not 26.5's brick: the
+    /// guard is a count of running games, and every running game has an end root can always reach
+    /// (`RareGame.declare`), whereas 26.5's brick is a guard on the mode that only the setter could lift.
+    /// The price, stated so it is not discovered: demo mode can no longer be thrown ON as a brake while
+    /// a game is running. BINDING.md, the section headed "Ruling 74".
     function setDemoMode(bool on) external {
         if (!hasPower(msg.sender, SET_DEMO_MODE)) revert PowerNotHeld(msg.sender, SET_DEMO_MODE);
+        requireNoGameRunning();
         if (demoMode == on) revert DemoModeUnchanged();
         demoMode = on;
         emit DemoModeSet(on, msg.sender);
@@ -433,9 +440,11 @@ contract RareRoles {
     }
 
     /// @notice open the game to every address (true) or close it to the list (false). ROOT ONLY
-    /// (MANAGE_ROLES): opening is a launch decision of the same weight as demo mode.
+    /// (MANAGE_ROLES): opening is a launch decision of the same weight as demo mode. **Frozen while a
+    /// game runs** (ruling 74): it is an on/off switch every join reads, so it is one of "every switch".
     function setWhitelistOpen(bool open) external {
         if (!hasPower(msg.sender, MANAGE_ROLES)) revert PowerNotHeld(msg.sender, MANAGE_ROLES);
+        requireNoGameRunning();
         if (whitelistOpen == open) revert WhitelistOpenUnchanged();
         whitelistOpen = open;
         emit WhitelistOpenSet(open, msg.sender);
@@ -453,8 +462,11 @@ contract RareRoles {
 
     /// @notice point the guards at the games contract. ROOT ONLY (MANAGE_ROLES). Refused for zero and for an
     /// address with no code, so the rule cannot be switched off by pointing it at nothing.
+    /// **Refused while a game runs** (ruling 74): this pointer is what every freeze reads, so re-pointing it
+    /// at a contract that answers zero would thaw every number and every switch in one transaction.
     function setGame(address game_) external {
         if (!hasPower(msg.sender, MANAGE_ROLES)) revert PowerNotHeld(msg.sender, MANAGE_ROLES);
+        requireNoGameRunning();
         if (game_ == address(0)) revert ZeroAddress();
         if (game_.code.length == 0) revert NotAContract(game_);
         game = game_;
@@ -466,8 +478,9 @@ contract RareRoles {
         return game == address(0) ? 0 : IRunningGames(game).runningGames();
     }
 
-    /// @notice the line every number's setter puts after its power check: refused while a game runs
-    function requireNoGameRunning() external view {
+    /// @notice the line every number's and every switch's setter puts after its power check: refused while
+    /// a game runs. Public, not external, so this contract's own switches ask the same question.
+    function requireNoGameRunning() public view {
         uint256 n = runningGames();
         if (n != 0) revert GameRunning(n);
     }

@@ -8,7 +8,7 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
   require("./pagewatch.js").guard(prof);            // close it even if this check throws, or is killed
   const ch=spawn(CHROME,['--headless=new','--enable-unsafe-swiftshader','--hide-scrollbars',
     '--remote-debugging-port='+PORT,'--user-data-dir='+prof,'--window-size=1000,700',
-    'http://localhost:8765/base.html?seams=1'],{stdio:'ignore'});
+    'http://localhost:8765/base.html?seams=1&pace=demo'],{stdio:'ignore'});
   let send, sock;
   for(let i=0;i<160&&!send;i++){await sleep(250);try{
     const t=(await(await fetch(`http://127.0.0.1:${PORT}/json`)).json()).find(x=>x.type==='page');
@@ -19,9 +19,12 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
   }catch(_){send=null;}}
   const ev=async e=>(await send('Runtime.evaluate',{expression:e,returnByValue:true})).result.value;
   const watch = await require('./pagewatch.js').attach(sock, send);
-  await sleep(1500);
+  // wait for the page to be up rather than a fixed 1.5 s: under a 4-wide suite the page was not always open by
+  // then, `base` was undefined and the first JSON.parse below threw on "undefined" (seen once in three runs)
+  for (let i = 0; i < 120 && !(await ev('!!(window.base && Array.isArray(base.drones) && base.drones.length)')); i++) await sleep(250);
   const start = await ev('base.crystals');
   const seen = new Set(); let last='';
+  // pace=demo (values.js, THE DEMO PACE): at the decided 15-min growth no haul lands inside this window.
   // A seam ripens over GROW_MS (36 s) and a harvester only cuts in the last quarter, so it has
   // nothing to haul until about 27 s in. At 50 x 500 ms this watched for 25 s and could never
   // see a haul land - it was not measuring the harvester, it was measuring its own patience.

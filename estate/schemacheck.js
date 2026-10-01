@@ -20,7 +20,11 @@
 //     the schema; a field the schema adds must be marked undecided, so a documented gap is allowed and
 //     an invented field is not. `splashFalloff` is exactly that case: DESIGN names it among the five
 //     proposed numbers and the struct has no field for it, so the schema declares it and this check
-//     reports the mismatch instead of hiding it.
+//     reports the mismatch instead of hiding it. Since M20 item 1 it holds ShadowFriends' two structs too
+//     (Shadow, Claim): a field the CONTRACT holds outside the struct (the ERC-721 owner, a per-mint
+//     mapping) names its line in `beside` and that line is grepped for; the Claim's EIP-712 type string,
+//     its struct and its schema row must list one order; and a row marked `notBuilt` (the M19 switch)
+//     goes red the day its contract grows the thing, until the row says it is built.
 //  4. THE EXTRACTION LIST IS LIVE, COPY BY COPY. `oneHome` names every piece of state that existed in
 //     two places and the exact text of each copy. A live copy must still be in its file, or the row
 //     is stale; a copy marked gone must be ABSENT and the reader named in `nowReads` must be PRESENT,
@@ -152,7 +156,14 @@ const BUILT = [
   ['rules',     'RareCombat.sol',   'Rules'],
   ['duel',      'RareDuel.sol',     'Duel'],
   ['fightHash', 'RareFightLog.sol', 'Record'],   // the chain's half of a fight: the mapping's value struct
+  ['shadow',      'ShadowFriends.sol', 'Shadow'],  // M20 item 1: a live shadow, shadows[tokenId]
+  ['shadowClaim', 'ShadowFriends.sol', 'Claim'],   // what the attestor signs; its order is also CLAIM_TYPEHASH's
 ];
+// A field the struct does not hold but the CONTRACT does - an ERC-721 owner, a per-mint mapping, a constant -
+// names the exact line that holds it in `beside` (one string or several). It is allowed as an addition to a
+// struct only because it is held to the file, here: comments stripped, every text must still be in it.
+const codeOf = (file) => { const s = read('estate/contracts/' + file); return s == null ? null : s.split('\n').map(l => l.replace(/\/\/.*$/, '')).join('\n'); };
+const fileOfEnt = (e) => e.contract || (e.built ? e.built.split('.')[0] + '.sol' : null);
 for (const [ent, file, struct] of BUILT) {
   const e = ents[ent];
   const declared = solStruct(file, struct);
@@ -172,9 +183,41 @@ for (const [ent, file, struct] of BUILT) {
   // true) or as a mapping KEY the struct is stored under (`key: true`) - a struct inside a mapping does
   // not carry its own indices, and the schema's row must
   const extra = schemaFields.filter(f => !declared.includes(f));
-  const undoc = extra.filter(f => e.fields[f].key !== true && (e.fields[f].decided === undefined || e.fields[f].decided === true));
-  ok('what the schema adds to ' + struct + ' is declared undecided or is the mapping\'s key, not invented ('
+  const undoc = extra.filter(f => e.fields[f].key !== true && !e.fields[f].beside && (e.fields[f].decided === undefined || e.fields[f].decided === true));
+  ok('what the schema adds to ' + struct + ' is declared undecided, is the mapping\'s key, or names the line beside the struct that holds it - not invented ('
     + (extra.length ? extra.join(', ') : 'nothing added') + ')', !undoc.length, undoc.join(', '));
+}
+
+// Every `beside` is held to the contract that holds it.
+const besideBad = [];
+let nBeside = 0;
+for (const n of names) for (const [f, d] of Object.entries(ents[n].fields)) {
+  if (!d || !d.beside) continue;
+  const file = fileOfEnt(ents[n]), src = file && codeOf(file);
+  if (!src) { besideBad.push(n + '.' + f + ': no contract to look in (' + file + ')'); continue; }
+  for (const t of [].concat(d.beside)) { nBeside++; if (!src.includes(t)) besideBad.push(n + '.' + f + ': `' + t + '` is not in ' + file); }
+}
+ok('every field held beside a struct names a line its contract still has (' + nBeside + ' lines)', !besideBad.length, besideBad.join('; '));
+
+// An EIP-712 struct is three things that must agree: the Solidity struct, the type string its typehash is
+// built from, and this schema's row. The signature covers the type string, so an order that drifts between
+// them is a claim no attestor can sign.
+for (const n of names.filter(k => ents[k].typehash)) {
+  const e = ents[n], file = fileOfEnt(e), src = codeOf(file) || '';
+  const m = src.match(new RegExp(e.typehash + '\\s*=\\s*keccak256\\(\\s*"(\\w+)\\(([^)]*)\\)"'));
+  const typed = m ? m[2].split(',').map(s => s.trim().split(/\s+/).pop()) : null;
+  const struct = solStruct(file, e.built.split('.')[1]);
+  ok(n + ': ' + e.typehash + '\'s type string, `struct ' + e.built.split('.')[1] + '` and the schema list the same fields in the same order ('
+    + (typed ? typed.length : 0) + ')', !!typed && !!struct && typed.join(',') === struct.join(',') && typed.join(',') === Object.keys(e.fields).join(','),
+    'typehash: ' + String(typed) + '   struct: ' + String(struct) + '   schema: ' + Object.keys(e.fields).join(','));
+}
+
+// SPECIFIED, NOT BUILT, said both ways: a row marked `notBuilt` must not claim `built`, and the contract it
+// will live in must not have it yet - the day it does, this goes red until the row says what was built.
+for (const n of names.filter(k => ents[k].notBuilt)) {
+  const nb = ents[n].notBuilt, src = read(nb.file);
+  ok('`' + n + '` is specified and not built: ' + nb.file + ' has no `' + nb.text + '` and the row claims no struct',
+    src != null && !src.includes(nb.text) && !ents[n].built, src == null ? nb.file + ' is not there' : (ents[n].built ? 'the row says built: ' + ents[n].built : '`' + nb.text + '` is in ' + nb.file + ' - mark the row built'));
 }
 
 const duelState = solEnum('RareDuel.sol', 'State');
@@ -299,8 +342,9 @@ if (V) {
     !colBad.length, colBad.slice(0, 6).join('; '));
   // the fight's tables, the shape rulesFrom reads
   const gens = Object.keys(V.hp || {}).join(',');
-  ok('`hp` and `weapons` are keyed by generations 1 to 6 and every weapon names a melee class the combat table knows',
-    gens === '1,2,3,4,5,6' && Object.keys(V.weapons || {}).sort().join(',') === '1,2,3,4,5,6'
+  // ruling 55: `hp` gained slot 0, a 1/1 Doopie at 1140 - trap only, no weapon, so `weapons` stays 1 to 6
+  ok('`hp` is keyed 0 to 6 with slot 0 the 1/1 Doopie at 1140 (ruling 55), `weapons` by generations 1 to 6 (slot 0 has no weapon), and every weapon names a melee class the combat table knows',
+    gens === '0,1,2,3,4,5,6' && (V.hp || {})[0] === 1140 && Object.keys(V.weapons || {}).sort().join(',') === '1,2,3,4,5,6'
       && Object.values(V.weapons || {}).every(w => typeof w.k === 'string') && (V.combat.melee || []).every(m => Object.values(V.weapons).some(w => w.k === m)),
     'hp ' + gens + '; weapons ' + Object.keys(V.weapons || {}).join(',') + '; melee ' + String(V.combat && V.combat.melee));
   // the readers

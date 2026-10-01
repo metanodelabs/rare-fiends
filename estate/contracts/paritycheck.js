@@ -156,7 +156,7 @@ async function chain() {
   // E is what this check was written against. Each of the four is now compared with the page's own, and
   // the fight then runs on the page's. A deliberate change to the game updates the page and this list,
   // one line each; an accidental one stops here.
-  const E = { hp: { 1: 759, 2: 506, 3: 337, 4: 225, 5: 150, 6: 100 }, wallHp: 400,
+  const E = { hp: { 0: 1140, 1: 759, 2: 506, 3: 337, 4: 225, 5: 150, 6: 100 }, wallHp: 400,
     weapons: { 6: { n: 'CLUB', k: 'club', dmg: 10, rng: 0.5 }, 5: { n: 'SLING', k: 'sling', dmg: 15, rng: 2 }, 4: { n: 'SPEAR', k: 'spear', dmg: 25, rng: 1 },
       3: { n: 'BOW AND ARROW', k: 'bow', dmg: 35, rng: 3 }, 2: { n: 'CROSSBOW', k: 'xbow', dmg: 50, rng: 4, pierce: true },
       1: { n: 'CATAPULT', k: 'catapult', dmg: 80, rng: 5, siege: true, area: 1, vsBuilding: 2 } },
@@ -241,8 +241,9 @@ async function chain() {
   // step and every shot is another roll off the word. It is 61.5% of all Friends (site/stats.json,
   // generations.by_gen). The corpus avoided it at size, which hid the worst case AND made it look exotic.
   //
-  // So the ladder ends at the contract's own declared maximum, read off `combat.js` as MAX_SIDE and
-  // MAX_WALLS rather than written here as 12 and 16 - widen the contract and this widens with it. Each
+  // So the ladder ends at the contract's own declared maximum, read off `combat.js` as MAX_SIDE rather than
+  // written here as 12 - widen the contract and this widens with it. THERE IS NO WALL MAXIMUM (deployer,
+  // 2026-10-01: "there should be no limit"); 16 was the cap until then and is kept as a rung. Each
   // rung is NAMED, so a red line says which line-up does not fit instead of only by how much, and the
   // rungs below the top are kept because where it CROSSES is the useful thing: a ceiling failure with one
   // number beside it tells the deployer nothing about what is still playable.
@@ -250,7 +251,7 @@ async function chain() {
   // The first rung is the old hand-built twelve-a-side, geometry for geometry (six sections at
   // x = -6, -4, -2, 0, 2, 4 on y = -4, generation 1, the first two up towers), so nothing that was
   // already being proved stops being proved.
-  const MAXS = Combat.MAX_SIDE, MAXW = Combat.MAX_WALLS;
+  const MAXS = Combat.MAX_SIDE, OLDW = 16;   // 16: the wall cap that was, removed 2026-10-01
   const ladder = (n, gen, nw, order) => ({
     attackers: Array(n).fill(gen), entry: Combat.entry(base, 'N', 10),
     defenders: Array.from({ length: n }, (_, i) => ({ gen, x: -6 + i, y: -2, tower: i < 2, order })),
@@ -262,14 +263,67 @@ async function chain() {
     ['6 a side, generation 6, 6 walls', ladder(6, 6, 6, Combat.HOLD)],
     [MAXS + ' a side, generation 6, 6 walls', ladder(MAXS, 6, 6, Combat.HOLD)],
     [MAXS + ' a side, generation 6, 6 walls, defenders engaging', ladder(MAXS, 6, 6, Combat.ENGAGE)],
-    ['MAX_SIDE (' + MAXS + ') a side, MAX_WALLS (' + MAXW + ') walls, generation 6, holding'
-      + ' - THE CONTRACT\'S OWN DECLARED MAXIMUM', ladder(MAXS, 6, MAXW, Combat.HOLD)],
-    ['MAX_SIDE (' + MAXS + ') a side, MAX_WALLS (' + MAXW + ') walls, generation 6, defenders engaging'
-      + ' - the declared maximum under the worst standing order', ladder(MAXS, 6, MAXW, Combat.ENGAGE)],
+    ['MAX_SIDE (' + MAXS + ') a side, ' + OLDW + ' walls (the old cap), generation 6, holding', ladder(MAXS, 6, OLDW, Combat.HOLD)],
+    ['MAX_SIDE (' + MAXS + ') a side, ' + OLDW + ' walls (the old cap), generation 6, defenders engaging', ladder(MAXS, 6, OLDW, Combat.ENGAGE)],
   ];
   for (const [name, S] of rungs) cases.push(Object.assign({ name }, S));
+  // ---------- THE GENESIS AS A TARGET (M13 item 3) ----------
+  // Appended after everything above, so every earlier line-up keeps its words and fights exactly as before. Random
+  // bases again, each with a Genesis on a random spot, and four with NOBODY HOME - the Genesis alone. Its strength
+  // is a FIXTURE: no figure for a Genesis's strength is decided, so these are spread across the table's range
+  // (100 to 2000) to exercise the formula, not to propose one.
+  const G_HP = [100, 337, 759, 1140, 2000];
+  const firstGenesis = cases.length;
+  for (let k = 0; k < 24; k++) {
+    const alone = k < 4, nd = alone ? 0 : 1 + rint(6), na = 1 + rint(6);
+    const defenders = Array.from({ length: nd }, () => ({ gen: 1 + rint(6), x: -6 + rint(12), y: -6 + rint(12), tower: rint(4) === 0,
+      order: rint(4), fx: -6 + rint(12), fy: -6 + rint(12) }));
+    const walls = Array.from({ length: rint(5) }, () => ({ x: -6 + 2 * rint(6), y: -6 + rint(12) }));
+    cases.push({ attackers: Array.from({ length: na }, () => 1 + rint(6)), entry: Combat.entry(base, Combat.SIDES[rint(4)], 2 + rint(6)), defenders, walls,
+      genesis: { x: -2 + rint(4), y: -2 + rint(4), hp: G_HP[k % G_HP.length] } });
+  }
+  // ---------- WALLS BY LEVEL (ruling 64: a wall's strength is its level's - 400 / 800 / 1,600) ----------
+  // Each section carries its own hp, from the wall's registry row (values.js kinds.wall.strength[level - 1], read
+  // here, not typed). Appended last again, so nothing above changes its words. Mixed levels on one base, any side.
+  const WALL_LEVELS = require('../values.js').kinds.wall.strength;
+  const firstLevelled = cases.length;
+  // A wall line across the north edge, each section at a random level, plus a few loose sections; the defence
+  // behind it; the attack from the north and mostly short-reach (generations 3 to 6), so walls are broken, not
+  // shot over - a line-up where a wall's strength cannot matter would prove nothing about it.
+  for (let k = 0; k < 16; k++) {
+    const nd = 1 + rint(6), na = 2 + rint(8);
+    const defenders = Array.from({ length: nd }, () => ({ gen: 1 + rint(6), x: -6 + rint(12), y: -4 + rint(9), tower: rint(4) === 0,
+      order: rint(4), fx: -6 + rint(12), fy: -4 + rint(9) }));
+    const lvl = () => WALL_LEVELS[rint(WALL_LEVELS.length)];
+    const walls = [-6, -4, -2, 0, 2, 4].map((x) => ({ x, y: -6, vert: false, hp: lvl() }))
+      .concat(Array.from({ length: rint(3) }, () => ({ x: -6 + 2 * rint(6), y: -4 + rint(8), vert: rint(2) === 0, hp: lvl() })));
+    if (k % 4 === 0) defenders.forEach((d, i) => { if (i < 6) { d.x = walls[i].x; d.y = walls[i].y; } });   // crews on their walls
+    cases.push({ attackers: Array.from({ length: na }, () => 3 + rint(4)), entry: Combat.entry(base, 'N', 2 + rint(6)), defenders, walls });
+  }
+  // ---------- NO LIMIT ON WALL SECTIONS (deployer, 2026-10-01) ----------
+  // "there should be no limit .. if they can attack then they should be allowed to. it incentivizes players to
+  // secure their bases better." A real base has 27 sections (DESIGN.md, the wall count of a built base), so the
+  // old cap of 16 refused real attacks. Appended last, so every line-up above keeps its words. The base is RINGED
+  // - a closed wall round the plot the attack has to break through - at 27 sections, and at 60 (two rings), twelve
+  // a side of generation 6, holding and engaging. Named, so their gas prints against the ceiling with the ladder.
+  const ring = (lo, hi) => { const w = [];
+    for (let x = lo; x < hi; x += 2) w.push({ x, y: lo }, { x, y: hi });
+    for (let y = lo; y < hi; y += 2) w.push({ x: lo, y, vert: true }, { x: hi, y, vert: true });
+    return w; };
+  const ringed = (nw, order) => Object.assign(ladder(MAXS, 6, 0, order), { walls: ring(-7, 6).concat(ring(-9, 8)).slice(0, nw) });
+  const wallRungs = [
+    [MAXS + ' a side, generation 6, 27 walls (a real base), holding', ringed(27, Combat.HOLD)],
+    [MAXS + ' a side, generation 6, 27 walls (a real base), defenders engaging', ringed(27, Combat.ENGAGE)],
+    [MAXS + ' a side, generation 6, 60 walls, holding', ringed(60, Combat.HOLD)],
+    [MAXS + ' a side, generation 6, 60 walls, defenders engaging', ringed(60, Combat.ENGAGE)],
+  ];
+  for (const [name, S] of wallRungs) { if (S.walls.length !== +name.match(/(\d+) walls/)[1]) throw new Error('ring is short: ' + name); cases.push(Object.assign({ name }, S)); }
+  rungs.push(...wallRungs);
+  const wallsOf = (S) => S.walls.map((w) => ({ x: w.x, y: w.y, vert: !!w.vert, hp: w.hp || 0 }));
+  // the four fields of RareCombat.Setup plus its Genesis: absent is `present: false`, which fights as before
+  const genesisOf = (S) => S.genesis ? { present: true, x: S.genesis.x, y: S.genesis.y, hp: S.genesis.hp } : { present: false, x: 0, y: 0, hp: 0 };
   // what each named rung cost, so the output says where it crosses rather than only that it did
-  const rungGas = new Map();
+  const rungGas = new Map(), rungSame = new Map();
   const describe = (S) => S.name || (S.attackers.length + ' v ' + S.defenders.length + ', ' + S.walls.length
     + ' walls, gen ' + [...new Set(S.attackers.concat(S.defenders.map((d) => d.gen)))].sort((a, b) => a - b).join('/'));
   for (const [ci, S] of cases.entries()) for (let j = 0; j < 2; j++) {
@@ -277,17 +331,19 @@ async function chain() {
     const js = Combat.fight(R, S, { word: w, contract: lab.address, chainId: CHAIN_ID, fightId });
     // the four fields of RareCombat.Setup and nothing else: the line-ups now carry a `name` for the
     // output, and what goes to the ABI is spelled out rather than whatever else happens to be on S
-    const S2 = { attackers: S.attackers, entry: S.entry, walls: S.walls,
+    const S2 = { attackers: S.attackers, entry: S.entry, walls: wallsOf(S),
       defenders: S.defenders.map(d => ({ gen: d.gen, x: d.x, y: d.y, tower: !!d.tower, order: d.order || 0,
-        fx: d.fx == null ? d.x : d.fx, fy: d.fy == null ? d.y : d.fy })) };
+        fx: d.fx == null ? d.x : d.fx, fy: d.fy == null ? d.y : d.fy })), genesis: genesisOf(S) };
     const r = await lab.call('fight', [R, S2, w, fightId]);
     const o = r.out[0];
     const sol = { winner: o.attackWins ? 'attack' : 'defence', reason: ['wiped', 'repelled', 'held'][Number(o.reason)], t: Number(o.t), shots: Number(o.shots),
-      hits: Number(o.hits), rolls: Number(o.rolls), attackers: o.attackers.map(Number), defenders: o.defenders.map(Number), walls: o.walls.map(Number) };
-    const want = { winner: js.winner, reason: js.reason, t: js.t, shots: js.shots, hits: js.hits, rolls: js.rolls, attackers: js.attackers, defenders: js.defenders, walls: js.walls };
+      hits: Number(o.hits), rolls: Number(o.rolls), attackers: o.attackers.map(Number), defenders: o.defenders.map(Number), walls: o.walls.map(Number), genesis: Number(o.genesis) };
+    const want = { winner: js.winner, reason: js.reason, t: js.t, shots: js.shots, hits: js.hits, rolls: js.rolls, attackers: js.attackers, defenders: js.defenders, walls: js.walls,
+      genesis: js.genesis == null ? 0 : js.genesis };
     fights++;
     ends[js.reason] = (ends[js.reason] || 0) + 1; solEnds[sol.reason] = (solEnds[sol.reason] || 0) + 1; if (js.t > longest) longest = js.t;
     if (JSON.stringify(sol) === JSON.stringify(want)) match++; else if (!firstBad) firstBad = JSON.stringify({ S, sol, want });
+    if (S.name) rungSame.set(S.name, (rungSame.get(S.name) || 0) + (JSON.stringify(sol) === JSON.stringify(want) ? 1 : 0));
     const g = Number(r.gas); gasSum += g;
     if (S.name) rungGas.set(S.name, Math.max(rungGas.get(S.name) || 0, g));
     if (g > gasMax) { gasMax = g; worst = { line: describe(S), attackers: S.attackers.length, defenders: S.defenders.length, walls: S.walls.length, ms: js.t }; }
@@ -304,8 +360,8 @@ async function chain() {
   // cover, by switching it off: the same fight at coverDiv 1 must differ only where cover applies. On the wall it
   // must change the fight (in BOTH engines); behind a wall it must change nothing (in both).
   const R1 = Object.assign({}, R, { coverDiv: 1 });
-  const S2of = (S) => ({ attackers: S.attackers, entry: S.entry, walls: S.walls, defenders: S.defenders.map(d => ({ gen: d.gen, x: d.x, y: d.y, tower: !!d.tower,
-    order: d.order || 0, fx: d.fx == null ? d.x : d.fx, fy: d.fy == null ? d.y : d.fy })) });
+  const S2of = (S) => ({ attackers: S.attackers, entry: S.entry, walls: wallsOf(S), defenders: S.defenders.map(d => ({ gen: d.gen, x: d.x, y: d.y, tower: !!d.tower,
+    order: d.order || 0, fx: d.fx == null ? d.x : d.fx, fy: d.fy == null ? d.y : d.fy })), genesis: genesisOf(S) });
   const both = async (RR, S, w) => { const js = Combat.fight(RR, S, { word: w, contract: lab.address, chainId: CHAIN_ID, fightId: 1 }, { log: true });
     const o = (await lab.call('fight', [RR, S2of(S), w, 1])).out[0];
     return { js, jsKey: [js.t, js.shots, js.hits].concat(js.attackers, js.defenders).join(), solKey: [o.t, o.shots, o.hits].concat(o.attackers, o.defenders).map(Number).join() }; };
@@ -351,6 +407,98 @@ async function chain() {
     ok('a spared capture fight that cannot move ends at once as a stalemate ("stalemate", the ATTACK wins - ruling of 2026-10-01, at ' + stuck.t + ' ms, no shot) rather than looping; unspared, the same field is fought out ("' + open.reason + '")',
       stuck.reason === 'stalemate' && stuck.winner === 'attack' && stuck.shots === 0 && stuck.t <= R.stepMs && (open.reason === 'wiped' || open.reason === 'repelled'),
       JSON.stringify({ stuck: [stuck.reason, stuck.t, stuck.shots], open: open.reason })); }
+  // THE GENESIS IS THE LAST THING STANDING (M13 item 3), asserted as a rule and not only as parity: in every
+  // Genesis line-up, read off combat.js's own shot log, no shot, bolt or splash reaches the Genesis while any of
+  // its Friends is standing; a fight the attack wins has the Genesis at 0; and the Genesis was in fact shot at (so
+  // the first clause is not true of nothing). Solidity fights every one of these identically - the parity line above.
+  { let early = 0, struck = 0, wipedUp = 0, wins = 0, alone = 0, aloneWiped = 0, gFights = 0;
+    for (let ci = firstGenesis; ci < firstLevelled; ci++) for (let j = 0; j < 2; j++) {
+      const S = cases[ci], r = Combat.fight(R, S, { word: wordOf(ci + 1000, j), contract: lab.address, chainId: CHAIN_ID, fightId: ci * 10 + j + 1 }, { log: true });
+      gFights++;
+      const down = new Set();
+      for (const e of r.log) {
+        const friendsUp = S.defenders.length - down.size;
+        const hitsG = e.at === 'G' || e.also.some((a) => a[0] === 'G');
+        if (hitsG && friendsUp > 0) early++;
+        if (hitsG) struck++;
+        for (const kd of e.killed) if (kd[0] === 'D') down.add(kd);
+      }
+      if (r.winner === 'attack') { wins++; if (r.genesis !== 0) wipedUp++; }
+      if (!S.defenders.length) { alone++; if (r.reason === 'wiped' && r.genesis === 0 && r.shots > 0) aloneWiped++; }
+    }
+    ok('THE GENESIS IS THE LAST THING STANDING (M13 item 3): over ' + gFights + ' Genesis fights no shot, bolt or splash touches it while a Friend of its stands ('
+      + early + '), it is shot at ' + struck + ' times once they are down, and every one of the ' + wins + ' the attack wins ends with the Genesis at 0',
+      early === 0 && struck > 0 && wipedUp === 0 && wins > 0, JSON.stringify({ early, struck, wipedUp, wins }));
+    ok('and with NOBODY HOME - the Genesis alone, no Friend - the attack goes straight for it and fells it: ' + aloneWiped + ' of ' + alone + ' wiped with the Genesis at 0',
+      alone > 0 && aloneWiped === alone, JSON.stringify({ alone, aloneWiped })); }
+  // WALLS BY LEVEL, as a rule and not only as parity (ruling 64). (a) In the levelled line-ups every wall that is
+  // never shot ends at exactly the hp it was given, and a wall that falls took at least that much - read off
+  // combat.js's log. (b) The same fight with every section's hp doubled (a derived figure, not a level) is a
+  // different fight in BOTH engines, and the same in each; with hp equal to Rules.wallHp it is identical to a
+  // section that carries none, in both - the fallback is exactly the old behaviour.
+  { let kept = 0, fell = 0, shotAt = 0, bad = 0, ls = 0;
+    for (let ci = firstLevelled; ci < firstLevelled + 16; ci++) for (let j = 0; j < 2; j++) {
+      const S = cases[ci], r = Combat.fight(R, S, { word: wordOf(ci + 1000, j), contract: lab.address, chainId: CHAIN_ID, fightId: ci * 10 + j + 1 }, { log: true });
+      ls++;
+      S.walls.forEach((w, k) => {
+        const dealt = r.log.filter((e) => e.at === 'W' + k && e.landed).reduce((n, e) => n + e.dmg, 0);
+        if (dealt) shotAt++;
+        if (r.walls[k] === 0) { fell++; if (dealt < w.hp) bad++; } else { kept++; if (r.walls[k] !== Math.max(0, w.hp - dealt)) bad++; }
+      });
+    }
+    // three clubs against a Gen 6 behind the proving ground's wall line: they have to break through it
+    const p = Combat.proving(6, { wall: true }), base1 = { attackers: [6, 6, 6], entry: Combat.entry(p, 'N', 6), defenders: p.defenders };
+    const S0 = Object.assign({ walls: p.walls }, base1), Sw = Object.assign({ walls: p.walls.map((w) => Object.assign({ hp: R.wallHp }, w)) }, base1),
+      S2x = Object.assign({ walls: p.walls.map((w) => Object.assign({ hp: 2 * R.wallHp }, w)) }, base1);
+    let dbl = 0, same = 0; const NW = 6;
+    for (let k = 0; k < NW; k++) {
+      const w = wordOf(5200, k), [a, b, c] = [await both(R, S0, w), await both(R, Sw, w), await both(R, S2x, w)];
+      const wk = (x) => x.js.walls.join();
+      if (a.jsKey === b.jsKey && a.solKey === b.solKey && a.jsKey === a.solKey && wk(a) === wk(b)) same++;
+      if ((a.jsKey !== c.jsKey || wk(a) !== wk(c)) && c.jsKey === c.solKey && a.solKey !== c.solKey) dbl++;
+    }
+    ok('WALLS BY LEVEL (ruling 64): each section holds its own hp from the wall\'s registry row (' + WALL_LEVELS.join(' / ') + ') - over ' + ls + ' levelled fights '
+      + kept + ' sections stood at exactly their hp less what landed and ' + fell + ' fell only once at least their hp had landed (' + shotAt + ' were shot at); a section at twice the strength '
+      + 'changes the fight in both engines on ' + dbl + ' of ' + NW + ' words, and one carrying Rules.wallHp fights exactly as one carrying nothing on ' + same + ' of ' + NW,
+      bad === 0 && kept > 0 && fell > 0 && dbl === NW && same === NW, JSON.stringify({ bad, kept, fell, shotAt, dbl, same })); }
+  // NO WALL CAP, asserted as a rule (deployer, 2026-10-01): combat.js exports no MAX_WALLS and refuses no wall count,
+  // RareCombat's ABI carries no TooManyWalls, and the 27- and 60-section rungs were fought identically by both engines.
+  { const big = wallRungs.map(([name, S]) => [S.walls.length, rungSame.get(name)]);
+    const errs = C.lab.abi.filter((f) => f.type === 'error').map((f) => f.name);
+    ok('NO LIMIT ON WALL SECTIONS (deployer, 2026-10-01): combat.js has no MAX_WALLS (' + typeof Combat.MAX_WALLS + '), RareCombat has no TooManyWalls (errors: '
+      + errs.join(', ') + '), and ' + big.map(([n, k]) => n + ' walls ' + k + '/2').join(', ') + ' fought field for field the same in both engines',
+      Combat.MAX_WALLS === undefined && !errs.includes('TooManyWalls') && big.every(([, k]) => k === 2) && big.some(([n]) => n >= 60),
+      JSON.stringify({ MAX_WALLS: Combat.MAX_WALLS, errs, big })); }
+  // refused in both engines: a 1/1 (slot 0) has no weapon, so it cannot stand in a full fight; a Genesis must be given a strength
+  { const errOf = async (S) => { try { await lab.call('fight', [R, S2of(S), wordOf(4800, 0), 1]); return 'landed'; } catch (e) { try { return lab.iface.parseError(e.data).name; } catch (_) { return 'revert'; } } };
+    const jsErr = (S) => { try { Combat.fight(R, S, { word: wordOf(4800, 0), contract: lab.address, chainId: CHAIN_ID, fightId: 1 }); return 'landed'; } catch (e) { return e.name; } };
+    const p = Combat.proving(1, {}), att0 = { attackers: [0], entry: Combat.entry(p, 'N', 6), defenders: p.defenders, walls: p.walls },
+      def0 = { attackers: [1], entry: Combat.entry(p, 'N', 6), defenders: [{ gen: 0, x: 0, y: -1 }], walls: p.walls },
+      gNo = { attackers: [1], entry: Combat.entry(p, 'N', 6), defenders: p.defenders, walls: p.walls, genesis: { x: 0, y: 0, hp: 0 } };
+    const got = { att0: [jsErr(att0), await errOf(att0)], def0: [jsErr(def0), await errOf(def0)], gNo: [jsErr(gNo), await errOf(gNo)] };
+    ok('generation 0 (a 1/1, ruling 55 - no weapon yet) is refused in a full fight by both engines, attacking or defending, and so is a Genesis with no strength: '
+      + JSON.stringify(got), got.att0[0] === 'RangeError' && got.att0[1] === 'InvalidGeneration' && got.def0[0] === 'RangeError' && got.def0[1] === 'InvalidGeneration'
+      && got.gNo[0] === 'RangeError' && got.gNo[1] === 'InvalidGenesis', JSON.stringify(got)); }
+  // THE TRAP (ruling 55; M17 items 10 and 11): slot 0 is 1140, read out of values.js; the odds are the ruling's own
+  // six figures; and RareCombat.trap settles the same one roll as combat.js trap() on every word, every victim.
+  { const RULED = [6003, 6925, 7718, 8351, 8837, 9193];     // DESIGN.md, *What springs - decided*, worked out with 1140
+    const js6 = [1, 2, 3, 4, 5, 6].map((g) => Combat.trapBps(R, g));
+    let tSame = 0, tAll = 0, tWins = 0; const sol6 = [];
+    for (let g = 1; g <= 6; g++) for (let k = 0; k < 40; k++) {
+      const w = wordOf(4900 + g, k), trapId = g * 1000 + k;
+      const o = (await lab.call('trap', [R, g, w, trapId])).out;
+      const js = Combat.trap(R, g, { word: w, contract: lab.address, chainId: CHAIN_ID, trapId });
+      if (k === 0) sol6.push(Number(o.bps));
+      tAll++; if (o.doopieWins === js.doopieWins && Number(o.roll) === js.roll && Number(o.bps) === js.bps) tSame++;
+      if (js.doopieWins) tWins++;
+    }
+    ok('A 1/1 DOOPIE\'S STRENGTH IS 1140, in slot 0 of values.js HP_OF (ruling 55), and the trap\'s odds are the ruling\'s: ' + js6.join(' / ') + ' bps against Gen 1 to 6 in combat.js, '
+      + sol6.join(' / ') + ' in RareCombat.trapBps', R.hp[0] === 1140 && JSON.stringify(js6) === JSON.stringify(RULED) && JSON.stringify(sol6) === JSON.stringify(RULED),
+      JSON.stringify({ slot0: R.hp[0], js6, sol6 }));
+    ok('the trap is ONE chance roll: RareCombat.trap matches combat.js trap() - roll, odds and winner - on ' + tSame + ' of ' + tAll + ' traps (40 words x 6 victims; the Doopie won ' + tWins + ')',
+      tSame === tAll && tWins > 0 && tWins < tAll, tSame + ' / ' + tAll);
+    const R39 = Object.assign({}, R, { hp: [1139].concat(R.hp.slice(1)) });
+    ok('slot 0 hashes: rulesHash moves when a 1/1\'s strength does (1140 -> 1139)', Combat.rulesHash(R39) !== Combat.rulesHash(R), 'same hash'); }
   console.log('        gas per fight: average ' + Math.round(gasSum / fights).toLocaleString('en-US') + ', most ' + gasMax.toLocaleString('en-US') + ' (' + JSON.stringify(worst) + ')');
   // The ceiling, read from the chain the contracts are for. The chain id is asserted with it: a ceiling
   // read from the wrong chain is worse than a typed-in one, because it looks like it was measured.
@@ -446,6 +594,32 @@ async function chain() {
   ok('the challenge: RareDuel settles like duel.js (winner, roll and odds) on all ' + dAll + ' duels, every pick against every pick', dMatch === dAll, dMatch + ' / ' + dAll);
   ok('the odds are the triangle: counter ' + Duel.TERMS.counterBps / 100 + '%, same ' + Duel.TERMS.sameBps / 100 + '%, countered ' + (100 - Duel.TERMS.counterBps / 100) + '%', oddsOk, 'odds differ');
   ok('the pot moves exactly: the winner gets both stakes less the fee, the fee goes to its address', payOk, 'balances');
+  // THE TERMINAL (ruling 55): its own terms, 70 / 70 / 50 with the Doopie as the first pick, held equal in duel.js
+  // TERMINAL and RareDuel's terminal*Bps; the ordinary triangle is untouched beside it (ruling 64, 70 / 50 / 30).
+  { const onChain = { counterBps: Number((await duel.call('terminalCounterBps')).out[0]), sameBps: Number((await duel.call('terminalSameBps')).out[0]),
+      beatenBps: Number((await duel.call('terminalBeatenBps')).out[0]) };
+    let pairs = 0, pairOk = 0, sum = 0, ordOk = 0;
+    for (const a of picks) for (const b of picks) {
+      const t = Number((await duel.call('terminalOddsBps', [Duel.code(a), Duel.code(b)])).out[0]), o = Number((await duel.call('oddsBps', [Duel.code(a), Duel.code(b)])).out[0]);
+      pairs++; sum += t;
+      if (t === Duel.oddsBps(a, b, Duel.TERMINAL) && t === (a === b ? 7000 : Duel.beats(a, b) ? 7000 : 5000)) pairOk++;
+      if (o === Duel.oddsBps(a, b) && o === (a === b ? 5000 : Duel.beats(a, b) ? 7000 : 3000)) ordOk++;
+    }
+    ok('THE TERMINAL\'S TERMS (ruling 55) are a separate set: RareDuel holds ' + JSON.stringify(onChain) + ' as duel.js TERMINAL does, the Doopie\'s chance is 70 / 70 / 50 on all '
+      + pairOk + ' of ' + pairs + ' pairs (' + (sum / pairs / 100).toFixed(1) + '% across the nine), and the ordinary triangle beside it is still 70 / 50 / 30 on ' + ordOk + ' of ' + pairs,
+      onChain.counterBps === Duel.TERMINAL.counterBps && onChain.sameBps === Duel.TERMINAL.sameBps && onChain.beatenBps === Duel.TERMINAL.beatenBps
+      && pairOk === 9 && sum === 57000 && ordOk === 9 && Duel.TERMS.counterBps === 7000 && Duel.TERMS.sameBps === 5000 && !('beatenBps' in Duel.TERMS),
+      JSON.stringify({ onChain, pairOk, sum, ordOk, TERMS: Duel.TERMS })); }
+  { let same = 0, all = 0, dw = 0;
+    for (const a of picks) for (const b of picks) for (let j = 0; j < 4; j++) {
+      const w = wordOf(5100, all), tid = 9000 + all;
+      const o = (await duel.call('terminalRoll', [w, tid, Duel.code(a), Duel.code(b)])).out;
+      const js = Duel.terminal(Object.assign({ word: w }, ctx), tid, a, b, 1);
+      all++; if (Number(o.roll) === js.roll && Number(o.odds) === js.odds && o.doopieWins === (js.winner === 'doopie')) same++;
+      if (js.winner === 'doopie') dw++;
+    }
+    ok('a terminal duel settles the same one roll as duel.js terminal(): RareDuel.terminalRoll matches roll, odds and winner on ' + same + ' of ' + all + ' (the Doopie won ' + dw + ')',
+      same === all && dw > 0 && dw < all, same + ' / ' + all); }
   // no one can see a pick early: a wrong salt, the other player's commitment, or a changed pick are all refused
   id++;
   const sa = wordOf(20, 1), sb = wordOf(20, 2);

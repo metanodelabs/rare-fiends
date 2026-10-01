@@ -21,9 +21,12 @@
 //     leak at level I on the game's clock and none at level IV;
 //   - and WATCHES THE PAGE (pagewatch.js): nothing 404s, nothing is logged as an error.
 //
-// WHAT IT DOES NOT COVER. Any number being RIGHT: strength is 0 on every row but the wall, energy draw
-// and supply are 0 on every row, and the check sets its own (10 and 4, then 20) to drive the loop - it
-// proves the loop reads the rows, not that the rows are tuned. Building a capacitor through the build
+// Since ruling 64 (M8 item 13) the rows carry the DECIDED strength, draw and supply: the check asserts the
+// starting loop off those rows (supply and demand summed from them, every strength inside the ceiling, every
+// row marked DECIDED with its sweep row), then ZEROES them at run time and sets its own (10 and 4, then 20)
+// to drive the loop, and puts them back.
+// WHAT IT DOES NOT COVER. Any number being RIGHT against the sweep - that is the economist's; it proves the
+// loop reads the rows, not that the rows are tuned. Building a capacitor through the build
 // UI (it is pushed onto `base.buildings` directly) and placing one by a real tap (siteReason is called,
 // not tapped). The unlock is checked on the capacitor only; `needsKind` on the tower only, by editing
 // its row. A wall above level 2, and a crew actually filling past the old cap. Capacitor II and III's
@@ -122,13 +125,34 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     const str = JSON.parse(await ev('JSON.stringify(Object.fromEntries(Object.entries(base.ECON.kinds).map(([k,r])=>[k,r.strength])))'));
     ok('every row carries a strength per level, and the wall\'s level 1 is the fight\'s wallHp (' + (await ev('base.ECON.wallHp')) + ')',
       Object.values(str).every((a) => Array.isArray(a)) && str.wall[0] === (await ev('base.ECON.wallHp')), JSON.stringify(str));
-    ok('every other row says 0 - no number decided, not a target - and says so in `proposed`',
-      Object.entries(str).filter(([k]) => k !== 'wall').every(([k, a]) => a.every((v) => v === 0)) && (await ev('Object.values(base.ECON.kinds).every(r=>r.proposed && r.proposed.strength)')) === true, JSON.stringify(str));
+    // ruling 64, sweep rows 6 and 7: every level of every row has a decided strength, none over the ceiling, and
+    // the row says DECIDED with its sweep row - the old rule (0 off the wall, marked PROPOSED) fails all three
+    const smax = await ev('base.ECON.strengthMax');
+    ok('every level of every row has a strength above 0 and at most the ceiling, strengthMax ' + smax + ' (the harvester\'s ' + (await ev('base.ECON.harvStrength')) + ' too)',
+      smax > 0 && Object.values(str).every((a) => a.every((v) => v > 0 && v <= smax)) && (await ev('base.ECON.harvStrength > 0 && base.ECON.harvStrength <= base.ECON.strengthMax')) === true, JSON.stringify(str));
+    ok('and every row marks its strength DECIDED with its sweep row, not PROPOSED',
+      (await ev('Object.values(base.ECON.kinds).every(r=>r.decided && /^DECIDED, ruling 64, sweep row \\d/.test(r.decided.strength) && !(r.proposed && r.proposed.strength))')) === true,
+      await ev('JSON.stringify(Object.fromEntries(Object.entries(base.ECON.kinds).map(([k,r])=>[k,(r.decided||{}).strength||null])))'));
 
     // ---- M8 item 10 + M10 items 4 and 5: energy is real, the bar reads charge ----
     const E = async () => JSON.parse(await ev('JSON.stringify((({supply,demand,ratio,stalled})=>({supply,demand,ratio,stalled:stalled.map(b=>b.type)}))(base.ECON.energy()))'));
-    const e0 = await E();
-    ok('with every draw and supply at 0 nothing starves: supply 0, demand 0, ratio 1, nobody stalled', e0.supply === 0 && e0.demand === 0 && e0.ratio === 1 && !e0.stalled.length, JSON.stringify(e0));
+    // the DECIDED draws and supply (sweep rows 29 to 31), summed here off the rows for every standing building of
+    // the home base - not typed: a row the page stopped reading, or one left at 0, fails it.
+    // energy() is what the last tick computed; a building that finishes raising later in the same frame stands
+    // in the sum below but not yet in the tick (seen once in three runs: demand 5 against 6). So both are read
+    // in ONE evaluate, and read again over a few frames until a tick has caught up - never longer than 3 s.
+    const W0 = '(()=>{const at=(b,c)=>{const r=base.ECON.kinds[b.type],L=b.build?(b.tier||1)-1:(b.tier||1); return r&&r[c]&&L>0?(r[c][L-1]||0):0;}; const mine=base.buildings.filter(b=>(b.base==null?base.HOME:b.base)===base.HOME); return {supply:mine.reduce((n,b)=>n+at(b,"supply"),0),demand:mine.reduce((n,b)=>n+at(b,"energy"),0)};})()';
+    let e0, want0;
+    for (let i = 0; i < 12; i++) {
+      ({ e0, want0 } = JSON.parse(await ev('JSON.stringify({ e0: (({supply,demand,ratio,stalled})=>({supply,demand,ratio,stalled:stalled.map(b=>b.type)}))(base.ECON.energy()), want0: ' + W0 + ' })')));
+      if (e0.supply === want0.supply && e0.demand === want0.demand) break;
+      await sleep(250);
+    }
+    ok('the decided rows drive the starting loop: supply ' + want0.supply + ' and demand ' + want0.demand + ' summed off the rows, both above 0, the mill meets it - ratio 1, nobody stalled',
+      want0.supply > 0 && want0.demand > 0 && e0.supply === want0.supply && e0.demand === want0.demand && e0.ratio === 1 && !e0.stalled.length, JSON.stringify({ e0, want0 }));
+    // from here the loop is driven by numbers the check sets: every draw and supply zeroed at run time, put back after
+    await ev('(()=>{window.__rows=JSON.stringify(Object.fromEntries(Object.entries(base.ECON.kinds).map(([k,r])=>[k,{energy:r.energy.slice(),supply:r.supply?r.supply.slice():null}]))); Object.values(base.ECON.kinds).forEach(r=>{r.energy.fill(0); if(r.supply) r.supply.fill(0);}); return 1;})()');
+    await untilSim(300);
     ok('every standing building reads full charge', (await ev('base.buildings.filter(b=>!b.build).every(b=>b.charge===1||b.type==="capacitor")')) === true, await ev('JSON.stringify(base.buildings.map(b=>[b.type,b.charge]))'));
     // the loop, driven from the registry at run time: the depot draws 10, the mill (tier 2) makes 4
     await ev('base.ECON.kinds.collectionDepot.energy[0] = 10; base.ECON.kinds.generator.supply[1] = 4;');
@@ -145,6 +169,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     const e2 = await E();
     ok('give the mill 20 and the demand of 10 is met: ratio 1, nobody stalled', e2.ratio === 1 && !e2.stalled.length, JSON.stringify(e2));
     await ev('base.ECON.kinds.collectionDepot.energy[0] = 0; base.ECON.kinds.generator.supply[1] = 0;');
+    await ev('(()=>{const s=JSON.parse(window.__rows); Object.entries(s).forEach(([k,v])=>{const r=base.ECON.kinds[k]; v.energy.forEach((x,i)=>{r.energy[i]=x;}); if(v.supply) v.supply.forEach((x,i)=>{r.supply[i]=x;});}); return 1;})()');
     // a store: its charge is its fill, and it leaks by its own level, the decided 10% a day at level I
     await ev('(()=>{const g=base.buildings.find(b=>b.type==="generator"); const c={type:"capacitor",x:g.x+1,y:g.y,tier:1,base:base.HOME,stored:500}; base.buildings.push(c); return 1;})()');
     await untilSim(200);

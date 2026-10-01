@@ -39,9 +39,9 @@
     "enum", "ref",
     "bool[]", "uint8[]", "uint16[]", "uint32[]", "uint64[]", "uint128[]", "uint256[]",
     "int16[]", "bytes32[]", "address[]", "string[]", "ref[]", "enum[]",
-    "mapping(address => bool)"
+    "mapping(address => bool)", "mapping(bytes32 => bool)", "mapping(bytes32 => uint64)"
   ],
-  "typesNote": "mapping(address => bool) is a per-address lookup: a page reads it one address at a time (whitelisted(addr)) and can never enumerate it - there is no list on chain to show. deployer.html's whitelist add/remove rows already treat it that way. Ruling 21.",
+  "typesNote": "mapping(address => bool) is a per-address lookup: a page reads it one address at a time (whitelisted(addr)) and can never enumerate it - there is no list on chain to show. deployer.html's whitelist add/remove rows already treat it that way. Ruling 21. The two bytes32 mappings are ShadowFriends' per-mint state (shadowed, revokedAt), keyed by the raw Solana mint and read the same way: one key at a time, never enumerated.",
 
   "gaps": {
     "note": "BINDING.md §12's eight rows, keyed so an entity can name the one it closes. `covered` says whether THIS file gives it a home; it never claims a contract exists - M20 builds them.",
@@ -79,7 +79,7 @@
 
     "gameState": { "decided": "proposed", "built": "RareGame.State", "members": ["None", "Open", "Started", "Settled", "Abandoned"], "note": "BUILT as RareGame.State by the chain engineer from the decided clocks (join window, start delay, length) and the decided end (the winners are declared); `Abandoned` is joining closing short of the minimum with every stake refunded. The members are the contract's, not the deployer's: PROPOSED, and the steward owes the deployer the question. `None` is index zero so an unwritten slot is not a live state - the RareDuel.State pattern." },
 
-    "moveKind": { "decided": true, "members": ["build", "raise", "demolish", "harvester", "gather", "chop", "walk", "post", "unpost", "order", "hire", "release", "hands"], "note": "`hands` (M8 item 3) is how many Friends work a building going up, from a moment on - the action a player takes when they put Friends on a build or pull them off it. The move log's discriminator. §17.2.2 makes every move an event folded into moveRoot, so THIS LIST IS THE DEFINITION OF WHAT COUNTS AS HISTORY - a move kind left off it is a thing that happened and is not in the record. DECIDED (the deployer, 2026-09-30): 'all actions should be saved' - EVERY ACTION A PLAYER TAKES IS A MOVE. The members are estate/record.js's MOVES table, the actions the page gives a player today, and recordcheck holds the two lists equal; a later milestone that gives the player a new action (a fight, a duel, the market's verbs, a claim of ground) adds its kind to both, never an action the record does not carry. M18 closes the game against it. Not a move, by the same ruling: when the player was last on the map (base lastSeen in record.js), which a session with no moves still writes; what happens while a player is idle is recorded through other players' actions." },
+    "moveKind": { "decided": true, "members": ["build", "raise", "demolish", "harvester", "gather", "chop", "walk", "post", "unpost", "order", "hire", "release", "hands", "attack", "attacked"], "note": "`hands` (M8 item 3) is how many Friends work a building going up, from a moment on - the action a player takes when they put Friends on a build or pull them off it. `attack` and `attacked` (M13 item 2) are one fight's result, written by OUR SERVER and never by a client (rulings 3 and 7; record.js SERVER_MOVES, refused in a client's batch by serve.py): `attack` on the attacker's record - its Friends that went down leave the roster and a won attack brings the loot home; `attacked` on the defender's - its Friends that went down and its broken wall sections come off, and a won attack takes the whole purse (ruling 14) and destroys the keep (ruling 37 (d)), after which nothing on that base can be raised. The move log's discriminator. §17.2.2 makes every move an event folded into moveRoot, so THIS LIST IS THE DEFINITION OF WHAT COUNTS AS HISTORY - a move kind left off it is a thing that happened and is not in the record. DECIDED (the deployer, 2026-09-30): 'all actions should be saved' - EVERY ACTION A PLAYER TAKES IS A MOVE. The members are estate/record.js's MOVES table, the actions the page gives a player today, and recordcheck holds the two lists equal; a later milestone that gives the player a new action (a fight, a duel, the market's verbs, a claim of ground) adds its kind to both, never an action the record does not carry. M18 closes the game against it. Not a move, by the same ruling: when the player was last on the map (base lastSeen in record.js), which a session with no moves still writes; what happens while a player is idle is recorded through other players' actions." },
 
     "closeReason": { "decided": false, "members": [], "note": "Why a game ended. BINDING §16.4 last bullet: an era must not close with fights still open, and what happens if it does is undecided." }
   },
@@ -205,10 +205,9 @@
         "landVsBuildingBps": { "type": "uint32", "note": "COMBAT.landVsBuildingBps." },
         "towerReach": { "type": "uint32", "note": "How much further a Friend up a watchtower can shoot, in spots. COMBAT.towerRange doubled." },
         "dropReach": { "type": "uint32", "note": "How far a wall crew can drop stones, in spots. COMBAT.dropRange doubled." },
-        "coverDiv": { "type": "uint32", "decided": false, "note": "PROPOSED, no value. One of the five BINDING §10.1.3 names; the deployer decides and a contract must not." },
-        "maxMs": { "type": "uint32", "decided": false, "note": "PROPOSED, no value. The fight clock." },
-        "stepMs": { "type": "uint32", "decided": false, "note": "PROPOSED, no value. Derived from walking pace, which is undecided." },
-        "defendReach": { "type": "uint32", "decided": false, "note": "PROPOSED, no value. How far a DEFEND order may stray from its post, in spots." },
+        "coverDiv": { "type": "uint32", "decided": true, "note": "DECIDED, ruling 45: a Friend standing ON a wall (its crew) is hit 1/coverDiv as often - 50% protection, so coverDiv is two - and a Friend BEHIND a wall gets no cover at all. The rule moved, not just the number: both engines used to halve the chance for a Friend behind a wall (M13 item 9). One reading is stated rather than chosen in the ruling: '50% protection' is read as halving the chance a shot lands, not halving the damage." },
+        "stepMs": { "type": "uint32", "decided": true, "note": "THE WALKING SPEED, as the struct holds it. DECIDED, ruling 44: every Friend walks at `speed`, ONE TILE A SECOND, and it is a DEPLOYER SETTING (the deployer tunes it after testing; deployer.html carries the row). The struct carries no `speed` field: it stores the step that speed implies, stepMs = 1000 / (2 x speed) because a spot is half a tile - five hundred ms a spot at the decided speed (combat.js rulesFrom, P.speed). So `speed` is the deployer's number and this field is its encoding; the two are one setting, not two, and a page must edit speed and write stepMs, never let the two be set apart." },
+        "defendReach": { "type": "uint32", "decided": true, "note": "How far a DEFEND order may stray from its post, IN SPOTS. DECIDED, ruling 46: FIVE TILES, which is ten spots (combat.js rulesFrom, spots(P.defendTiles)). A deployer setting, written per game and frozen with the rest of the table like every number here." },
         "splashFalloff": { "type": "uint32", "decided": false, "note": "PROPOSED, no value, AND NOT IN RareCombat.Rules TODAY. DESIGN says 'the splash falling off by half a spot'; §10.1.3 counts it among the five, and the struct has no field for it. So the table is one field short of the specification and schemacheck records the mismatch rather than hiding it." },
         "entryGap": { "type": "uint32", "decided": false, "note": "NO VALUE, AND IT MAY NOT BELONG HERE AT ALL. BINDING §10.3.3: the mockup offers three gaps and defaults to one, DESIGN says only 'in a line off the base', and WHETHER THE ATTACKER PICKS IT is the deployer's. If the attacker picks it, it is a fight field and not a rules field. Declared here with that fork written down." }
       }
@@ -226,14 +225,14 @@
         "levelName": { "type": "string[]", "note": "Per level. KIND[k].tiers." },
         "crystalCost": { "type": "uint32[]", "unit": "hundredths", "note": "Per level. KIND[k].cost. No values. HOME: RareRules.setLadder/ladderOf, per rulesId, frozen by RareRules.freeze - M15 item 11's chain half." },
         "woodCost": { "type": "uint32[]", "unit": "hundredths", "note": "Per level. WOOD_COST - level 1 is built of logs, upgrades are paid in crystals, and that asymmetry is data rather than a rule in code. HOME: RareRules, beside crystalCost. Not refunded by a demolition (BINDING §46.4)." },
-        "buildMs": { "type": "uint32[]", "note": "Per level: how long ONE Friend takes to raise this kind to that level (M8 item 2). Every row in values.js carries it; every value names BUILD_MS, the demo pace, held while the economist's figures are PROPOSED (question 21 row 24, in each row's `proposed.buildMs`). record.js raiseMs reads it; the top-level values.js buildMs is that one held number, kept readable." },
-        "hands": { "type": "uint8", "decided": false, "note": "The ceiling on Friends working one build (M8 item 3): each Friend up to it takes the time down linearly - buildMs / n - and past it another adds nothing. PROPOSED (question 21 rows 25 and 27): 4 for a one-tile building, 2 for a wall, 4 for the capacitor. record.js `ceiling` and `worked` read it." },
-        "strength": { "type": "uint32[]", "note": "Per level. M3 item 2's 'strength'. A wall's is the one the fight reads (rules.wallHp today - see oneHome, it is declared in two places and one must go). Since M8 item 5 every row in values.js carries it: the wall's level 1 names WALL_HP rather than typing a second 400, and 0 means NO NUMBER IS DECIDED and the building is not a target - which is what the fight does with every building but a wall today. The economist's per-level figures are PROPOSED (question 21 rows 6 and 7) and are not written." },
-        "energy": { "type": "uint32[]", "note": "Per level, in P: what the building DRAWS while it runs (M8 item 10). Every row in values.js carries it, and every value is 0 because the economist's figures are PROPOSED (question 21 rows 29 and 30) and a proposal is not written as a value. index.html's energy tick (M10 item 4) reads it: a base's demand is the sum of its standing buildings' draws, its supply the sum of their `supply`, and a building whose draw cannot be met is marked stalled and its bar reads the shortfall. NOT IN RareRules YET: the contract side is a spec for the chain engineer." },
-        "supply": { "type": "uint32[]", "note": "Per level, in P: what the building MAKES while it runs. Only the generator's row carries it; 0 at every level until the deployer decides (PROPOSED 10 / 25 / 60, question 21 row 31). A row without the column makes nothing." },
-        "release": { "type": "uint32[]", "note": "Per level, in P: the most a STORE lets out when the generator it serves is offline. Only the capacitor's row carries it (PROPOSED 15 / 40 / 100 / 250, question 21 row 32). A store's `capacity` is what it holds, in P·h - the same column a silo uses for crystals, because it is the one number the kind caps." },
+        "buildMs": { "type": "uint32[]", "decided": true, "note": "Per level: how long ONE Friend takes to raise this kind to that level (M8 item 2). DECIDED, ruling 64, sweep row 24: four seconds of one Friend's work per unit (1.00) of the rung's materials, wood and crystals added together - so every kind's per-level buildMs is DERIVED from that one number (values.js buildMsPerUnit) and the rung's own price, and a free rung (Keep I) takes no time. A deployer setting. The flat demo pace (2.8 s a level) loads ONLY under the explicit demo switch (pace=demo, RF_PACE=demo; values.js demoPace) and is a demo, not a value. record.js raiseMs reads it." },
+        "hands": { "type": "uint8", "decided": true, "note": "The ceiling on Friends working one build (M8 item 3): each Friend up to it takes the time down linearly - buildMs / n - and past it another adds nothing. DECIDED, ruling 64, sweep rows 25 and 27: linear, up to 4 for every one-tile building, 2 for a wall (an edge with two faces, one crew a side), 4 for the capacitor. A deployer setting. record.js `ceiling` and `worked` read it." },
+        "strength": { "type": "uint32[]", "decided": true, "note": "Per level. M3 item 2's 'strength'. DECIDED, ruling 64, sweep rows 6 and 7: each level doubles from the kind's first (keep 1,500 / 3,000 / 6,000; a wall 400 / 800 / 1,600; Cell IV 2,000; the capacitor the generator's ladder, 200 to 1,600), and NO BUILDING MAY EXCEED THE CITADEL'S 6,000 - values.js `strengthMax`, which refuses to load a row over it, so the ceiling is a rule and not a note. A harvester is not a building row and has its own, 150 (values.js `harvStrength`, row 6). A wall's level 1 names WALL_HP, the fight's own (rules.wallHp - see oneHome, it is declared in two places and one must go). THE FIGHT IS BEHIND THIS ROW: combat.js and RareCombat.sol give every wall WALL_HP whatever its level and target no other building, so levels 2 and 3 of a wall and every other kind's strength are decided numbers no fight reads yet - owed with the parity check." },
+        "energy": { "type": "uint32[]", "decided": true, "note": "Per level, in P: what the building DRAWS while it runs (M8 item 10). DECIDED, ruling 64, sweep rows 29 and 30: by kind and level in values.js (a cell 2 / 4 / 8 / 14, a depot 3 / 6 / 10, the keep 0 / 2 / 6; a generator and a capacitor draw nothing). index.html's energy tick (M10 item 4) reads it: a base's demand is the sum of its standing buildings' draws, its supply the sum of their `supply`, and a building whose draw cannot be met is marked stalled and its bar reads the shortfall. NOT IN RareRules YET: the contract side is a spec for the chain engineer." },
+        "supply": { "type": "uint32[]", "decided": true, "note": "Per level, in P: what the building MAKES while it runs. Only the generator's row carries it. DECIDED, ruling 64, sweep row 31: 10 / 25 / 60 - a level-1 base runs on its water wheel, just. A row without the column makes nothing." },
+        "release": { "type": "uint32[]", "decided": true, "note": "Per level, in P: the most a STORE lets out when the generator it serves is offline. Only the capacitor's row carries it. DECIDED, ruling 64, sweep row 32: 15 / 40 / 100 / 250. A store's `capacity` is what it holds, in P·h - the same column a silo uses for crystals, because it is the one number the kind caps." },
         "leak": { "type": "uint8[]", "note": "Per level, in percent of the store lost a day. Only the capacitor's row carries it, and it is DECIDED: 10, 5, 3, none (Energy, 'Two ladders, and they are independent'). How fast a store CHARGES is not a column: it is set by the source, and which generator level each of 48 h / 24 h / 6 h / 2 h belongs to is undecided, so nothing holds it." },
-        "capacity": { "type": "uint32[]", "note": "Per level, the one number the kind caps: a depot's crystals (what it holds), a silo's crystals (what it ADDS to the depot's reserve - How much you can hold; record.js storeCap), a wall's crew (WALL_CAP), a capacitor's store. One field because they are one concept, and the note on the row says which. A depot's harvesters are one a level, not this column; a hut holds no Friends (housing is not a thing)." },
+        "capacity": { "type": "uint32[]", "decided": true, "note": "Per level, the one number the kind caps: a depot's crystals (what it holds; DECIDED, ruling 64, sweep row 20: 240.00 / 720.00 / 2,160.00), a silo's crystals (what it ADDS to the depot's reserve - How much you can hold; record.js storeCap; DECIDED, ruling 64, row 21: +300 / +900 / +3,000), THE KEEP'S FLOOR (DECIDED, ruling 62, sweep row 45: 240.00 at every keep level while the keep stands - a floor under the store that counts only when no depot and no silo stores, not an addition; 0 once the keep is gone and nothing else stores; record.js storeCap reads it through placement.isKeep, not the kind's name), a wall's crew (WALL_CAP), a capacitor's store (ruling 64, row 32). One field because they are one concept, and the note on the row says which. A depot's harvesters are one a level, not this column; a hut holds no Friends (housing is not a thing)." },
         "reach": { "type": "uint32[]", "note": "Per level, in spots: a cell's claim (CELL_REACH), a tower's sight. Zero for a kind that reaches nowhere." },
         "footprint": { "type": "int16[]", "note": "RELATIVE TILE OFFSETS, x,y pairs. A one-tile building is a single [0,0]. DATA, so a building bigger than one tile needs no code change - which matters because wallsortcheck's uncovered column says 'buildings bigger than one tile, which do not exist yet' and this is the field that lets them." },
         "placement": { "type": "ref", "ref": "placementRule", "note": "The rule as data. M3 item 3." },
@@ -253,7 +252,7 @@
         "onWater": { "type": "bool", "note": "A generator needs running water: map.waterSites. terraincheck already proves a generator is refused on dry ground." },
         "onBaseEdge": { "type": "bool", "note": "A wall stands on a tile's edge, not in its middle - which is why a wall carries a direction and nothing else does." },
         "onClaimedGround": { "type": "bool", "note": "A cell may be placed on claimed ground to push further still." },
-        "maxPerBase": { "type": "uint16", "note": "Zero for no limit. This is where a base's seventeenth wall section becomes a decided thing rather than a discovered one: RareCombat's MAX_WALLS is 16 and BINDING §10.2 says it becomes reachable by ordinary play the moment walls are read instead of supplied. No value - it is the deployer's, BINDING §13 item 5." },
+        "maxPerBase": { "type": "uint16", "note": "Zero for no limit. A fight has NO limit on wall sections (deployer, 2026-10-01): RareCombat's MAX_WALLS of 16 is removed and every finished section is fought, so this field is a building rule only, never a combat bound. No value - it is the deployer's." },
         "scienceGen": { "type": "uint8[]", "note": "Per level, the worst generation that can run it - CELL_NEEDS. Zero where no posted Friend is needed. Per level because a cell's second level needs a Gen 3 and its fourth a Gen 1." },
         "needsKind": { "type": "uint16", "note": "A kindId this one requires, or zero. Named rather than hard-coded so a partnership's building can require a partner's. index.html's lockReason() reads it since M8 item 4: a kind whose needsKind is not standing finished on the base is locked in the catalogue. No row sets it today." },
         "nextToKind": { "type": "uint16", "note": "THE FOURTH PLACEMENT RULE (Energy): a kindId this one must stand TOUCHING - sharing a tile edge with - or zero. The capacitor's row names the generator, and touching is also what binds the store to the generator it serves ('What a capacitor backs up: the one it touches'). index.html's siteReason() reads it in tap(); the kind is written by codeName until M20 numbers the registry." }
@@ -270,7 +269,7 @@
         "yearDiv": { "type": "uint8", "note": "A game year is the game's length divided by this - DECIDED a quarter (How long a game year is), and a divisor rather than a fraction because a chain cannot hold 0.25. Shown on the deployer page, not edited there: 'the year itself needs no field'. values.js yearDiv; index.html GAME_YEAR_OF is 1 / it." },
         "growMs": { "type": "uint32", "note": "A seam's full growth cycle, stages every quarter. values.js growMs." },
         "handYield": { "type": "uint32", "note": "Crystals a Friend cuts from a seam by hand. values.js handYield." },
-        "stageYieldBps": { "type": "uint16[]", "decided": false, "note": "What a seam gives by growth stage, in basis points of a full haul (M10 item 2: taking it young gives less). As many stages as entries, each an equal share of growMs. PROPOSED (question 21 row 16): 2500 / 5000 / 7500 / 10000. values.js stageYieldBps; record.js haulOf reads it for the harvester and the hand alike." },
+        "stageYieldBps": { "type": "uint16[]", "decided": true, "note": "What a seam gives by growth stage, in basis points of a full haul (M10 item 2: taking it young gives less). As many stages as entries, each an equal share of growMs. DECIDED, ruling 64, sweep row 16: 25% / 50% / 75% / 100% at stages 0 to 3. A deployer setting. values.js stageYieldBps; record.js haulOf reads it for the harvester and the hand alike." },
         "harvCost": { "type": "uint128", "note": "What a harvester costs to build, in hundredths. values.js harvCost." },
         "treeWood": { "type": "uint32", "note": "Wood a tree gives when felled, in hundredths (three logs). values.js treeWood. NOT trees per grove - that is a map parameter, frozen at the seed, and mapgen.js carries it." },
         "chopMs": { "type": "uint32", "note": "How long one chop takes. values.js chopMs." },
@@ -612,6 +611,97 @@
         "maxFeeBps": { "type": "uint16", "decided": true, "note": "The fee's ceiling: RareMarket.maxFeeBps, an immutable constructor argument. Ruling 1 (2026-09-30): 10% (1000 bps). Permanent once deployed - no setter exists, and setFeeBps refuses anything above it." },
         "state": { "type": "uint8", "decided": false, "note": "open, sold, cancelled - not decided as a list. M15's." }
       }
+    },
+
+    "shadow": {
+      "home": "chain",
+      "note": "A SHADOW: a Solana NFT's stand-in on 4663 - a Doopie, not a Genesis and not a Generation (ruling 35) - written FROM ShadowFriends.sol AS IT IS, for M20 item 1's re-judgement, so that the contract is described here and not the other way round. One row a live shadow, in `shadows[tokenId]`. The token id IS the Solana mint (its raw 32-byte key as a uint256), so a mint has at most one live shadow and the identity needs no second mapping. Soulbound: minted to the claim's `to` and never passed on (`_update` reverts Soulbound on any transfer that is not a mint or a burn). It is created only by `claim` with the attestor's EIP-712 signature (shadowClaim), touched afterwards only by the attestor's `recheck` (checkedAt) and destroyed only by the attestor's `revoke`, which deletes this row, burns the token and frees the mint (shadowFriends.shadowed, shadowFriends.revokedAt). PERMANENT: no proxy and no initializer, so a field that is not here when M21 item 1 deploys can never be added. The fields not in `struct Shadow` are the mapping's key and the ERC-721 owner; each names the line of the contract that holds it (`beside`), and schemacheck greps for it.",
+      "built": "ShadowFriends.Shadow",
+      "milestone": "M21",
+      "fields": {
+        "tokenId": { "type": "uint256", "key": true, "beside": "tokenId = uint256(c.solMint);", "note": "The mapping's key, and the ERC-721 id: uint256(solMint). One identity - anyone can read which shadow belongs to which original by base58-encoding the id." },
+        "owner": { "type": "address", "beside": ["_safeMint(c.to, tokenId);", "revert Soulbound();"], "note": "ERC-721 ownerOf: the 4663 wallet the claim named in `to`, which must also be the caller of `claim` (NotYours). Never changes while the shadow lives - a shadow cannot be sold or sent - so it is the address a join guard's ownerOf check passes against, and it is who holds a 1/1 terminal's cut (ruling 54, BINDING §65). It is NOT the Solana holder: that is solOwner, and the two are linked only by the attestor's signature." },
+        "mask": { "type": "uint256[]", "note": "uint256[16] in the struct - a fixed sixteen words, the type list has no fixed arrays. Which pixels of the 64 x 64 sprite exist: pixel (x, y) is bit y*64+x, most significant first." },
+        "palette": { "type": "uint256[]", "note": "RGB, three bytes a colour, eight colours to a word. Bounded by the format (at most thirty-two colours), so `revoke` can always clear it." },
+        "pixels": { "type": "uint256[]", "note": "Five bits a pixel, in reading order over the pixels the mask covers. Bounded like the palette." },
+        "colors": { "type": "uint16", "note": "How many palette entries are real. Refused BadArt above the format's limit." },
+        "count": { "type": "uint16", "note": "How many pixels the mask covers. Refused BadArt above 64 x 64." },
+        "solMint": { "type": "bytes32", "note": "THE RAW MINT KEY: the Solana mint's 32-byte public key (b58decode of the address), NEVER A HASH - so the hourly recheck can read it back and ask Solana who holds it. Equal to bytes32(tokenId)." },
+        "solOwner": { "type": "bytes32", "note": "The Solana wallet that held the mint when it was claimed, as its raw 32-byte key. What the recheck compares Solana's current holder against; a different holder is a revoke." },
+        "collection": { "type": "bytes32", "note": "The Solana collection (its update authority), raw 32 bytes. NOT the same thing as rosterRow.collection, which is a 4663 address: a fielded shadow's rosterRow.collection is ShadowFriends' own address and its tokenId is this row's tokenId." },
+        "imageHash": { "type": "bytes32", "note": "keccak of the ORIGINAL art, so what was converted can be proved against the source image." },
+        "claimedAt": { "type": "uint64", "note": "block.timestamp of the claim." },
+        "checkedAt": { "type": "uint64", "note": "THE RECHECK STATE: when the attestor last confirmed the mint is still in solOwner's wallet (recheck, hourly - ruling 16). Set to claimedAt at the claim. NOTHING ON CHAIN READS IT: no contract refuses a shadow whose check has lapsed, so an attestor that stops running leaves every shadow playable. Whether a lapsed check should bar a shadow is not decided anywhere and is not decided here." },
+        "name": { "type": "string", "note": "The NFT's name, as the attestor signed it. Unbounded in length; it is cleared by `revoke` with the rest of the row." },
+        "traitKeys": { "type": "bytes32[]", "note": "THE TRAITS, keys as signed: right-padded bytes32, compared byte for byte, at most MAX_TRAITS, no zero key and no key twice (claim refuses BadTraitKey, DuplicateTrait, TooManyTraits), so traitOf has exactly one answer. RareDoopieGate.isOneOfOne reads `Evolution` here - the one on-chain consumer of a trait." },
+        "traitValues": { "type": "bytes32[]", "note": "The values, the same length as traitKeys (TraitsMismatch otherwise). As ATTESTED, not as the collection reads today: they vouch for the signature, not for Solana (BINDING B1.8)." }
+      }
+    },
+
+    "shadowClaim": {
+      "home": "chain",
+      "note": "WHAT THE ATTESTOR SIGNS, and the only way a shadow comes into being: the calldata of ShadowFriends.claim, an EIP-712 message in the domain 'Rare Fiends Shadows' version '1'. Never stored - its art, keys and traits are copied into a `shadow` row and `to` becomes the owner - but its SHAPE is the most permanent thing in the bridge: CLAIM_TYPEHASH and the domain are frozen into every signature the attestor will ever make, so a field added, removed or reordered is a new contract and a new attestor. schemacheck holds the struct, the typehash string and this row to one order. The attestor that signs it is shadowFriends.attestor.",
+      "built": "ShadowFriends.Claim",
+      "typehash": "CLAIM_TYPEHASH",
+      "milestone": "M21",
+      "fields": {
+        "to": { "type": "address", "note": "The 4663 wallet that may redeem it - and must be the caller (NotYours). The whitelist is asked about the caller before anything else (roles.requireAllowed, ruling 21)." },
+        "solMint": { "type": "bytes32", "note": "The raw mint key; becomes the token id. Refused AlreadyShadowed while a live shadow holds it, and ClaimPredatesRevoke if it was signed at or before the mint's last revoke." },
+        "solOwner": { "type": "bytes32", "note": "The Solana holder the attestor read, raw 32 bytes." },
+        "collection": { "type": "bytes32", "note": "The Solana collection, raw 32 bytes." },
+        "mask": { "type": "uint256[]", "note": "uint256[16]: the sprite's mask, as shadow.mask." },
+        "palette": { "type": "uint256[]", "note": "As shadow.palette; refused BadArt past the format's word count." },
+        "pixels": { "type": "uint256[]", "note": "As shadow.pixels; refused BadArt past the format's word count." },
+        "colors": { "type": "uint16", "note": "As shadow.colors." },
+        "count": { "type": "uint16", "note": "As shadow.count." },
+        "imageHash": { "type": "bytes32", "note": "As shadow.imageHash." },
+        "deadline": { "type": "uint64", "note": "When the signature stops being redeemable (ClaimExpired). The attestor signs now + CLAIM_TTL, so deadline - CLAIM_TTL is when it was signed - which is the only clock a claim carries, and what lets claim refuse one signed before a revoke." },
+        "name": { "type": "string", "note": "As shadow.name." },
+        "traitKeys": { "type": "bytes32[]", "note": "As shadow.traitKeys, checked here rather than trusted." },
+        "traitValues": { "type": "bytes32[]", "note": "As shadow.traitValues." }
+      }
+    },
+
+    "shadowFriends": {
+      "home": "chain",
+      "note": "THE SHADOW CONTRACT'S OWN STATE - what is per contract or per Solana mint rather than per live shadow, the way `roles` is RareRoles'. Every field here names the line that holds it (`beside`) and schemacheck greps ShadowFriends.sol for it. The guards, all on chain: claim is the attestor's signature plus the whitelist plus `to == msg.sender`; recheck and revoke are `msg.sender == attestor`; setAttestor is the SET_ATTESTOR power in RareRoles (ruling 60).",
+      "contract": "ShadowFriends.sol",
+      "milestone": "M21",
+      "fields": {
+        "attestor": { "type": "address", "beside": "address public attestor;", "note": "THE ATTESTOR: the key that signs claims and alone may recheck and revoke. A plain stored address, changeable - never zero (WrongSigner). The attestor service holds the key; who may REPLACE it is the roles system's (setAttestorPower, ruling 60)." },
+        "setAttestorPower": { "type": "bytes32", "beside": ["bytes32 public constant SET_ATTESTOR = keccak256(\"rarefriends.power.setAttestor\");", "roles.requirePower(msg.sender, SET_ATTESTOR);"], "note": "SET_ATTESTOR, the one power that may change the attestor, held in RareRoles (ruling 60): root holds it by being root, the gamemaster once granted it (grant.mjs), and a leaked holder is removed in RareRoles without touching this contract. It was `immutable team`, which would have made a lost key permanent. Each change logs AttestorChanged." },
+        "roles": { "type": "address", "beside": ["IRareRoles public immutable roles;", "roles.requireAllowed(msg.sender);"], "note": "RareRoles, immutable: the launch whitelist claim asks FIRST (ruling 21), and the holder of SET_ATTESTOR. recheck and revoke do not ask the whitelist, so closing the gate never strands a revoke." },
+        "claimTtl": { "type": "uint64", "beside": "uint64 public constant CLAIM_TTL", "note": "How long a signed claim lives. A constant because revoke needs it (a claim signed before a revoke must not land after it), held equal to attestor.mjs CLAIM_TTL by the parity check. Its value is in the contract, not here." },
+        "maxTraits": { "type": "uint256", "beside": "uint256 public constant MAX_TRAITS", "note": "The most traits a shadow carries - public so a reader knows the scan traitOf is bounded by." },
+        "shadowed": { "type": "mapping(bytes32 => bool)", "beside": "mapping(bytes32 => bool) public shadowed;", "note": "One LIVE shadow per mint, keyed by the raw mint key. Set by claim, cleared by revoke - so a mint is NOT once ever: a Doopie sold on Solana is bridged again by its buyer (BINDING B3)." },
+        "revokedAt": { "type": "mapping(bytes32 => uint64)", "beside": "mapping(bytes32 => uint64) public revokedAt;", "note": "THE REVOKE STATE, per mint, and it OUTLIVES the shadow it revoked: when the mint's shadow was last revoked, zero if never. claim refuses any claim whose deadline <= revokedAt + CLAIM_TTL (ClaimPredatesRevoke), so the seller's still-valid calldata cannot re-shadow a sold Doopie (found by bridge-proof.mjs, 2026-09-30)." }
+      }
+    },
+
+    "switch": {
+      "home": "chain",
+      "note": "M19 ITEM 8, THE SWITCH MECHANISM ITSELF - SPECIFIED HERE, NOT BUILT. A switch is a NAME AND A BIT, held by the one mechanism and read by the contract that obeys it (requireSwitchOn(key), reverting SwitchOff(key)), never a flag inside that contract - so one mechanism serves the four things DESIGN rides on it: a tradeable asset's switch, a whole collection on or off, more than one partnership (one at a time at launch - built, not live), and the technology centre (built and switched off). Its home is RareRoles (BINDING §64.4), beside the powers it is guarded by. Every switch is OFF until turned on: an unwritten key reads false, which is DESIGN's 'closed until we open it'. Setting one logs switchSet and refuses a no-op (SwitchUnchanged), like DemoModeUnchanged; it needs no delay (M19 item 9: confirmed on the page, instant on chain). ONE INSTANCE PREDATES THE MECHANISM AND STAYS: RareMarket.tradeable[collection] behind SET_TRADEABLE. RareMarket is permanent, so that switch is not moved into this one; it is the same switch in shape - a name and a bit, its own power, a log, a refused no-op - and the deployer page is to list both side by side. schemacheck holds `notBuilt`: the day a contract declares requireSwitchOn, this row must say `built` instead.",
+      "milestone": "M19",
+      "notBuilt": { "file": "estate/contracts/RareRoles.sol", "text": "requireSwitchOn" },
+      "fields": {
+        "key": { "type": "bytes32", "key": true, "note": "The mapping's key: keccak256(\"rarefriends.switch.\" + name). THE SAME WORD IS THE POWER THAT FLIPS IT, so there is no second table pairing switches with powers. A per-collection switch names the collection in its name (\"collection.\" + its lowercase hex address); a per-kind tradeable switch, a partnership slot and the technology centre each have a plain name." },
+        "name": { "type": "string", "home": "client", "note": "OVERRIDDEN HOME. The readable name the deployer page lists and hashes into `key`. The chain holds only the hash, so the list of names is the page's, and the page proves each by recomputing the key and reading it back." },
+        "on": { "type": "bool", "note": "The bit. False until it is turned on." },
+        "power": { "type": "bytes32", "derived": true, "note": "DERIVED: equal to `key`. A narrow power in RareRoles (M19 item 10): root holds every one, and root grants a gamemaster exactly the switches it may flip with grantPower(key, GAMEMASTER, true) - the partnership switch without the trade switches. A switch root wants kept to itself is registerRootPower(key), irreversibly. So the setter is guarded on chain by hasPower(msg.sender, key)." },
+        "heldWhileGameRuns": { "type": "bool", "decided": false, "note": "NOT DECIDED, AND THE DEPLOYER'S: whether a switch may change while a game is running, as the duel's numbers may not (RareRoles.requireNoGameRunning). Per switch, because the answer may differ - a tradeable switch already changes under a running game, the way the market fee does. Named so the builder asks rather than chooses." }
+      }
+    },
+
+    "switchSet": {
+      "home": "chain",
+      "event": true,
+      "note": "THE RECORD OF EVERY SWITCH CHANGE - M19 item 9's 'every change is recorded' for the switch, and the only history of it: the mapping holds the present, this event holds how it got there. One event per accepted change; a refused no-op logs nothing. Specified with `switch`, not built.",
+      "milestone": "M19",
+      "fields": {
+        "key": { "type": "bytes32", "indexed": true, "note": "Which switch. Indexed so the deployer page fetches one switch's history in one log query." },
+        "on": { "type": "bool", "note": "What it was set to." },
+        "by": { "type": "address", "indexed": true, "note": "Who flipped it - the deployer or a gamemaster holding the power. The same shape as DemoModeSet(on, by)." }
+      }
     }
   },
 
@@ -691,7 +781,9 @@
       "treeWood": "economy.treeWood", "chopMs": "economy.chopMs", "regrowMs": "economy.regrowMs",
       "buildMs": "buildingType.buildMs", "kinds": "buildingType", "stageYieldBps": "economy.stageYieldBps",
       "hp": "rules.hp", "wallHp": "rules.wallHp", "weapons": "rules", "combat": "rules",
-      "startBase": "base"
+      "startBase": "base",
+      "buildMsPerUnit": "buildingType.buildMs", "strengthMax": "buildingType.strength", "harvStrength": "buildingType.strength",
+      "demoPace": "economy"
     },
     "kindRow": {
       "tiers": "buildingType.levelName", "cost": "buildingType.crystalCost", "wood": "buildingType.woodCost",
@@ -699,7 +791,7 @@
       "placement": "buildingType.placement", "sub": "client",
       "strength": "buildingType.strength", "energy": "buildingType.energy", "supply": "buildingType.supply",
       "release": "buildingType.release", "leak": "buildingType.leak", "proposed": "client",
-      "buildMs": "buildingType.buildMs", "hands": "buildingType.hands"
+      "buildMs": "buildingType.buildMs", "hands": "buildingType.hands", "decided": "client"
     },
     "readers": {
       "the page loads it": { "file": "estate/index.html", "text": "<script src=\"values.js\">" },
@@ -729,7 +821,7 @@
   },
 
   "needsDeployer": [
-    "The five PROPOSED rules fields - coverDiv, maxMs, stepMs, defendReach - plus splashFalloff, which is named in DESIGN and MISSING FROM RareCombat.Rules altogether. The table cannot be frozen per game until they have values.",
+    "What is left of the five PROPOSED rules fields: splashFalloff, which is named in DESIGN and MISSING FROM RareCombat.Rules altogether, and is the one still without a value. The other four are answered and have left this list: maxMs is STRUCK - a fight has no clock (ruling 47), the struct dropped it and so has this schema; coverDiv is decided (ruling 45, two, for the crew ON a wall); stepMs is decided as the encoding of speed, one tile a second (ruling 44); defendReach is decided, five tiles (ruling 46). Speed and defendReach stay deployer settings. The table cannot be frozen per game until splashFalloff has a value or is ruled out of it.",
     "The entry gap, and whether the attacker chooses it. It decides whether the field lives on `rules` or on `fight`, so it is a schema question and not only a balance one.",
     "Whether crystals are an ERC-20 or an internal balance - and the collision that shape (a) contradicts the decided rule that a player cannot give crystals to another player.",
     "Whether a duel is staked in crystals, $RF, or either - §20.1 currently says crystals only and must be reconciled.",
@@ -737,7 +829,6 @@
     "The move kinds. The list IS the definition of what counts as history.",
     "A game's states, and whether a game may close with fights still open.",
     "A fight's default outcome when it is never settled or never opened, and who opens sealed orders.",
-    "A base with more than 16 finished wall sections: which 16 are fought, or whether the cap rises.",
     "Whether a rented Friend defends, and whose ownership check it passes.",
     "The dispute process - submitter, bond, window, deadline - FOR V2. The deployer declined it for v1 (Fights resolve on our server: no dispute machinery, no bond escrow), so it is not a v1 question; it is here so V2's question is not lost, and fight.bond and fight.challengeDeadline hold its place.",
     "Where an overflowing duel prize goes when the winner's depot is full.",

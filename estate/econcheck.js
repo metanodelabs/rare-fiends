@@ -80,7 +80,10 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
   ok('the starting estate\'s power is worked out from its real buildings (' + need + ' P)', text.includes('draws ' + need + ' P'), 'missing');
   ok('the water mill year and the capacitor are there', /ONE YEAR/.test(text) && /CAPACITOR/.test(text) && /hours of cover/.test(text), 'missing');
   const tags = await ev('({game: document.querySelectorAll("#out .tag.game").length, ph: document.querySelectorAll("#out .tag.ph").length, prop: document.querySelectorAll("#out .tag.prop").length, open: document.querySelectorAll("#out .tag.open").length, dec: document.querySelectorAll("#out .tag.dec").length})');
-  ok('every kind of answer is labelled', tags.game > 10 && tags.ph >= 2 && tags.prop >= 3 && tags.open >= 4 && tags.dec >= 3, JSON.stringify(tags));
+  // the depot's capacity was one of the PROPOSED tags until ruling 64 decided it (sweep row 20, M8 item 13): with it
+  // decided in values.js the page has one PROPOSED tag fewer, so the floor follows the game rather than a count
+  const depotProposed = !!(E.kinds.collectionDepot.proposed && E.kinds.collectionDepot.proposed.capacity);
+  ok('every kind of answer is labelled', tags.game > 10 && tags.ph >= 2 && tags.prop >= (depotProposed ? 3 : 2) && tags.open >= 4 && tags.dec >= 3, JSON.stringify(tags));
   ok('undecided questions say so (maximum players, on chain)', /MAXIMUM PLAYERS/.test(text) && /ON CHAIN AND OFF CHAIN/.test(text), 'missing');
   // THE GAME YEAR. This replaces an assertion that the year was still open; it is decided now.
   // Everything here is read from the page's own YEAR, never hardcoded — the whole point of the
@@ -137,12 +140,58 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
   const storeTxt = await ev("(document.getElementById('store')||{}).textContent||'NO #store'");
   ok('the page ran the game\'s storeCap: depot I 240.00, a silo I adds 300.00, two depots count the best (' + (ST ? ST.depot.join('/') : 'null') + ')',
     !!ST && ST.siloAdds === true && ST.bestDepot === true && ST.depot[0] === 24000 && ST.adds[0] === 30000, JSON.stringify(ST));
-  ok('the storage note says each silo adds to the depot and the best depot counts, and nothing in it DISAGREES',
-    /each silo adds to the depot/.test(storeTxt) && /the best depot counts/.test(storeTxt) && !/DISAGREES/.test(storeTxt), storeTxt.replace(/\s+/g, ' ').slice(0, 400));
-  ok('the depot\'s capacity is marked PROPOSED, and the silo is no longer called a cap of its own',
-    /The depot's capacity, 240\.00 \/ 720\.00 \/ 2,160\.00, is PROPOSED, not decided/.test(storeTxt) && !/SILO CAP/.test(text) && !/a base with no standing silo is uncapped/.test(text),
+  // (it also said "and nothing in it DISAGREES": ruling 62's keep line below now owns that, and requires the note
+  // to DISAGREE while values.js carries no keep.capacity - so that clause moved there, it was not dropped)
+  ok('the storage note says each silo adds to the depot and the best depot counts',
+    /each silo adds to the depot/.test(storeTxt) && /the best depot counts/.test(storeTxt), storeTxt.replace(/\s+/g, ' ').slice(0, 400));
+  // PROPOSED exactly when values.js proposes it: ruling 64 decided 240.00 / 720.00 / 2,160.00 (sweep row 20), and a
+  // page still calling a decided number PROPOSED is as wrong as one calling a proposal decided
+  const depotSaysProposed = /The depot's capacity, 240\.00 \/ 720\.00 \/ 2,160\.00, is PROPOSED, not decided/.test(storeTxt);
+  ok('the depot\'s capacity is marked PROPOSED exactly when values.js proposes it (' + (depotProposed ? 'proposed' : 'decided') + '), and the silo is no longer called a cap of its own',
+    depotSaysProposed === depotProposed && !/SILO CAP/.test(text) && !/a base with no standing silo is uncapped/.test(text),
     storeTxt.replace(/\s+/g, ' ').slice(0, 400));
   ok('the probes are removed once read (no estates drawing in the background)', await ev('document.querySelectorAll("iframe").length') === 0, await ev('document.querySelectorAll("iframe").length'));
+  // =============================================================================================
+  // RULING 64 AND 62 ON THE ECONOMY PAGE (economist, 2026-10-01). The power numbers and building strength
+  // are READ from values.js now - the page's own POWER and BHP copies are gone - and the storage note runs
+  // ruling 62's keep. Every assertion holds the page to the probed game; the last one changes the game.
+  // =============================================================================================
+  const src = fs.readFileSync(path.join(__dirname, 'economy.html'), 'utf8');
+  ok('no second copy: the page source carries no BHP table and no supply / run / capacitor literals',
+    !/const BHP\b/.test(src) && !/supply:\s*\{\s*generator:\s*\[\s*10/.test(src) && !/run:\s*\{\s*keep:\s*\[/.test(src) && !/store:\s*\[\s*500/.test(src), 'a copy is still in the source');
+  const PW2 = await ev('JSON.stringify(economy.POWER)').then(JSON.parse);
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  const runOff = Object.keys(PW2.run).filter((k) => !same(PW2.run[k], E.kinds[k].energy));
+  ok('economy.POWER is the game\'s: supply = kinds.generator.supply (' + JSON.stringify(E.kinds.generator.supply) + '), run = each kind\'s energy, the capacitor = its row',
+    same(PW2.supply.generator, E.kinds.generator.supply) && runOff.length === 0 && same(PW2.capacitor.store, E.kinds.capacitor.capacity) &&
+    same(PW2.capacitor.release, E.kinds.capacitor.release) && same(PW2.capacitor.leak, E.kinds.capacitor.leak) && same(PW2.capacitor.cost, E.kinds.capacitor.cost),
+    JSON.stringify({ supply: PW2.supply, runOff }));
+  const strRows = await ev(`JSON.stringify([...document.querySelectorAll('#hp table')].find(t=>/^Building/.test(t.querySelector('th').textContent)).querySelectorAll('tbody tr').length)`);
+  const strOff = JSON.parse(await ev(`JSON.stringify((()=>{const t=[...document.querySelectorAll('#hp table')].find(t=>/^Building/.test(t.querySelector('th').textContent));
+    const E=economy.E; return Object.keys(E.kinds).filter((k,i)=>{const cells=[...t.querySelectorAll('tbody tr')[i].querySelectorAll('td')].slice(1,-1).map(c=>c.textContent).filter(x=>x!=='—');
+      return cells.join(',')!==(E.kinds[k].strength||[]).map(n=>Math.round(n).toLocaleString('en-US')).join(',');});})())`));
+  ok('the strength table is values.js\'s strength column, row by row, plus the harvester (' + strRows + ' rows)', strOff.length === 0 && Number(strRows) === Object.keys(E.kinds).length + 1, JSON.stringify(strOff));
+  const store = await ev("document.getElementById('store').textContent.replace(/\\s+/g,' ')");
+  const kw = E.kinds.keep && E.kinds.keep.capacity;
+  ok('the storage note runs ruling 62: ' + (kw ? 'a keep alone holds values.js keep.capacity, a keep beside depot I holds the depot\'s, nothing holds 0 - no DISAGREES' : 'this game has no keep.capacity, and the note says DISAGREES rather than "neither standing"'),
+    !/a base with neither standing:/.test(store) && (kw ? /a keep alone, with no depot and no silo, holds 240\.00 \/ 240\.00 \/ 240\.00/.test(store) && /nothing standing at all .*: 0\.00/.test(store) && !/DISAGREES/.test(store)
+      : /DISAGREES - values\.js carries no keep\.capacity/.test(store)), store.slice(0, 700));
+  const pace = await ev("document.getElementById('pace').textContent");
+  ok('the pace banner reads the pace the game reports (' + (E.demoPace ? (E.demoPace.on ? 'demo' : 'decided') : 'none') + ')',
+    E.demoPace ? (E.demoPace.on ? /DEMO pace/.test(pace) : /DECIDED pace/.test(pace) && /15 min/.test(pace)) : /predates ruling 64/.test(pace), pace);
+  // BROKEN ONCE: a game whose generator makes 1 / 2 / 3 P. The change is made in the PROBED estate as values.js
+  // hands its table over, the page is reloaded, and the table it prints must follow.
+  await send('Page.enable');
+  const inj = await send('Page.addScriptToEvaluateOnNewDocument', { source: `(function(){
+    if (window.top === window) return;
+    let v; Object.defineProperty(window, 'VALUES', { configurable: true, get() { return v; },
+      set(x) { if (x && x.kinds && x.kinds.generator) x.kinds.generator.supply = [1, 2, 3]; v = x; } }); })();` });
+  await send('Page.reload'); await sleep(500);
+  for (let i = 0; i < 80 && !/READ FROM THE GAME/.test(await ev('(document.getElementById("status")||{}).textContent||""')); i++) await sleep(250);
+  const sup = await ev('JSON.stringify(economy.POWER.supply.generator)');
+  const supText = await ev(`[...document.querySelectorAll('#power table')][0].innerText`);
+  ok('BROKEN ONCE: a game whose generator makes 1 / 2 / 3 P - the page follows it, in economy.POWER and in the supply table', sup === '[1,2,3]' && /makes?\s*1 P|\b1 P\b/.test(supText) && !/\b10 P\b/.test(supText), sup + ' | ' + supText.replace(/\s+/g, ' ').slice(0, 200));
+  await send('Page.removeScriptToEvaluateOnNewDocument', { identifier: inj.identifier });
   ok('nothing 404d and nothing was logged as an error, over the economy page and the estates it probes', watch.clean(), watch.why());
   // not "matches the game": where the game is wrong the page is required to disagree with it out loud.
   console.log(bad?`\n${bad} step(s) failed`:'\nthe economy page states the decided numbers, and says where the game differs');

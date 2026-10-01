@@ -33,3 +33,7 @@ web_assets/social/bases/*.mp4
 # local fork scratch (deploy/local-chain.sh) - addresses on a forked anvil, never the real chain
 estate/bridge-config.local.json
 site/bridge-config.local.json
+
+# the landing page's whitelist (serve.py /api/whitelist): wallet addresses and contacts, kept on the server
+# only (/srv/rarefriends/data/whitelist/), never in this public repository
+whitelist*.json

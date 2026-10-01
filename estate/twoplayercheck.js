@@ -15,13 +15,25 @@
 //     (lastResync) and put back on the record, showing seat 1's walk - and seat 1 lost nothing.
 // (4) The record SURVIVES A SERVER RESTART: the server is killed and started again on the same directory;
 //     every head is what it was; seat 0 reloaded opens at its own head with its wood and still sees seat 1.
-// Fixtures are chop and walk moves only.
+// (1b) M13 in node, against that server: a client batch carrying a fight's result is refused; an attack
+//     ordered off a stale head is StaleParent and moves nothing; an attack settles and writes BOTH records,
+//     and the fight counter (item 6) counts it; the defender's client writing off its pre-fight head is
+//     StaleParent and the record keeps the fight.
+// (5) M13 in the browser: a REAL TAP on seat 1's Friend opens seat 0's attack chooser (item 1); a base past
+//     the fight's wall bound is not sent, and the chooser says why; seat 1 knocks walls down to the bound;
+//     the chooser's own buttons send every Friend on seat 0's roster; the fight is settled on the server,
+//     both records move to the heads it names, the counter counts it, seat 0's page stands on its record,
+//     and BOTH of seat 1's pages are told they were attacked and stand on the fight's record, parity held.
+// Fixtures are chop and walk moves only, plus the attack's two bases in (1b).
 // What it does NOT cover: two machines on a network (one Chrome, two contexts, one localhost); what an
 // absent player's base does (M7 item 4); the chain's half (the hourly sync, rulings 16 and 18); a build,
 // raise or demolish seen across seats (the same showOther path, not driven here); the HUD's crystal figure
 // on an island (it shows whichever base's harvester banked last - index.html's drone loop); tap() on
-// another player's Friend, which nothing stops yet; and what a page does while our server is DOWN - (4)
-// freezes every page across the restart, so a poll or write that meets a dead server is never driven.
+// another player's Friend, which nothing stops yet; what a page does while our server is DOWN - (4)
+// freezes every page across the restart, so a poll or write that meets a dead server is never driven;
+// the fight's outcome against a standing order on a real page (recordcheck proves the order decides it,
+// in node); and a defender with moves in flight at the moment of the attack (their loss is the same
+// lostTo path (3) drives).
 'use strict';
 const { spawn } = require('child_process'); const fs = require('fs'), os = require('os'), path = require('path');
 const R = require('./record.js'), V = require('./values.js');
@@ -149,6 +161,42 @@ const SEES = (id, r) => `(function(){ const a = base.actors.find(a => a.kind ===
     ok(wrong.status === 400 && !(await getJ('/api/record/900002')).ok, 'a batch posted to another base\'s route is refused (' + wrong.status + ') and writes nothing');
     await postJ('/api/record/' + ID + '/forget', {});
 
+    console.log('--- (1b) M13: an attack, settled by serve.py running record.js\'s settle() ---');
+    // two bases built from the start base: the attacker's two GEN 2s against the defender's two GEN 2s left on
+    // HOLD - the line-up recordcheck shows the attack WINS (on ENGAGE it is repelled)
+    const camp = (id, roster) => { const X = R.fresh(id, V.startBase.purse);
+      V.startBase.buildings.forEach((b, i) => X.buildings.push(R.buildingRow(i + 1, b.type, b.tier || 1, b.x, b.y, b.dir === 'y', null, b.harvesters)));
+      X.nextId = X.buildings.length + 1; X.base.wood = 7700;
+      roster.forEach(([gen, x, y, order], i) => X.roster.push(R.rosterRow(i, { gen, name: 'GEN ' + gen, x, y, order })));
+      return R.genesis(X, null, 1); };
+    const AT = 900003, DF = 900004;
+    const ga = await (await postJ('/api/record/' + AT + '/commit', camp(AT, [[2, 2, 2], [2, 3, 2]]))).json();
+    const gd = await (await postJ('/api/record/' + DF + '/commit', camp(DF, [[2, 8, 8, 0], [2, 9, 8, 0]]))).json();
+    const fights0 = (await getJ('/api/record/fights')).count;
+    // A FIGHT'S RESULT IS NEVER A CLIENT'S TO WRITE: the defender's own client sending an `attacked` that says it
+    // held - a batch record.js alone would replay - is refused by serve.py before apply is asked
+    { const S = R.session(gd.record.ledger, gd.record.head); S.note('attacked', { fight: 99, hash: '0x00', by: AT, won: false, lost: [], walls: [], loot: { crystals: 0, wood: 0 }, keep: false }, 5);
+      const forged = await (await postJ('/api/record/' + DF + '/commit', S.batch(6, null, 6))).json();
+      ok(S.moves.length === 1 && !forged.ok && forged.reason === 'Invalid' && /never written by a client/.test(forged.why) && (await getJ('/api/record/' + DF)).record.head === gd.record.head,
+        'a client batch carrying a fight\'s result (`attacked`) is refused by serve.py - ' + forged.reason + ': ' + forged.why + ' - and the record does not move'); }
+    // an attacker whose order names a head its record has moved past: StaleParent, and NEITHER record moves
+    { const st = await (await postJ('/api/record/' + AT + '/attack', { on: DF, sent: [0, 1], side: 'E', parent: '0x' + '1'.repeat(64) })).json();
+      ok(!st.ok && st.reason === 'StaleParent' && (await getJ('/api/record/' + AT)).record.head === ga.record.head && (await getJ('/api/record/' + DF)).record.head === gd.record.head && (await getJ('/api/record/fights')).count === fights0,
+        'an attack ordered off a head the attacker\'s record is not at is StaleParent, and neither record moves and no fight is counted'); }
+    // THE ATTACK: both records written, the fight counted (item 6)
+    const fa = await (await postJ('/api/record/' + AT + '/attack', { on: DF, sent: [0, 1], side: 'E', parent: ga.record.head })).json();
+    const sa = (await getJ('/api/record/' + AT)).record, sd = (await getJ('/api/record/' + DF)).record, fl = await getJ('/api/record/fights');
+    ok(fa.ok && fa.fight.won && sa.head === fa.fight.heads.attacker && sd.head === fa.fight.heads.defender && sd.ledger.base.crystals === 0 && sa.ledger.base.crystals === 2 * gd.record.ledger.base.crystals && sd.ledger.keepLost && sd.ledger.keepLost.fight === fa.fight.id,
+      'serve.py settles the attack and writes BOTH records: the attacker at ' + String(sa.head).slice(0, 10) + ' holding ' + sa.ledger.base.crystals + ', the defender at ' + String(sd.head).slice(0, 10) + ' holding 0 with its keep lost to fight ' + (fa.fight && fa.fight.id));
+    ok(fl.count === fights0 + 1 && fl.fights[fl.fights.length - 1].id === fa.fight.id && fl.fights[fl.fights.length - 1].hash === fa.fight.hash,
+      'M13 item 6: the fight counter went ' + fights0 + ' -> ' + fl.count + ', its last line the fight just settled, hash ' + String(fa.fight && fa.fight.hash).slice(0, 10));
+    // StaleParent stays safe: the defender's client, still on the head it had before it was attacked, writes a chop
+    { const S = R.session(gd.record.ledger, gd.record.head); S.note('chop', {}, 7); const late = await (await postJ('/api/record/' + DF + '/commit', S.batch(8, null, 8))).json();
+      const now = (await getJ('/api/record/' + DF)).record;
+      ok(!late.ok && late.reason === 'StaleParent' && late.is === fa.fight.heads.defender && now.head === fa.fight.heads.defender && now.ledger.base.wood === 0,
+        'the defender\'s client writing off its pre-fight head is StaleParent and the server\'s record keeps the fight (wood ' + now.ledger.base.wood + ', not a log)'); }
+    await postJ('/api/record/' + AT + '/forget', {}); await postJ('/api/record/' + DF + '/forget', {});
+
     console.log('--- (2) two seats on one island, each seeing the other ---');
     require('./pagewatch.js').claimPort(PORT);
     PROF = fs.mkdtempSync(path.join(os.tmpdir(), 'tpc-'));
@@ -252,6 +300,76 @@ const SEES = (id, r) => `(function(){ const a = base.actors.find(a => a.kind ===
     // the wood is at least what it was, and exactly what the restarted server's record holds
     ok(re.wood >= aWood && re.wood === srvA.record.ledger.base.wood && re.head === srvA.record.head && re.same, 'seat 0 reloaded opens off the restarted server at its record\'s head, wood ' + re.wood / 100 + ' (was ' + aWood / 100 + '), page and record the same');
     ok(re.other === (await getJ('/api/record/' + homeB)).record.head, 'and still reads seat 1\'s record, at its head');
+
+    console.log('--- (5) M13: seat 0 attacks seat 1 - chosen by a tap, settled on our server, seen by both ---');
+    // let pending moves land, so the attack is ordered off a head every page agrees on
+    await sleep(2 * pollMs);
+    const fightsB = (await getJ('/api/record/fights')).count;
+    // A REAL TAP on one of seat 1's Friends, where pick() would find it: projected, lifted by its ground height and
+    // pick's 6 px, through the fit zoom - and only a Friend no other body stands within pick's 22 px of.
+    const aim = JSON.parse(await A2.J(`(function(){ const cv = document.getElementById('c'), r = cv.getBoundingClientRect(), k = base.fit;
+      const scr = (a) => { const p = base.project(a.x, a.y); return [p[0], p[1] - base.heightAt(a.x, a.y) - 6]; };
+      const all = base.actors.map(a => [a, scr(a)]);
+      for (const [a, p] of all) { if (a.kind !== 'friend' || a.base !== ${homeB} || a.rid == null) continue;
+        if (all.some(([b, q]) => b !== a && Math.hypot(q[0] - p[0], q[1] - p[1]) < 30)) continue;
+        const sx = (p[0] * k + base.CAM.x * (1 - k) + base.viewX) / cv.width * r.width + r.left, sy = (p[1] * k + base.CAM.y * (1 - k)) / cv.height * r.height + r.top;
+        if (sx > 0 && sy > 0 && sx < innerWidth && sy < innerHeight && document.elementFromPoint(sx, sy) === cv) return JSON.stringify({ rid: a.rid, sx, sy }); }
+      return 'null'; })()`));
+    ok(!!aim, 'seat 0 sees one of seat 1\'s Friends on screen, clear of every other body' + (aim ? ' (roster row ' + aim.rid + ')' : ' - NONE, so the tap below cannot be driven'));
+    if (aim) for (const type of ['mousePressed', 'mouseReleased']) await A2.send('Input.dispatchMouseEvent', { type, x: aim.sx, y: aim.sy, button: 'left', clickCount: 1 });
+    const chooser = await A2.until(`base.panelFor && base.panelFor.attack === ${homeB} && !!document.querySelector('#pattack')`, 3000) >= 0;
+    ok(chooser,
+      'M13 item 1: the tap on seat 1\'s Friend opens the ATTACK chooser for seat 1\'s base - a target, not a Friend of this seat\'s to select');
+    // NO LIMIT ON WALL SECTIONS (ruling 65): an island base starts with more finished wall sections than the
+    // 16 a fight used to be capped at, and it is attacked AS IT STANDS - nothing is knocked down first. With
+    // any cap below that count the chooser would refuse to send and settle() would refuse TooLarge, so the
+    // fight settling further down could only happen if every one of these sections is fought.
+    const big = JSON.parse(await A2.J(`(function(){ document.querySelectorAll('#pbody [data-send]').forEach(c => { if (c.getAttribute('aria-pressed') !== 'true') c.click(); });
+      const rec = base.record.others[${homeB}], g = document.querySelector('#pattack');
+      return JSON.stringify({ walls: Record.defense(rec.ledger, rec.at || 0, []).walls.length, off: !!(g && g.disabled), text: g ? g.textContent : '' }); })()`));
+    const bigWalls = big.walls;
+    ok(big.walls > 16 && !big.off && /ATTACK WITH/.test(big.text),
+      'seat 1 holds ' + big.walls + ' finished wall sections - more than the 16 a fight used to be capped at - and the chooser will send against all of them: "' + big.text + '"');
+    await A2.J(`base.attack.open(${homeB})`);
+    // the chooser: every Friend of this seat's ticked to send, the side picked, ATTACK pressed - the panel's own buttons
+    const chosen = JSON.parse(await A2.J(`(function(){ document.querySelectorAll('#pbody [data-send]').forEach(c => { if (c.getAttribute('aria-pressed') !== 'true') c.click(); });
+      const n = document.querySelector('#pbody [data-side="N"]'); if (n) n.click();
+      return JSON.stringify({ pick: base.attack.pick.sort((p, q) => p - q), side: base.attack.side, mine: base.record.ledger.roster.map(r => r.id).sort((p, q) => p - q),
+        go: (document.querySelector('#pattack') || {}).textContent || '' }); })()`));
+    ok(JSON.stringify(chosen.pick) === JSON.stringify(chosen.mine) && chosen.mine.length > 0 && chosen.side === 'N' && /ATTACK WITH/.test(chosen.go),
+      'the chooser sends this seat\'s own Friends - every row of its roster, ' + JSON.stringify(chosen.pick) + ', no stake and no fee - from the N: "' + chosen.go + '"');
+    const defBefore = (await getJ('/api/record/' + homeB)).record, attBefore = (await getJ('/api/record/' + homeA)).record;
+    await A2.J(`(function(){ const b = document.querySelector('#pattack'); if (b && !b.disabled) b.click(); return 1; })()`);
+    const settled = await A2.until('!!base.attack.last', 20000) >= 0;
+    const fight = await A2.J('base.attack.last');
+    const attNow = (await getJ('/api/record/' + homeA)).record, defNow = (await getJ('/api/record/' + homeB)).record, fightsNow = (await getJ('/api/record/fights')).count;
+    ok(settled && fight && fight.attacker === homeA && fight.defender === homeB && JSON.stringify(fight.sent.slice().sort((p, q) => p - q)) === JSON.stringify(chosen.mine),
+      'M13 item 2: the attack was settled on our server - fight ' + (fight && fight.id) + ', ' + (fight && (fight.won ? 'WON' : 'REPELLED')) + ' (' + (fight && fight.reason) + '), the Friends sent exactly those chosen');
+    ok(settled && fight && R.defense(defBefore.ledger, defBefore.at || 0, []).walls.length === bigWalls && bigWalls > 16,
+      'ruling 65: a base of ' + bigWalls + ' finished wall sections was attacked and the fight resolved (' + (fight && fight.reason) + ') - no wall knocked down first, none refused TooLarge');
+    ok(fight && attNow.head === fight.heads.attacker && defNow.head === fight.heads.defender && attNow.head !== attBefore.head && defNow.head !== defBefore.head && fightsNow === fightsB + 1,
+      'BOTH records moved on the server to the heads the fight names, and the fight counter went ' + fightsB + ' -> ' + fightsNow);
+    const pa = JSON.parse(await A2.J(`JSON.stringify({ same: base.record.parity().same, parent: base.record.parent, crystals: base.purse(base.HOME).crystals, wood: base.purse(base.HOME).wood,
+      bodies: base.actors.filter(a => a.kind === 'friend' && (a.base == null ? base.HOME : a.base) === base.HOME && a.rid != null).map(a => a.rid).sort((p, q) => p - q), other: base.record.others[${homeB}] && base.record.others[${homeB}].head, note: document.getElementById('note').textContent })`));
+    const rowsA = attNow.ledger.roster.map((q) => q.id).sort((p, q) => p - q);
+    ok(fight && pa.same && pa.parent === attNow.head && pa.crystals === attNow.ledger.base.crystals && pa.wood === attNow.ledger.base.wood && JSON.stringify(pa.bodies) === JSON.stringify(rowsA) && pa.other === defNow.head,
+      'seat 0\'s page stands on its new record - purse ' + pa.crystals + '/' + pa.wood + ', bodies ' + JSON.stringify(pa.bodies) + ' = the roster, page and record hashing the same - and reads seat 1 at its new head');
+    ok(fight && /your attack on/.test(pa.note), 'and its note bar says what happened: "' + String(pa.note).slice(0, 110) + '"');
+    // THE DEFENDER'S PAGES learn on their next poll: the record moved under them, they are put back on it, and told
+    for (const [P, who] of [[B, 'seat 1'], [C, 'seat 1\'s second machine']]) {
+      const learnt = await P.until(`!!base.record.lastResync && base.record.lastResync.fight === ${fight ? fight.id : -1}`, 4 * pollMs) >= 0;
+      const pb = JSON.parse(await P.J(`JSON.stringify({ same: base.record.parity().same, parent: base.record.parent, crystals: base.purse(base.HOME).crystals, keep: base.buildings.some(b => b.type === 'keep' && (b.base == null ? base.HOME : b.base) === base.HOME),
+        lost: base.attack.keepLost(), bodies: base.actors.filter(a => a.kind === 'friend' && (a.base == null ? base.HOME : a.base) === base.HOME && a.rid != null).map(a => a.rid).sort((p, q) => p - q) })`));
+      const rowsD = defNow.ledger.roster.map((q) => q.id).sort((p, q) => p - q);
+      ok(learnt && pb.same && pb.parent === defNow.head && pb.crystals === defNow.ledger.base.crystals && JSON.stringify(pb.bodies) === JSON.stringify(rowsD) && pb.keep === !(fight && fight.keep) && !!pb.lost === !!(fight && fight.keep),
+        who + ' is told it was attacked (lastResync.fight ' + (fight && fight.id) + ') and stands on the fight\'s record: purse ' + pb.crystals + ', bodies ' + JSON.stringify(pb.bodies) + ', keep ' + (pb.keep ? 'standing' : 'destroyed') + ', page and record the same');
+    }
+    // M13 item 8 on the page: with the keep destroyed, the upgrade panel of anything still standing refuses the raise
+    if (fight && fight.keep) {
+      const up = JSON.parse(await B.J(`(function(){ const t = base.buildings.find(b => b.type === 'tower' && (b.base == null ? base.HOME : b.base) === base.HOME); if (!t) return 'null';
+        base.openPanel(t); const g = document.querySelector('#pgo'); return JSON.stringify({ off: !!(g && g.disabled), text: g ? g.textContent : '' }); })()`));
+      ok(up && up.off && /KEEP WAS DESTROYED/.test(up.text), 'M13 item 8: seat 1\'s watchtower panel will not raise it - "' + (up && up.text) + '"');
+    }
 
     const clean = [A, B, C, A2].every((p) => p.watch.clean());
     ok(clean, 'no 4xx and no console error on any page' + (clean ? '' : ': ' + [A, B, C, A2].map((p) => p.watch.why()).join(' / ')));

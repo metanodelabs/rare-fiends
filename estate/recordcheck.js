@@ -15,6 +15,10 @@
 //     tab's abandoned draft is dropped on reload and it shows the first's state. Then a tab is CRASHED (no
 //     pagehide) after a move: its draft is taken on the next open and the move is there.
 // BASE=http://localhost:PORT points it at another server; PORT1/PORT2 are the debug ports (9801, 9802).
+// Then, in node: a harvester pays harvCost crystals and is refused one short; and M13 - an attack settled by
+// settle(): a defender's standing order flips the winner on the same word, the result written into both
+// records (ruling 14's whole purse, the Friends that went down, the keep lost and nothing raisable after),
+// the fight redone to the same hash, and StaleParent for a stale defender and a stale attacker.
 // What it does NOT cover: serve.py holding the record (the store is the browser's), a harvester's own haul
 // arriving (harvcheck), a Friend's job surviving a reload (jobs are not recorded), and two players (M7).
 'use strict';
@@ -148,8 +152,30 @@ console.log('--- M8 items 1, 2, 3, 6 and M10 item 2: the rules a build, a store 
     ok(!!S.note('build', { b: L.nextId, of: 'silo', x: 4.5, y: 2.5 }, 10) && S.ledger.base.wood === 0 && S.ledger.base.crystals === 0, 'row 1: a first level can cost wood ONLY - a silo set to 15 wood and no crystals goes up on an empty crystal purse');
   });
   // ---- ROW 2: a raise time per building per level ----
-  const shapeBad = Object.entries(V.kinds).filter(([, r]) => !Array.isArray(r.buildMs) || r.buildMs.length !== r.tiers.length || !r.buildMs.every((t) => t > 0)).map(([k]) => k);
+  const shapeBad = Object.entries(V.kinds).filter(([, r]) => !Array.isArray(r.buildMs) || r.buildMs.length !== r.tiers.length || !r.buildMs.every((t) => t >= 0)).map(([k]) => k);
   ok(!shapeBad.length, 'row 2: every kind carries a raise time for every one of its levels' + (shapeBad.length ? ' - not: ' + shapeBad.join(', ') : ''));
+  // M8 ITEM 13, ruling 64, sweep row 24: the DECIDED time is 4 s per unit of the rung's materials (wood and
+  // crystals added), by one Friend - so every level's time is read back against ITS OWN bill. The held demo pace
+  // (2.8 s at every level) fails it at every rung; a time typed per row that drifts from its price fails it.
+  const per = V.buildMsPerUnit, offRule = [];
+  Object.entries(V.kinds).forEach(([k, r]) => r.tiers.forEach((_, i) => { const b = R.materials(k, i + 1);
+    if (R.raiseMs(k, i + 1) !== Math.round((b.crystals + b.wood) / V.crystalUnit * per)) offRule.push(k + ' ' + (i + 1) + ': ' + R.raiseMs(k, i + 1)); }));
+  const min = (k, l) => Math.round(R.raiseMs(k, l) / 6000) / 10;
+  ok(V.demoPace.on === false && per === 4000 && !offRule.length && R.raiseMs('keep', 1) === 0,
+    'M8 item 13 (row 24): every level of every kind takes 4 s per unit of its own materials - hut I ' + min('hut', 1) + ' min, HALL ' + min('keep', 2) + ', TOWER III ' + min('tower', 3) + ', CELL IV ' + min('cell', 4) + ', and the free KEEP I ' + R.raiseMs('keep', 1) + ' ms' + (offRule.length ? ' - OFF THE RULE: ' + offRule.join('; ') : ''));
+  const b0 = { kind: 'keep', level: 1, startedAt: 500 };
+  ok(R.finished(b0, 500) && R.progress(b0, 500) === 1 && R.standingLevel(b0, 500) === 1, 'M8 item 13: a free rung stands the moment it is placed - KEEP I finished and at full progress at its own startedAt, not NaN');
+  // M10 ITEM 9, ruling 64, sweep rows 13 and 14: a tree regrows and a seam grows in 15 min - one clock for both -
+  // and the demo pace (36 s / 45 s / 2.8 s) loads ONLY under the switch. Proved by loading values.js twice in
+  // fresh processes, with and without RF_PACE=demo, so the switch is what the test turns and nothing else.
+  const load = (env) => JSON.parse(require('child_process').execFileSync(process.execPath, ['-e',
+    'const V=require(' + JSON.stringify(path.join(__dirname, 'values.js')) + ');process.stdout.write(JSON.stringify({g:V.growMs,r:V.regrowMs,on:V.demoPace.on,b:Object.values(V.kinds).map(k=>k.buildMs)}))'],
+    { env: Object.assign({}, process.env, env) }).toString());
+  const dec = load({ RF_PACE: '' }), dem = load({ RF_PACE: 'demo' });
+  ok(dec.g === 15 * 60e3 && dec.r === 15 * 60e3 && dec.on === false && V.growMs === dec.g && V.regrowMs === dec.r,
+    'M10 item 9 (rows 13 and 14): with no switch a seam grows and a tree regrows in 15 min (' + dec.g + ' / ' + dec.r + ' ms)');
+  ok(dem.on === true && dem.g === V.demoPace.growMs && dem.r === V.demoPace.regrowMs && dem.b.every((a) => a.every((t) => t === V.demoPace.buildMs)) && dem.g !== dec.g,
+    'and RF_PACE=demo - the one switch - loads the held demo pace instead: ' + dem.g + ' / ' + dem.r + ' ms, every level ' + V.demoPace.buildMs + ' ms');
   withRow('tower', { buildMs: [1000, 5000, 9000] }, () => {
     const L = startLedger(), tw = at0(L, 'tower', 60, 2, 5.5, 5.5, 0), hut = at0(L, 'hut', 61, 2, 6.5, 5.5, 0);
     ok(!R.finished(tw, 4999) && R.finished(tw, 5000) && R.finished(hut, R.raiseMs('hut', 2)) && !R.finished(hut, R.raiseMs('hut', 2) - 1),
@@ -228,10 +254,51 @@ console.log('--- M8 items 1, 2, 3, 6 and M10 item 2: the rules a build, a store 
     L = startLedger(); const dep = L.buildings.find((b) => b.kind === 'collectionDepot'), was = L.base.crystals; k = knock(L, dep.id);
     ok(dep.harvesters === 1 && !!k.m && k.S.ledger.base.crystals - was === (DEP.cost[0] + V.harvCost) / 2 && !k.S.ledger.buildings.some((b) => b.kind === 'collectionDepot'),
       'M15 item 13 (3): the start base\'s DEPOT I with its 1 harvester refunds ' + (k.S.ledger.base.crystals - was) + ' = ' + DEP.cost[0] / 2 + ' + ' + V.harvCost / 2 + ', and the depot row - its harvesters with it - is gone');
-    // NOT SETTLED BY RULING 56, reported and not asserted: the last depot and the last silo both gone leaves the
-    // base uncapped (storeCap: Infinity), so the second of the two always fits, whatever the purse.
-    L = startLedger(); L.buildings = L.buildings.filter((b) => b.kind !== 'collectionDepot'); L.base.crystals = 10 ** 7; k = knock(L, silo(L).id);
-    console.log('      (not settled by ruling 56, not asserted: the LAST silo with no depot standing comes down at ' + L.base.crystals + ' held - ' + (k.m ? 'TAKEN, the base is left uncapped' : 'refused: ' + k.why) + ')');
+    // RULING 62 (5): the LAST depot or silo is tested against the keep's floor, not against no cap at all. The
+    // start base with its depot gone holds SILO I alone; the silo's refund must fit the keep's 240.00 it leaves.
+    // The old rule (uncapped once the last store goes) takes the first knock-down at any purse.
+    const FLOOR = V.kinds.keep.capacity[0];
+    L = startLedger(); L.buildings = L.buildings.filter((b) => b.kind !== 'collectionDepot'); L.base.crystals = FLOOR - own + 1; k = knock(L, silo(L).id);
+    ok(k.m === null && /needs 0\.01 room/.test(k.why), 'M8 item 14 / ruling 62 (5): the LAST silo, no depot standing, ' + L.base.crystals + ' held - its ' + own + ' refund one hundredth over the keep\'s ' + FLOOR + ' - is refused: ' + k.why);
+    L = startLedger(); L.buildings = L.buildings.filter((b) => b.kind !== 'collectionDepot'); L.base.crystals = FLOOR - own; k = knock(L, silo(L).id);
+    ok(!!k.m && k.S.ledger.base.crystals === FLOOR && !k.S.ledger.buildings.some((b) => b.kind === 'silo'), 'M8 item 14 / ruling 62 (5): one hundredth less and it comes down, the purse exactly at the keep\'s ' + FLOOR);
+  }
+  // ---- M8 ITEM 14, RULING 62: the keep's storage floor ----
+  // Every assertion is one the old rule (no depot and no silo: Infinity) fails, and one an ADDITION fails too.
+  {
+    const KEEP = V.kinds.keep, DEP = V.kinds.collectionDepot, SIL = V.kinds.silo;
+    const bare = (level) => { const L = startLedger(); L.buildings = L.buildings.filter((b) => b.kind !== 'collectionDepot' && b.kind !== 'silo'); L.buildings.find((b) => b.kind === 'keep').level = level; return L; };
+    const floors = KEEP.tiers.map((_, i) => R.storeCap(bare(i + 1), 0));
+    ok(floors.every((c) => c === 24000) && KEEP.capacity.every((c) => c === 24000),
+      'M8 item 14 (1): no depot and no silo standing, the base holds its keep\'s 240.00 at every keep level (' + floors.map((c) => c / 100).join(' / ') + ') - it used to be uncapped');
+    const L1 = bare(3); L1.base.crystals = 24000 - 100; const S1 = R.session(L1, R.head(L1));
+    ok(!!S1.note('gather', { got: 100 }, 1) && S1.note('gather', { got: 1 }, 2) === null && /cannot hold 1 more/.test(S1.refused[0].why),
+      'M8 item 14 (1): a CITADEL with no store banks a haul exactly to 240.00 and refuses the next hundredth: ' + (S1.refused[0] || {}).why);
+    // (2) a FLOOR, not an addition: the moment a depot or a silo stands, the keep counts for nothing
+    const withD = bare(1); at0(withD, 'collectionDepot', 95, 2, 6.5, 6.5, null);
+    const withS = bare(1); at0(withS, 'silo', 96, 1, 6.5, 6.5, null);
+    ok(R.storeCap(withD, 0) === DEP.capacity[1] && R.storeCap(withS, 0) === SIL.capacity[0],
+      'M8 item 14 (2): a floor, not an addition - keep + DEPOT II holds ' + R.storeCap(withD, 0) / 100 + ' (not ' + (DEP.capacity[1] + 24000) / 100 + '), keep + SILO I ' + R.storeCap(withS, 0) / 100 + ' (not ' + (SIL.capacity[0] + 24000) / 100 + ')');
+    const going = bare(1); at0(going, 'silo', 97, 1, 6.5, 6.5, 100);
+    ok(R.storeCap(going, 100 + R.raiseMs('silo', 1) - 1) === 24000 && R.storeCap(going, 100 + R.raiseMs('silo', 1)) === SIL.capacity[0],
+      'M8 item 14 (2): a silo still going up stores nothing yet, so the floor holds until the moment it stands');
+    // (3) it is read through placement.isKeep, not the keep's name: flip the flag and the floor is gone
+    const flag = KEEP.placement.isKeep; KEEP.placement.isKeep = false;
+    let flipped; try { flipped = R.storeCap(bare(1), 0); } finally { KEEP.placement.isKeep = flag; }
+    ok(flipped === 0, 'M8 item 14 (3): the floor is found through the keep row\'s placement.isKeep - set it false and the same base holds ' + flipped);
+    // (4) the keep gone and nothing storing: the cap is 0, gathering is refused, the crystals held are kept
+    const gone = bare(1); gone.buildings = gone.buildings.filter((b) => b.kind !== 'keep'); gone.base.crystals = 50000; const S4 = R.session(gone, R.head(gone));
+    ok(R.storeCap(gone, 0) === 0 && S4.note('gather', { got: 1 }, 1) === null && /cannot hold 1 more/.test(S4.refused[0].why) && S4.ledger.base.crystals === 50000,
+      'M8 item 14 (4): no keep and nothing storing holds 0 - a one-hundredth haul is refused and the 500.00 already held stays: ' + (S4.refused[0] || {}).why);
+    // (6) a player knocking down their OWN keep is exempt from the overflow test: a lone HALL refunds 75.00 into
+    // a cap of 0, which the test would refuse. ("The keep goes last" still refuses it while anything else stands.)
+    const lone = R.fresh(0, { crystals: 50000, wood: 0 }); lone.buildings.push(R.buildingRow(1, 'keep', 2, 0.5, 0.5, false, null, 0)); lone.nextId = 2;
+    const SK = R.session(lone, R.head(lone)), mk = SK.note('demolish', { b: 1 }, 5);
+    ok(!!mk && !SK.ledger.buildings.length && SK.ledger.base.crystals === 50000 + R.refund('keep', 2).crystals && R.refundExempt('keep') && !R.refundExempt('silo'),
+      'M8 item 14 (6): knocking down your own keep is exempt - a lone HALL comes down at 500.00 held and refunds ' + R.refund('keep', 2).crystals / 100 + ' into a cap of 0' + (mk ? '' : ': refused - ' + (SK.refused[0] || {}).why));
+    const notLast = startLedger(), SN = R.session(notLast, R.head(notLast));
+    ok(SN.note('demolish', { b: notLast.buildings.find((b) => b.kind === 'keep').id }, 5) === null && /the keep goes last/.test(SN.refused[0].why),
+      'and the keep still goes last - M15 item 12 is not this row: ' + (SN.refused[0] || {}).why);
   }
   // ---- M10 ROW 2: a seam cut young gives less, by stage ----
   const y = [0.1, 0.3, 0.6, 0.99].map((r) => R.haulOf(1, r));
@@ -240,6 +307,88 @@ console.log('--- M8 items 1, 2, 3, 6 and M10 item 2: the rules a build, a store 
   const was = V.stageYieldBps; V.stageYieldBps = [5000, 10000];
   try { ok(R.haulOf(1, 0.4) === 50 && R.haulOf(1, 0.6) === 100, 'M10 row 2: the number of stages is the table\'s length - two entries make two halves (0.4 ripe -> ' + R.haulOf(1, 0.4) + ', 0.6 -> ' + R.haulOf(1, 0.6) + ')'); }
   finally { V.stageYieldBps = was; }
+}
+
+// ============================ the harvester's bill, and M13 - an attack settled - in node ============================
+console.log('--- the harvester pays its bill; M13: an attack settled on our server, written into both records ---');
+{
+  // A HARVESTER PAYS harvCost CRYSTALS, and is refused when the purse cannot. The move once called pay() with a
+  // bare number: every material read `bill[m]` off a number, the comparisons were all false, and the purse
+  // became { crystals: NaN, wood: NaN } with no refusal. Exact arithmetic on both materials is what only a
+  // correct bill passes; a NaN fails every equality here.
+  const buy = (L, at) => { const S = R.session(L, R.head(L)); let m = null, why = null;
+    try { m = S.note('harvester', { b: L.buildings.find((b) => b.kind === 'collectionDepot').id }, at); why = m ? null : S.refused[0].why; } catch (e) { why = 'THREW: ' + e.message; }
+    return { m, why, base: S.ledger.base }; };
+  let L = startLedger(); const dep = L.buildings.find((b) => b.kind === 'collectionDepot'); dep.level = 2;   // a DEPOT II runs two
+  const c0 = L.base.crystals, w0 = L.base.wood;
+  let h = buy(L, 100);
+  ok(!!h.m && h.base.crystals === c0 - V.harvCost && h.base.wood === w0, 'a harvester costs ' + V.harvCost + ' crystals and no wood: the purse goes ' + c0 + '/' + w0 + ' -> ' + h.base.crystals + '/' + h.base.wood + (h.why ? ' (' + h.why + ')' : ''));
+  L = startLedger(); L.buildings.find((b) => b.kind === 'collectionDepot').level = 2; L.base.crystals = V.harvCost - 1;
+  h = buy(L, 100);
+  ok(!h.m && /cannot pay/.test(h.why || '') && h.base.crystals === V.harvCost - 1, 'and is REFUSED when the purse holds ' + (V.harvCost - 1) + ', one short: ' + h.why);
+
+  // AN ATTACK. Two bases built from the start base, each its own record. settle() is what serve.py runs.
+  const Ch = require('./chance.js'), Cb = require('./combat.js');
+  const camp = (id, roster, purse) => { const X = R.fresh(id, purse || V.startBase.purse);
+    V.startBase.buildings.forEach((b, i) => X.buildings.push(R.buildingRow(i + 1, b.type, b.tier || 1, b.x, b.y, b.dir === 'y', null, b.harvesters)));
+    X.nextId = X.buildings.length + 1; X.base.wood = 7700;
+    roster.forEach(([gen, x, y, order], i) => X.roster.push(R.rosterRow(i, { gen, name: 'GEN ' + gen, x, y, order })));
+    return R.apply(null, R.genesis(X, null, 1)).record; };
+  const draw = { word: '0x' + 'ab'.repeat(32), fightId: 1 };
+  const go = (defOrder) => { const att = camp(10, [[2, 2, 2], [2, 3, 2]]), def = camp(11, [[2, 8, 8, defOrder], [2, 9, 8, defOrder]]);
+    return { att, def, r: R.settle(att, def, { sent: [0, 1], side: 'E', parent: att.head }, draw) }; };
+  // A DEFENDER'S STANDING ORDER CHANGES THE OUTCOME (M13's Done-when; item 4; ruling 50: an order is a response).
+  // Two attacks identical in every input but the order the defender's two Friends were left with on their
+  // record: HOLD and the attack wins, ENGAGE and the base holds. Only a fight that reads the order off the
+  // defender's record can tell these apart.
+  const hold = go(0), engage = go(1);
+  ok(hold.r.ok && engage.r.ok && hold.r.fight.won === true && engage.r.fight.won === false && JSON.stringify(hold.r.fight.orders) === '[0,0]' && JSON.stringify(engage.r.fight.orders) === '[1,1]',
+    'M13 item 4: the same attack, the same word - defenders left on HOLD lose (' + (hold.r.fight && hold.r.fight.winner) + '), the same defenders left on ENGAGE hold (' + (engage.r.fight && engage.r.fight.winner) + '): the order is read off the defender\'s record');
+  // THE RESULT IS WRITTEN INTO BOTH RECORDS (item 2), through apply(), each one move off its own head
+  const { att, def, r: won } = hold, A1 = won.attacker, D1 = won.defender, f = won.fight;
+  const lastMove = (rec) => { const S = R.session(rec.ledger, rec.head); return S; };
+  ok(won.ok && A1.head === R.head(A1.ledger) && D1.head === R.head(D1.ledger) && A1.ledger.seq === att.ledger.seq + 1 && D1.ledger.seq === def.ledger.seq + 1 && A1.writes === 2 && D1.writes === 2 && f.heads.attacker === A1.head && f.heads.defender === D1.head,
+    'M13 item 2: one move on each record - the attacker\'s and the defender\'s each moved one write and one move off its own head, and the fight names both new heads');
+  ok(D1.ledger.base.crystals === 0 && D1.ledger.base.wood === 0 && A1.ledger.base.crystals === att.ledger.base.crystals + def.ledger.base.crystals && A1.ledger.base.wood === att.ledger.base.wood + def.ledger.base.wood,
+    'M13 item 2, ruling 14: a WON attack takes everything - the defender\'s purse ' + def.ledger.base.crystals + '/' + def.ledger.base.wood + ' -> 0/0, and the attacker\'s rises by exactly that (' + A1.ledger.base.crystals + '/' + A1.ledger.base.wood + ')');
+  const goneD = def.ledger.roster.filter((q) => !D1.ledger.roster.some((p) => p.id === q.id)).map((q) => q.id), goneA = att.ledger.roster.filter((q) => !A1.ledger.roster.some((p) => p.id === q.id)).map((q) => q.id);
+  ok(JSON.stringify(goneD) === JSON.stringify(f.lost.defender) && JSON.stringify(goneA) === JSON.stringify(f.lost.attacker) && goneD.length > 0,
+    'M13 item 2: the Friends that went down leave each roster and nobody else does - defender lost ' + JSON.stringify(goneD) + ', attacker lost ' + JSON.stringify(goneA));
+  // THE FIGHT CAN BE REDONE by anyone holding the two records: the setup it returns, run again, gives the same
+  // result and the same hash (combat.js fightHash) - the hash a fight log publishes (item 7)
+  const RR = Cb.rulesFrom(V), again = Cb.fight(RR, won.setup, { word: draw.word, contract: Ch.PREVIEW_CONTRACT, chainId: Ch.CHAIN_ID, fightId: draw.fightId });
+  ok(Cb.fightHash(won.setup, again, { fightLog: Ch.PREVIEW_CONTRACT, chainId: Ch.CHAIN_ID, gameId: 0, fightId: draw.fightId, word: draw.word, rules: RR }) === f.hash && again.winner === f.winner,
+    'M13 item 7\'s hash: the fight redone from the setup it was settled on gives the same winner and hash ' + String(f.hash).slice(0, 12));
+  // A KEEP LOST TO AN ATTACK (item 8, ruling 37 (d)): it is gone, the record says by which fight, and NOTHING on
+  // the base can be raised afterwards - while what stands keeps working (a build replayed at its own level).
+  ok(!D1.ledger.buildings.some((b) => b.kind === 'keep') && D1.ledger.keepLost && D1.ledger.keepLost.fight === f.id && D1.ledger.keepLost.by === 10,
+    'M13 item 8: the won attack destroyed the keep - it is off the defender\'s buildings and keepLost names fight ' + (D1.ledger.keepLost && D1.ledger.keepLost.fight) + ' by base ' + (D1.ledger.keepLost && D1.ledger.keepLost.by));
+  { const rich = clone(D1.ledger); rich.base.crystals = 10 ** 7; rich.base.wood = 10 ** 7;
+    const tw = rich.buildings.find((b) => b.kind === 'tower'), S = R.session(rich, R.head(rich));
+    const up = S.note('raise', { b: tw.id, level: tw.level + 1 }, 50), same = S.note('raise', { b: tw.id, level: tw.level }, 60);
+    const ctl = clone(rich); delete ctl.keepLost; const Sc = R.session(ctl, R.head(ctl)), upCtl = Sc.note('raise', { b: tw.id, level: tw.level + 1 }, 50);
+    ok(!up && /keep was destroyed/.test((S.refused[0] || {}).why || '') && !!same && !!upCtl,
+      'M13 item 8: with a full purse the tower CANNOT be raised (' + ((S.refused[0] || {}).why) + '); replayed at its own level it can; and the same ledger without keepLost raises it - so it is the lost keep, not the purse, that refuses'); }
+  // A LOST ATTACK takes nothing and destroys nothing
+  const E1 = engage.r;
+  ok(E1.defender.ledger.base.crystals === engage.def.ledger.base.crystals && E1.defender.ledger.base.wood === engage.def.ledger.base.wood && E1.attacker.ledger.base.crystals === engage.att.ledger.base.crystals
+    && E1.defender.ledger.buildings.some((b) => b.kind === 'keep') && !E1.defender.ledger.keepLost,
+    'M13 item 2: a REPELLED attack takes nothing - both purses as they were, the keep standing, no keepLost');
+  // STALEPARENT STAYS SAFE. (a) The defender's client, holding a session off the head it had before the fight,
+  // writes: refused, StaleParent, and the record keeps the fight. (b) An attacker whose own record moved under the
+  // order is refused before anything is fought, and neither record changes.
+  { const S = R.session(def.ledger, def.head); S.note('chop', {}, 500); const late = R.apply(D1, S.batch(501, null, 501));
+    ok(late.reason === 'StaleParent' && late.saw === def.head && late.is === D1.head && D1.ledger.base.wood === 0,
+      'StaleParent stays safe: the defender\'s client writing off its pre-fight head is refused (' + late.reason + ') and the record keeps the fight - wood still 0, not a log'); }
+  { const moved = R.apply(att, (() => { const S = R.session(att.ledger, att.head); S.note('chop', {}, 9); return S.batch(10, null, 10); })()).record;
+    const r = R.settle(moved, def, { sent: [0, 1], side: 'E', parent: att.head }, draw);
+    ok(r.reason === 'StaleParent' && !r.attacker && !r.defender, 'and an attacker that chose its Friends on a head that has moved is StaleParent, with no record returned to write'); }
+  // a fight result is never a client's to write: SERVER_MOVES names the two kinds serve.py refuses in a batch
+  ok(JSON.stringify(R.SERVER_MOVES) === '["attack","attacked"]' && R.SERVER_MOVES.every((k) => R.MOVES.includes(k)), 'the fight\'s two moves are record.js\'s SERVER_MOVES - serve.py\'s list of what a client may never write');
+  // the refusals an attack CAN meet (decision 2: it cannot be refused by the defender - only a malformed order)
+  ok(R.settle(att, def, { sent: [0, 0], side: 'E', parent: att.head }, draw).reason === 'Invalid' && R.settle(att, def, { sent: [7], side: 'E', parent: att.head }, draw).reason === 'Invalid'
+    && R.settle(att, def, { sent: [0], side: 'Q', parent: att.head }, draw).reason === 'Invalid' && R.settle(att, att, { sent: [0], side: 'E', parent: att.head }, draw).reason === 'Invalid',
+    'a Friend sent twice, a Friend not on the roster, a side that is not N/E/S/W and a base attacking itself are each Invalid');
 }
 
 // ======================================= (2) the page, in a browser =======================================
@@ -308,7 +457,9 @@ const uniq = (a) => new Set(a).size === a.length;
 
 (async () => {
   console.log('--- (2) the page: survive a reload, two tabs out of step, a crashed tab\'s draft ---');
-  const url = BASE + '/base.html';
+  // pace=demo: the held 2.8 s / 36 s / 45 s pace (values.js, THE DEMO PACE) - a raise, a seam and a tree must
+  // happen inside a check's minute; the decided minutes are asserted in node above
+  const url = BASE + '/base.html?pace=demo';
   const br = await launch(url, PORT1);
   let A = await attachTab(PORT1, (all) => all[0]);
   try {
@@ -433,7 +584,7 @@ const uniq = (a) => new Set(a).size === a.length;
     const h = JSON.parse(await M.J(`(function(){ const k = base.buildings.find(b => b.id === ${r0.id}); base.openPanel(k); const btn = document.querySelector('#pbody [data-hands="1"]');
       if (!btn) return JSON.stringify({ none: true }); btn.click(); return JSON.stringify({ hands: k.hands, label: document.getElementById('phands') && document.getElementById('phands').textContent, moves: base.record.moves.map(m => m.kind), same: base.record.parity().same }); })()`));
     ok(!h.none && h.hands && h.hands.length === 1 && h.hands[0][1] === 2 && h.moves.includes('hands') && h.same && /^2 of /.test(h.label), 'row 3: PUT ONE ON is a `hands` move - two Friends on the HALL, the panel says ' + h.label + ', and the page and the record hash the same');
-    const t1 = h.hands ? h.hands[0][0] : 0, need = R.raiseMs('keep', 2), expect = t1 + (need - (t1 - r0.t0)) / 2;
+    const t1 = h.hands ? h.hands[0][0] : 0, need = await M.ev("Record.raiseMs('keep', 2)"), expect = t1 + (need - (t1 - r0.t0)) / 2;
     const done = await M.untilSim(`!base.buildings.find(b => b.id === ${r0.id}).build`, need + 2000);
     const fin = await M.ev('base.simT');
     ok(done && fin >= expect - 1 && fin <= expect + 250 && fin < r0.t0 + need - 200, 'row 3: the HALL stood at ' + Math.round(fin - r0.t0) + ' ms of game clock, where two Friends put it (' + Math.round(expect - r0.t0) + ') and not one Friend\'s ' + need);
@@ -455,7 +606,7 @@ const uniq = (a) => new Set(a).size === a.length;
     const after = JSON.parse(await M.J(STATE)), kh = await M.ev(`JSON.stringify(base.buildings.find(b => b.id === ${r0.id}).hands)`);
     ok(after.same && after.strippedHead === before.strippedHead && kh === JSON.stringify(h.hands), 'row 3: after a reload the hands are back on the page\'s building (' + kh + ') and the page and the record still hash the same');
     // M10 ROWS 2 AND 3: the one harvester, every home seam taken away, the wild one past the border left
-    await M.send('Page.navigate', { url: BASE + '/base.html?seams=1&record=0' }); await sleep(2500);
+    await M.send('Page.navigate', { url: BASE + '/base.html?seams=1&record=0&pace=demo' }); await sleep(2500);
     M = await attachTab(PORT1, (all) => all[0]); seen.push(M);
     const wild = JSON.parse(await M.J(`(function(){ const keep = base.nodes.filter(n => n.wild && !base.onLand(n.x, n.y)).sort((p, q) => Math.hypot(p.x - 2.5, p.y - 0.5) - Math.hypot(q.x - 2.5, q.y - 0.5))[0];
       if (!keep) return JSON.stringify({ none: true }); base.nodes.splice(0, base.nodes.length, keep); return JSON.stringify({ x: keep.x, y: keep.y, onLand: base.onLand(keep.x, keep.y), crystals: base.crystals, drones: base.drones.length }); })()`));
@@ -465,6 +616,13 @@ const uniq = (a) => new Set(a).size === a.length;
     const back = await M.untilSim(`base.crystals > ${wild.crystals}`, 30000);
     const haul = JSON.parse(await M.J(`JSON.stringify({ got: base.crystals - ${wild.crystals}, ripe: base.drones[0].ripe, tier: base.drones[0].f.tier || 1, want: Record.haulOf(base.drones[0].f.tier || 1, base.drones[0].ripe), steps: VALUES.stageYieldBps.map(b => b * (base.drones[0].f.tier || 1) * VALUES.crystalUnit / 10000) })`));
     ok(back && haul.got === haul.want && haul.steps.includes(haul.got), 'M10 row 2: it brought back ' + haul.got + ' hundredths from a seam cut ' + Math.round(haul.ripe * 100) + '% grown - its stage\'s yield, one of ' + haul.steps.join(' / ') + ' (in proportion it would be ' + Math.round(haul.tier * 100 * haul.ripe) + ')');
+    // M8 ITEM 14 ON THE PAGE: the page's own siloCap hands storeCap only the rows it picks, so the keep must be one
+    // of them. Take the depot and the silo out of this (record=0) page's buildings for one synchronous read: the
+    // base holds the keep's 240.00 - not uncapped (the old rule) and not 0 (a page that forgot to pass the keep).
+    const fl = JSON.parse(await M.J(`(function(){ const B = base.buildings, out = B.filter(b => b.type === 'silo' || b.type === 'collectionDepot');
+      out.forEach(b => B.splice(B.indexOf(b), 1)); const cap = base.siloCap(base.HOME); out.forEach(b => B.push(b)); return JSON.stringify({ cap, back: base.siloCap(base.HOME) }); })()`));
+    ok(fl.cap === V.kinds.keep.capacity[0] && fl.back === V.kinds.collectionDepot.capacity[0] + V.kinds.silo.capacity[0],
+      'M8 item 14: on the page, a base with its depot and silo taken away holds the keep\'s ' + fl.cap + ', and ' + fl.back + ' again once they are back');
     ok(seen.every((t) => t.watch.clean()), 'no 4xx and no console error across the three opens' + (seen.every((t) => t.watch.clean()) ? '' : ': ' + seen.map((t) => t.watch.why()).join(' / ')));
   } catch (e) { ok(false, 'the M8/M10 browser part threw: ' + e.message); }
   finally { await brM.close(); }
@@ -479,7 +637,7 @@ const uniq = (a) => new Set(a).size === a.length;
   // that is said beside the result and the part is not counted, not failed.
   console.log('--- (3) a chain-read Friend (?token=) and the restore ---');
   const PORT2 = +(process.env.PORT2 || 9802), LIVE_TOKEN = 437;
-  const url2 = BASE + '/base.html?token=' + LIVE_TOKEN;
+  const url2 = BASE + '/base.html?pace=demo&token=' + LIVE_TOKEN;
   const br2 = await launch(url2, PORT2);
   try {
     const T = await attachTab(PORT2, (all) => all[0]);
@@ -505,7 +663,7 @@ const uniq = (a) => new Set(a).size === a.length;
       ok(JSON.stringify(s.tokens) === JSON.stringify(before.tokens) && uniq(s.tokens.map(([, t]) => t)) && s.setsMatch, 'after the reload every Friend holds the token it had - ' + LIVE_TOKEN + ' included - all distinct, each body\'s set its own token\'s');
       ok(JSON.stringify(s.claimed) === JSON.stringify(before.claimed) && s.same && s.refused === 0, 'and the sprites\' pool is exactly those tokens; the page and the record hash the same');
       // the same base WITHOUT the parameter: the record's roster stands
-      await T2.send('Page.navigate', { url: BASE + '/base.html' }); await sleep(1500);
+      await T2.send('Page.navigate', { url: BASE + '/base.html?pace=demo' }); await sleep(1500);
       const T3 = await attachTab(PORT2, (all) => all[0]);
       ok(await untilBase(T3), 'the same base opens without ?token=');
       s = JSON.parse(await T3.J(LIVEQ));

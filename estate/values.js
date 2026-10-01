@@ -43,7 +43,7 @@
   // ---------------------------------------------------------------------------------------------
   // A starting plan, not balance. HP is tier-0 and 1.5x per generation up (the chain's reward
   // weights, compressed). Each evolution is +50% damage and +1 tile of range.
-  const HP_OF = { 1: 759, 2: 506, 3: 337, 4: 225, 5: 150, 6: 100 };
+  const HP_OF = { 0: 1140, 1: 759, 2: 506, 3: 337, 4: 225, 5: 150, 6: 100 };   // slot 0: a 1/1 Doopie, 1140 - DECIDED, ruling 55 (trap only; no weapon, so it never enters a full fight)
   const WALL_HP = 400;                                // a level-1 log wall section
   // One weapon per generation, as agreed: weapon, range in tiles, damage per hit, and what it does to buildings
   const WEAPONS = {
@@ -94,32 +94,83 @@
   // a third material is a third column and one row in record.js's MATERIALS, never a special case). The
   // NUMBERS are today's - wood for level 1, crystals after - held, because question 22's mix is PROPOSED:
   // each row's `proposed.cost` carries it. `buildMs` is how long each level takes ONE Friend to raise, in
-  // ms; every level of every kind names BUILD_MS, the demo's pace, the way growMs and regrowMs are held at
-  // demo pace while the sweep proposes minutes (question 21 row 24, carried in `proposed.buildMs`).
-  // `hands` is the ceiling on Friends working one build: each Friend up to it takes the time down
-  // linearly (time / Friends), and past it another adds nothing (question 21 rows 25 and 27, PROPOSED -
-  // 4 for a one-tile building, 2 for a wall: one crew a side of an edge).
-  const BUILD_MS = 2800;                              // ms one Friend takes to raise a level, every kind, held at demo pace
+  // ms. `hands` is the ceiling on Friends working one build: each Friend up to it takes the time down
+  // linearly (time / Friends), and past it another adds nothing.
+  //
+  // M8 ITEM 13 AND M10 ITEM 9 - THE DECIDED STARTING VALUES (ruling 64, 2026-10-01: the number sweep's rows 5
+  // to 43, question 21, approved as starting values; each stays a deployer setting). What a row's numbers
+  // ARE is now marked in its `decided` column, each with its sweep row, and `proposed` keeps only what is
+  // still a proposal (question 22's mix, which ruling 64 did not name; the capacitor's keep-cap flag).
+  //   - raise time, row 24: BUILD_MS_PER_UNIT - 4 s per unit of the rung's materials, wood and crystals added
+  //     together, by one Friend, by hand. ONE number: every kind's per-level buildMs is DERIVED from it and the
+  //     rung's own materials (raised() below), so a rung whose price moves keeps its time in proportion, and
+  //     nothing here types a minute. A free rung (Keep I) takes no time at all.
+  //   - hands, rows 25 and 27: linear up to 4 for every one-tile building, 2 for a wall, 4 for the capacitor.
+  //   - strength, rows 6 and 7: as economy.html proposed them, plus Cell IV 2,000 and the capacitor
+  //     200 / 400 / 800 / 1,600; the harvester's 150 is `harvStrength`; nothing may exceed STRENGTH_MAX, 6,000
+  //     (the Citadel's own), and this file REFUSES TO LOAD if a row does - the ceiling is a rule, not a note.
+  //   - energy and supply, rows 29 to 31: what each level draws while running, and the generator's 10 / 25 / 60.
+  //   - the depot's capacity and a silo's addition, rows 20 and 21, were already written at these figures.
+  //
+  // THE DEMO PACE - THE ONE EXPLICIT SWITCH. The decided pace is minutes: a hut is 4 min by one Friend, a tree
+  // regrows in 15 min, a seam takes 15 min to grow. A demo, a clip and the browser checks need the held pace
+  // the game ran on until ruling 64 - every level 2.8 s, a seam 36 s, a tree 45 s - and get it ONLY by asking:
+  //   in a browser   the page's address carries  pace=demo    (base.html?pace=demo, hero.html?pace=demo ...);
+  //                  the page's own clip modes - hero=1, reel, rec, studio - are demos by definition and
+  //                  switch it too, so the start page's reel and the recorder need no edit
+  //   in node        the environment carries     RF_PACE=demo (record.js, and serve.py's `node record.js
+  //                  apply`, which inherits serve.py's environment - so a shared game played at the demo
+  //                  pace needs serve.py started with RF_PACE=demo, or the server replays at the decided one)
+  // Nothing else switches it: no default, no host test. `pace` says which one loaded, and `demoPace` holds the
+  // three held numbers, so the demo's figures have one home and are never typed again anywhere.
+  const DEMO_PACE = { growMs: 36000, regrowMs: 45000, buildMs: 2800 };   // the held demo pace, ONLY under the switch above
+  const PACE = (function () {
+    try {
+      if (root.location && typeof root.location.search === 'string') {
+        const q = new URLSearchParams(root.location.search);
+        return q.get('pace') === 'demo' || q.get('hero') === '1' || !!q.get('reel') || !!q.get('rec') || !!q.get('studio') ? 'demo' : 'decided';
+      }
+      if (typeof process !== 'undefined' && process.env) return process.env.RF_PACE === 'demo' ? 'demo' : 'decided';
+    } catch (_) { /* no address and no environment: the decided pace */ }
+    return 'decided';
+  })();
+  const DEMO = PACE === 'demo';
+  const BUILD_MS = DEMO_PACE.buildMs;                 // the demo's flat raise time; kept as the scalar `buildMs` the clips and one-number readers read
+  const BUILD_MS_PER_UNIT = 4000;                     // DECIDED, ruling 64, sweep row 24: ms of one Friend's work per unit (1.00) of a rung's materials
+  const STRENGTH_MAX = 6000;                          // DECIDED, ruling 64, sweep row 7: no building out-lasts the Citadel
+  const HARV_STRENGTH = 150;                          // DECIDED, ruling 64, sweep row 6: a harvester's strength
   const LEVELS = (n, v) => Array.from({ length: n }, () => v);
-  const HANDS_PROPOSED = 'PROPOSED (question 21 rows 25 and 27): linear - the time divided by the Friends on it - up to this ceiling, past which another adds nothing';
-  const TIME_PROPOSED = (s) => 'held at BUILD_MS, the demo pace, at every level; PROPOSED (question 21 row 24): 4 s per unit of the rung\'s materials by one Friend - ' + s;
-  const MIX_PROPOSED = (s) => 'today\'s numbers, held; PROPOSED (question 22): level 1 wood only, level 2 half and half, level 3 crystals standing in for materials that do not exist yet - ' + s;
+  // the raise time of each level, from its materials: (crystals + wood) hundredths / 100 units x 4 s - or, under
+  // the demo switch, the flat demo pace at every level, exactly as the game ran before ruling 64
+  const raised = (cost, wood) => cost.map((c, i) => (DEMO ? BUILD_MS : Math.round((c + (wood[i] || 0)) / 100 * BUILD_MS_PER_UNIT)));
+  const MIX_PROPOSED = (s) => 'today\'s numbers, held; PROPOSED (question 22, not named by ruling 64): level 1 wood only, level 2 half and half, level 3 crystals standing in for materials that do not exist yet - ' + s;
   const PLACE = (over) => Object.assign({ needsKeep: true, isKeep: false, cappedByKeepLevel: true, onWater: false,
     onBaseEdge: false, onClaimedGround: false, maxPerBase: 0, scienceGen: [], needsKind: 0, nextToKind: 0 }, over);
-  const NO_STRENGTH = 'no number is decided for any level (question 21 row 6); 0 means not a target, as the fight has it today';
-  const NO_DRAW = 'draws nothing at any level until the deployer decides (question 21 rows 29 and 30)';
+  // the marks every row shares - each names its sweep row, so a value is traced to the ruling that set it
+  const DECIDED = (extra) => Object.assign({
+    buildMs: 'DECIDED, ruling 64, sweep row 24: 4 s per unit of the rung\'s materials, one Friend, by hand (BUILD_MS_PER_UNIT); the flat 2.8 s only under the demo switch',
+    hands: 'DECIDED, ruling 64, sweep rows 25 and 27: linear - the time divided by the Friends on it - up to this ceiling, past which another adds nothing',
+    strength: 'DECIDED, ruling 64, sweep row 6: each level doubles; capped at STRENGTH_MAX by row 7',
+    energy: 'DECIDED, ruling 64, sweep row 29: P drawn while running, by level',
+  }, extra || {});
   const KINDS = {
     keep:  { tiers: ['KEEP', 'HALL', 'CITADEL'],        cost: [0, 15000, 45000],      wood: [0, 0, 0],
-             strength: [0, 0, 0], energy: [0, 0, 0],
-             buildMs: LEVELS(3, BUILD_MS), hands: 4,
+             // RULING 62, sweep row 45: what the base holds with NO depot and NO silo standing, while the keep
+             // stands - at every keep level. A FLOOR, not an addition: record.js storeCap counts it only when
+             // nothing else stores, reading it through `placement.isKeep` rather than this kind's name.
+             capacity: [24000, 24000, 24000],
+             strength: [1500, 3000, 6000], energy: [0, 2, 6],
+             hands: 4,
              footprint: [[0, 0]], placement: PLACE({ needsKeep: false, isKeep: true, cappedByKeepLevel: false, maxPerBase: 1, scienceGen: [0, 0, 0] }),
-             proposed: { buildMs: TIME_PROPOSED('0 min / 10 min / 30 min'), hands: HANDS_PROPOSED, cost: MIX_PROPOSED('free / 75 wood + 75 crystals / 450 crystals'), strength: NO_STRENGTH, energy: NO_DRAW },
+             decided: DECIDED({ capacity: 'DECIDED, ruling 62, sweep row 45: 240.00 while the keep stands, at every level - a floor under the store, not an addition; 0 once the keep is gone and nothing else stores' }),
+             proposed: { cost: MIX_PROPOSED('free / 75 wood + 75 crystals / 450 crystals') },
              sub: "The Genesis seat. Nothing else can stand until it does, and no building can be raised past the keep's own tier." },
     hut:   { tiers: ['HUT', 'HOUSE', 'MANSION'],        cost: [4000, 12000, 40000],   wood: [2000, 0, 0],
-             strength: [0, 0, 0], energy: [0, 0, 0],
-             buildMs: LEVELS(3, BUILD_MS), hands: 4,
+             strength: [200, 400, 800], energy: [0, 0, 0],
+             hands: 4,
              footprint: [[0, 0]], placement: PLACE({ scienceGen: [0, 0, 0] }),
-             proposed: { buildMs: TIME_PROPOSED('4 min / 8 min / 26.7 min'), hands: HANDS_PROPOSED, cost: MIX_PROPOSED('60 wood / 60 + 60 / 400 crystals'), strength: NO_STRENGTH, energy: NO_DRAW },
+             decided: DECIDED(),
+             proposed: { cost: MIX_PROPOSED('60 wood / 60 + 60 / 400 crystals') },
              // M8 item 9: it used to promise "houses more Friends and adds a slot to your walls", and then
              // "Quarters for your Friends. Each tier is a bigger house." DESIGN.md rules housing out, so
              // none of it was ever true of the code; the line says what the hut is and promises nothing.
@@ -128,17 +179,18 @@
              // what a silo ADDS to the base's reserve, by level (How much you can hold, DECIDED: a silo extends
              // the depot's reserve by a set amount; record.js storeCap sums every standing silo onto the best depot)
              capacity: [30000, 90000, 300000],
-             strength: [0, 0, 0], energy: [0, 0, 0],
-             buildMs: LEVELS(3, BUILD_MS), hands: 4,
+             strength: [250, 500, 1000], energy: [0, 2, 4],
+             hands: 4,
              footprint: [[0, 0]], placement: PLACE({ scienceGen: [0, 0, 0] }),
-             proposed: { buildMs: TIME_PROPOSED('3 min / 6 min / 20 min'), hands: HANDS_PROPOSED, cost: MIX_PROPOSED('45 wood / 45 + 45 / 300 crystals'), strength: NO_STRENGTH, energy: NO_DRAW,
-               capacity: 'PROPOSED (question 21 row 21): +300 / +900 / +3,000 by level, added up over every standing silo - the same three numbers the game used to take as a cap' },
+             decided: DECIDED({ capacity: 'DECIDED, ruling 64, sweep row 21: +300 / +900 / +3,000 by level, added up over every standing silo' }),
+             proposed: { cost: MIX_PROPOSED('45 wood / 45 + 45 / 300 crystals') },
              sub: 'Extends what the base can hold: 300 more crystals, then 900, then 3,000, on top of the depot. The green bar over it shows how full the base is.' },
     tower: { tiers: ['TOWER I', 'TOWER II', 'TOWER III'], cost: [8000, 24000, 70000], wood: [3000, 0, 0],
-             strength: [0, 0, 0], energy: [0, 0, 0],
-             buildMs: LEVELS(3, BUILD_MS), hands: 4,
+             strength: [300, 600, 1200], energy: [0, 3, 6],
+             hands: 4,
              footprint: [[0, 0]], placement: PLACE({ scienceGen: [0, 0, 0] }),
-             proposed: { buildMs: TIME_PROPOSED('7.3 min / 16 min / 46.7 min'), hands: HANDS_PROPOSED, cost: MIX_PROPOSED('110 wood / 120 + 120 / 700 crystals'), strength: NO_STRENGTH, energy: NO_DRAW },
+             decided: DECIDED(),
+             proposed: { cost: MIX_PROPOSED('110 wood / 120 + 120 / 700 crystals') },
              sub: 'Needs a Friend standing watch. Their generation sets the defence; the tier sets the reach.' },
     wall:  { tiers: ['LIGHT', 'STONE', 'CURTAIN'],      cost: [2500, 7500, 25000],    wood: [1000, 0, 0],
              // bodies a section holds, shoulder to shoulder. Question 23: the game held 3 at every level
@@ -146,17 +198,22 @@
              // the HUD multiplied by 3 - one program, two rules. The rule the game enforces is the one
              // written here now, and all three readers read this column.
              capacity: [3, 4, 5],
-             strength: [WALL_HP, WALL_HP, WALL_HP], energy: [0, 0, 0],
-             buildMs: LEVELS(3, BUILD_MS), hands: 2,
+             // level 1 names WALL_HP, the fight's own, rather than typing 400 a second time. NOT YET READ BY THE
+             // FIGHT AT LEVELS 2 AND 3: combat.js and RareCombat.sol give every wall WALL_HP whatever its level,
+             // so 800 and 1,600 are the decided numbers and the fight is behind them - owed with the parity check.
+             strength: [WALL_HP, 800, 1600], energy: [0, 1, 3],
+             hands: 2,
              footprint: [[0, 0]], placement: PLACE({ onBaseEdge: true, scienceGen: [0, 0, 0] }),
-             proposed: { buildMs: TIME_PROPOSED('2.3 min / 5 min / 16.7 min'), hands: HANDS_PROPOSED, cost: MIX_PROPOSED('35 wood / 37.50 + 37.50 / 250 crystals'), strength: 'level 1 is WALL_HP, the fight\'s own; levels 2 and 3 are undecided (question 21 row 6) and held at level 1, which is what the fight uses for every wall today', energy: NO_DRAW },
+             decided: DECIDED({ hands: 'DECIDED, ruling 64, sweep row 27: 2 - a wall is an edge with two faces, one crew a side; linear up to it (row 25)',
+               strength: 'DECIDED, ruling 64, sweep row 6: 400 / 800 / 1,600 - level 1 is WALL_HP; the fight still gives every wall level WALL_HP' }),
+             proposed: { cost: MIX_PROPOSED('35 wood / 37.50 + 37.50 / 250 crystals') },
              sub: 'Holds a crew shoulder to shoulder. Every body counts the same here, which is what Gen 6 is for.' },
     cell:  { tiers: ['CELL I', 'CELL II', 'CELL III', 'CELL IV'], cost: [5000, 15000, 40000, 90000], wood: [2000, 0, 0, 0],
              // The ladder is 2, 3, 4, 5 tiles. It held 1.5/2.5/3.5/4.5 and the deployer ruled the document
              // right and the game wrong - "design document is correct, it should use that".
              reach: [2, 3, 4, 5],
-             strength: [0, 0, 0, 0], energy: [0, 0, 0, 0],
-             buildMs: LEVELS(4, BUILD_MS), hands: 4,
+             strength: [250, 500, 1000, 2000], energy: [2, 4, 8, 14],
+             hands: 4,
              // The operator gate - a Friend of a good enough generation posted before a cell could rise a
              // level - is struck through in DESIGN.md (M8 item 7: "the cell was a permission gate, not a
              // quality dial"). It held gen 3, 2, 1 for levels II to IV; every level is 0 now, and the row
@@ -164,31 +221,33 @@
              // cappedByKeepLevel is false because the cell is the one building that climbs past the keep
              // to a fourth tier: index.html's `capped` used to know that by name, and now reads it here.
              footprint: [[0, 0]], placement: PLACE({ onClaimedGround: true, cappedByKeepLevel: false, scienceGen: [0, 0, 0, 0] }),
-             proposed: { buildMs: TIME_PROPOSED('4.7 min / 10 min / 26.7 min / 60 min'), hands: HANDS_PROPOSED, cost: MIX_PROPOSED('70 wood / 75 + 75 / 400 crystals / 900 crystals'), strength: NO_STRENGTH, energy: NO_DRAW },
+             decided: DECIDED({ strength: 'DECIDED, ruling 64, sweep row 6: 250 / 500 / 1,000, and Cell IV 2,000' }),
+             proposed: { cost: MIX_PROPOSED('70 wood / 75 + 75 / 400 crystals / 900 crystals') },
              sub: 'An outpost that extends your land. Each level reaches further, toward new seams or a rival. Place another cell on claimed ground to push further still. Levels past the first need science: a qualified Friend posted at the cell.' },
     generator:  { tiers: ['WATER WHEEL', 'WATER MILL', 'TURBINE'], cost: [5000, 15000, 45000], wood: [2500, 0, 0],
-             strength: [0, 0, 0], energy: [0, 0, 0],
-             buildMs: LEVELS(3, BUILD_MS), hands: 4,
-             supply: [0, 0, 0],                          // P it makes, by level: PROPOSED 10 / 25 / 60 (question 21 row 31), not written
+             strength: [200, 400, 800], energy: [0, 0, 0],
+             hands: 4,
+             supply: [10, 25, 60],                       // P it makes, by level
              footprint: [[0, 0]], placement: PLACE({ onWater: true, scienceGen: [0, 0, 0] }),
-             proposed: { buildMs: TIME_PROPOSED('5 min / 10 min / 30 min'), hands: HANDS_PROPOSED, cost: MIX_PROPOSED('75 wood / 75 + 75 / 450 crystals'), strength: NO_STRENGTH, energy: NO_DRAW, supply: 'makes nothing at any level until the deployer decides (question 21 row 31)' },
+             decided: DECIDED({ supply: 'DECIDED, ruling 64, sweep row 31: 10 / 25 / 60 P - a level-1 base runs on its water wheel, just' }),
+             proposed: { cost: MIX_PROPOSED('75 wood / 75 + 75 / 450 crystals') },
              sub: 'Makes power from running water: a wheel turning in its channel. Each level turns out more.' },
     collectionDepot: { tiers: ['DEPOT I', 'DEPOT II', 'DEPOT III'], cost: [6000, 18000, 50000], wood: [3000, 0, 0],
              // the crystals the depot itself holds, by level (M8 item 6; How much you can hold, DECIDED: the
-             // depot holds crystals and fills up). The numbers are the economist's PROPOSAL (question 21 row 20)
+             // depot holds crystals and fills up). DECIDED as a starting value, ruling 64, sweep row 20
              capacity: [24000, 72000, 216000],
-             strength: [0, 0, 0], energy: [0, 0, 0],
-             buildMs: LEVELS(3, BUILD_MS), hands: 4,
+             strength: [350, 700, 1400], energy: [3, 6, 10],
+             hands: 4,
              footprint: [[0, 0]], placement: PLACE({ scienceGen: [0, 0, 0] }),
-             proposed: { buildMs: TIME_PROPOSED('6 min / 12 min / 33.3 min'), hands: HANDS_PROPOSED, cost: MIX_PROPOSED('90 wood / 90 + 90 / 500 crystals'), strength: NO_STRENGTH, energy: NO_DRAW,
-               capacity: 'PROPOSED (question 21 row 20): 240.00 / 720.00 / 2,160.00 crystals by level - level I equals the starting purse, each level x3' },
+             decided: DECIDED({ capacity: 'DECIDED, ruling 64, sweep row 20: 240.00 / 720.00 / 2,160.00 crystals by level - level I equals the starting purse, each level x3' }),
+             proposed: { cost: MIX_PROPOSED('90 wood / 90 + 90 / 500 crystals') },
              sub: 'Collection depot. It holds the base\'s crystals - 240, then 720, then 2,160 - and builds harvesters that bring what they cut back here. Each level runs one more harvester and adds a crystal to every haul.' },
     // THE NINTH BUILDING (M8 item 11). Decided: four levels; one to a base; it must stand touching a
     // generator, and that generator is the one it serves; it leaks by its own level (10% a day, 5%, 3%,
     // none); it can be captured and destroyed; it opens one game year after a water mill stands (the
-    // `unlocks` row below). Every NUMBER on it is the economist's PROPOSAL (question 21 row 32, question
-    // 22), written here marked rather than left at 0, because a row the catalogue reads as "free" would
-    // be a worse untruth than a proposal that says it is one. `capacity` is what it stores, in P·h;
+    // `unlocks` row below). Its numbers were the economist's proposal (question 21 row 32) and are DECIDED
+    // as starting values since ruling 64 - cost, store and release by row 32, strength by row 6, no draw
+    // by row 29; its level-1 cost is crystals only, so question 22 has nothing to say about it. `capacity` is what it stores, in P·h;
     // `release` what it lets out at most, in P. How fast it charges is set by its source, not by this
     // row, and WHICH generator level each of 48 h / 24 h / 6 h / 2 h belongs to is undecided (Energy,
     // "Two ladders"), so no charge rate is written. cappedByKeepLevel is left TRUE, as the rule stands:
@@ -197,14 +256,24 @@
     capacitor: { tiers: ['CAPACITOR I', 'CAPACITOR II', 'CAPACITOR III', 'CAPACITOR IV'],
              cost: [30000, 80000, 200000, 450000], wood: [0, 0, 0, 0],
              capacity: [500, 1500, 4000, 10000], release: [15, 40, 100, 250], leak: [10, 5, 3, 0],
-             strength: [0, 0, 0, 0], energy: [0, 0, 0, 0],
-             buildMs: LEVELS(4, BUILD_MS), hands: 4,
+             strength: [200, 400, 800, 1600], energy: [0, 0, 0, 0],
+             hands: 4,
              footprint: [[0, 0]], placement: PLACE({ maxPerBase: 1, nextToKind: 'generator', scienceGen: [0, 0, 0, 0] }),
-             proposed: { buildMs: TIME_PROPOSED('20 min / 53.3 min / 133.3 min / 300 min'), hands: HANDS_PROPOSED, cost: 'the economy page\'s ladder, 300 / 800 / 2,000 / 4,500 (question 21 row 32)', capacity: 'the store, 500 / 1,500 / 4,000 / 10,000 P·h (row 32)',
-               release: '15 / 40 / 100 / 250 P at most (row 32)', strength: 'proposed 200 / 400 / 800 / 1,600 (row 6), not written: 0 means not a target',
-               energy: 'proposed 0 at every level - a store does not draw (row 29)', cappedByKeepLevel: 'true as the rule stands; false is way out 1 of three, the deployer\'s to pick' },
+             decided: DECIDED({ hands: 'DECIDED, ruling 64, sweep row 27: 4 for the capacitor; linear up to it (row 25)',
+               cost: 'DECIDED, ruling 64, sweep row 32: the economy page\'s ladder, 300 / 800 / 2,000 / 4,500, 0 wood', capacity: 'DECIDED, ruling 64, sweep row 32: the store, 500 / 1,500 / 4,000 / 10,000 P·h',
+               release: 'DECIDED, ruling 64, sweep row 32: 15 / 40 / 100 / 250 P at most', strength: 'DECIDED, ruling 64, sweep row 6: 200 / 400 / 800 / 1,600 - the generator\'s ladder, because the two stand touching',
+               energy: 'DECIDED, ruling 64, sweep row 29: 0 at every level - a store does not draw' }),
+             proposed: { cappedByKeepLevel: 'true as the rule stands; false is way out 1 of three, the deployer\'s to pick' },
              sub: 'Stores power from the generator it touches and lets it out when that generator goes offline. Leaks by its own level; the fourth leaks nothing. One to a base.' },
   };
+  // every kind's raise time per level, DERIVED from its own materials (row 24) - never typed per row
+  Object.values(KINDS).forEach((r) => { r.buildMs = raised(r.cost, r.wood); });
+  // ROW 7 IS A RULE: no level of any building, and no harvester, may be stronger than STRENGTH_MAX. A row that
+  // breaks it is a table that cannot load, rather than a ceiling a page mentions and nothing holds.
+  Object.entries(KINDS).forEach(([k, r]) => r.strength.forEach((s, i) => {
+    if (!(s >= 0 && s <= STRENGTH_MAX)) throw new Error('values.js: ' + k + ' level ' + (i + 1) + ' has strength ' + s + ', over the ceiling of ' + STRENGTH_MAX + ' (sweep row 7)');
+  }));
+  if (!(HARV_STRENGTH >= 0 && HARV_STRENGTH <= STRENGTH_MAX)) throw new Error('values.js: a harvester\'s strength ' + HARV_STRENGTH + ' is over the ceiling of ' + STRENGTH_MAX);
 
   // ---------------------------------------------------------------------------------------------
   // WHAT A BASE STARTS WITH (schema: base, building - the rows a new base is created holding).
@@ -212,7 +281,7 @@
   // The single-estate plan. index.html clones a fresh copy of each row, so `crew` and `occupant` are
   // the shape of a row and never shared state. A two-base island is laid out by mapgen's kit instead.
   const START_BASE = {
-    purse: { crystals: 24000, wood: 0 },             // hundredths - 240.00 crystals
+    purse: { crystals: 24000, wood: 0 },             // hundredths - 240.00 crystals and no wood - DECIDED, ruling 64, sweep rows 9 and 10
     buildings: [
       { type: 'keep',  x:  0.5, y:  0.5, tier: 1 },
       { type: 'tower', x: -2.5, y: -0.5, tier: 1, occupant: null },
@@ -242,18 +311,25 @@
     // tier 2) standing for `afterYears` game years is the capacitor's prerequisite. The page turns
     // afterYears into milliseconds of its own clock.
     unlocks: { capacitor: { needs: { type: 'generator', tier: 2 }, afterYears: 1 } },
-    // gathering (schema: game; the depot and the silo rows above)
-    growMs: 36000,                                    // a seam's full cycle, stages every quarter
-    handYield: 1,                                     // crystals a Friend cuts by hand
-    harvCost: 2000,                                   // hundredths - 20.00 crystals for a harvester
-    treeWood: 300,                                    // three logs a tree, in hundredths. NOT trees per grove: that is the map's (mapgen.js), frozen at the seed
-    chopMs: 1400, regrowMs: 45000,
-    buildMs: BUILD_MS,                                // the held pace every kind's per-level `buildMs` names; kept readable for the pages that read one number
+    // gathering (schema: game; the depot and the silo rows above). M10 ITEM 9: every figure here is DECIDED as a
+    // starting value by ruling 64 - the sweep row is on each line - and growMs and regrowMs run at the demo pace
+    // only under the switch (THE DEMO PACE, above).
+    growMs: DEMO ? DEMO_PACE.growMs : 15 * 60e3,      // a seam's full cycle, stages every quarter - DECIDED, ruling 64, sweep row 14: 15 min (demo 36 s)
+    handYield: 1,                                     // crystals a Friend cuts by hand at full growth - DECIDED, ruling 64, sweep row 15
+    harvCost: 2000,                                   // hundredths - 20.00 crystals for a harvester - DECIDED, ruling 64, sweep row 18
+    treeWood: 300,                                    // three logs a tree, in hundredths - DECIDED, ruling 64, sweep row 11. NOT trees per grove: that is the map's (mapgen.js), frozen at the seed
+    chopMs: 1400,                                     // a log every 1.4 s - DECIDED, ruling 64, sweep row 12
+    regrowMs: DEMO ? DEMO_PACE.regrowMs : 15 * 60e3,  // a felled tree stands again - DECIDED, ruling 64, sweep row 13: 15 min (demo 45 s)
+    buildMs: BUILD_MS,                                // THE DEMO PACE's flat raise time, kept readable for the clip clocks (index.html BUILD_MS) and the pages that read one number; under the switch every kind's per-level buildMs names it, and under the decided pace none does - the decided rule is buildMsPerUnit
+    buildMsPerUnit: BUILD_MS_PER_UNIT,                // DECIDED, ruling 64, sweep row 24: ms of one Friend's work per unit of a rung's materials; every kind's buildMs is derived from it
+    strengthMax: STRENGTH_MAX,                        // DECIDED, ruling 64, sweep row 7: the ceiling on any building's strength, held at load above
+    harvStrength: HARV_STRENGTH,                      // DECIDED, ruling 64, sweep row 6: a harvester's strength
+    // what the demo switch loads instead, and whether it did: `on` is true only under pace=demo / RF_PACE=demo
+    demoPace: Object.assign({ on: DEMO }, DEMO_PACE),
     // what a seam gives by GROWTH STAGE, in basis points of a full haul (M10 item 2: "taking it young gives
     // less - so a stage needs a yield"). The stages are quarters of growMs, so there are as many stages as
     // entries. A hand cut is handYield times it, a harvester's haul its depot's level times it.
-    // PROPOSED (question 21 row 16): 25% / 50% / 75% / 100%. schema.json marks economy.stageYieldBps
-    // undecided; written, as the capacitor's numbers are, because a yield of nothing would be a worse untruth.
+    // DECIDED, ruling 64, sweep row 16: 25% / 50% / 75% / 100% at stages 0 to 3.
     stageYieldBps: [2500, 5000, 7500, 10000],
     // the registry
     kinds: KINDS,

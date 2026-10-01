@@ -71,7 +71,7 @@ let PROF = null, CH = null;
   const ready = async () => { for (let i = 0; i < 120; i++) { if (await ev('!!(window.base && base.record && base.record.head && base.simT > 0)')) return true; await sleep(250); } return false; };
 
   try {
-    await send('Page.navigate', { url: SITE + '/base.html' });
+    await send('Page.navigate', { url: SITE + '/base.html?pace=demo' });   // the demo pace (values.js): V.buildMs below is the demo's flat raise time, and RF_PACE is not needed in node because only V.buildMs is read
     ok('the base opens and its record is up', await ready(), await ev('typeof window.base'));
     const g = await J('JSON.stringify({ writes: (base.record.store.load(base.HOME) || {}).writes, lw: base.record.lastWrite })');
     ok('a fresh profile: the base opened on its genesis and is saving (writes ' + g.writes + ')', g.writes === 1, JSON.stringify(g));

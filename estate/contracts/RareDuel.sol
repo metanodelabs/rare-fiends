@@ -92,6 +92,18 @@ contract RareDuel is ReentrancyGuard {
     /// that may be re-pointed after launch). Born here as a fresh `RareDice` so the constructor and the
     /// deploy order do not change; `setDice` points it elsewhere. Sealed into every duel at `challenge`.
     IRareDice public dice;
+    /// @notice THE TERMINAL'S TERMS (ruling 55, 2026-10-01), a separate set from the ordinary duel's above, which
+    /// they never touch. A 1/1 Doopie hidden as a terminal springs a duel nobody can decline, with the Doopie one
+    /// step up the ladder: its chance is terminalCounterBps when its pick beats the victim's, terminalSameBps on the
+    /// same pick and terminalBeatenBps when it is beaten - 70 / 70 / 50 (about 63% over the nine pairs) where an
+    /// ordinary duel is 70 / 50 / 30. Same commitment, same one roll, same dice as `settle`. Opened at the decided
+    /// values here rather than through the constructor, so the deploy order and every harness that deploys this
+    /// contract keep their argument lists; `paritycheck.js` holds them equal to estate/duel.js TERMINAL.
+    /// In v1 a terminal duel's stakes are crystals and settle on our server like every fight, so nothing here
+    /// escrows one: `terminalRoll` is the reference the server's settlement is replayed against.
+    uint16 public terminalCounterBps;
+    uint16 public terminalSameBps;
+    uint16 public terminalBeatenBps;
 
     uint256 public duelCount;
     mapping(uint256 => Duel) private duels;
@@ -116,6 +128,7 @@ contract RareDuel is ReentrancyGuard {
     event FeeSet(uint16 feeBps, address feeTo, address indexed by);
     event WindowsSet(uint64 answerWindow, uint64 revealWindow, uint64 rollWindow, address indexed by);
     event DiceSet(address dice, address indexed by);
+    event TerminalOddsSet(uint16 counterBps, uint16 sameBps, uint16 beatenBps, address indexed by);
 
     error InvalidTerms();
     error InvalidDuel();
@@ -174,11 +187,15 @@ contract RareDuel is ReentrancyGuard {
         revealWindow = revealWindow_;
         rollWindow = rollWindow_;
         dice = new RareDice();
+        terminalCounterBps = 7000;   // DECIDED, ruling 55: the terminal's 70 / 70 / 50
+        terminalSameBps = 7000;
+        terminalBeatenBps = 5000;
         // the opening state is emitted so the log starts at deployment rather than at the first change
         emit OddsSet(counterBps_, sameBps_, msg.sender);
         emit FeeSet(feeBps_, feeTo_, msg.sender);
         emit WindowsSet(answerWindow_, revealWindow_, rollWindow_, msg.sender);
         emit DiceSet(address(dice), msg.sender);
+        emit TerminalOddsSet(7000, 7000, 5000, msg.sender);
     }
 
     /// @notice the numbers one duel was struck under - what `settle` reads
@@ -195,14 +212,34 @@ contract RareDuel is ReentrancyGuard {
     /// @notice the challenger's chance of winning, in bps, under the LIVE odds - what the next duel gets.
     /// A duel already struck settles under its own sealed odds, which `sealedOf` shows.
     function oddsBps(uint8 pick1, uint8 pick2) public view returns (uint16) {
-        return _odds(counterBps, sameBps, pick1, pick2);
+        return _odds(counterBps, sameBps, 10_000 - counterBps, pick1, pick2);
     }
 
-    /// @dev the triangle: 1 rock, 2 paper, 3 scissors; counter beats, same ties, countered loses
-    function _odds(uint16 counter, uint16 same, uint8 pick1, uint8 pick2) private pure returns (uint16) {
+    /// @notice the Doopie's chance at a terminal, in bps, under the terminal's terms (ruling 55). The Doopie is
+    /// always the first pick.
+    function terminalOddsBps(uint8 doopiePick, uint8 victimPick) public view returns (uint16) {
+        return _odds(terminalCounterBps, terminalSameBps, terminalBeatenBps, doopiePick, victimPick);
+    }
+
+    /// @notice a terminal duel decided from its word: the same one roll `settle` takes (play 0 of the duel's id,
+    /// through the live dice), under the terminal's terms. A reference for replaying the server's settlement; it
+    /// moves nothing.
+    function terminalRoll(bytes32 word, uint256 id, uint8 doopiePick, uint8 victimPick)
+        external
+        view
+        returns (uint16 roll, uint16 odds, bool doopieWins)
+    {
+        odds = terminalOddsBps(doopiePick, victimPick);
+        roll = uint16(dice.roll(word, address(this), block.chainid, id, 0));
+        doopieWins = roll < odds;
+    }
+
+    /// @dev the triangle: 1 rock, 2 paper, 3 scissors; counter beats, same ties, countered loses at `beaten`
+    /// (an ordinary duel's `beaten` is 10000 - counter; a terminal's is its own)
+    function _odds(uint16 counter, uint16 same, uint16 beaten, uint8 pick1, uint8 pick2) private pure returns (uint16) {
         if (pick1 == 0 || pick1 > 3 || pick2 == 0 || pick2 > 3) revert BadReveal();
         if (pick1 == pick2) return same;
-        return (pick1 + 3 - pick2) % 3 == 1 ? counter : 10_000 - counter;
+        return (pick1 + 3 - pick2) % 3 == 1 ? counter : beaten;
     }
 
     function commitment(uint256 id, address player, uint8 pick, bytes32 salt) public view returns (bytes32) {
@@ -352,7 +389,7 @@ contract RareDuel is ReentrancyGuard {
         Duel storage d = _duel(id, State.Rolling);
         if (!d.fulfilled) revert RandomnessPending();
         Sealed storage s = _sealed[id];                        // the numbers this duel was struck under, never the live ones
-        uint16 odds = _odds(s.counterBps, s.sameBps, d.pick1, d.pick2);
+        uint16 odds = _odds(s.counterBps, s.sameBps, 10_000 - s.counterBps, d.pick1, d.pick2);
         // salted with THIS contract's address, which is stable across re-points of the dice (RareChance.sol)
         uint16 r = uint16(s.dice.roll(d.word, address(this), block.chainid, id, 0));
         address winner = r < odds ? d.p1 : d.p2;
@@ -419,6 +456,17 @@ contract RareDuel is ReentrancyGuard {
         counterBps = counterBps_;
         sameBps = sameBps_;
         emit OddsSet(counterBps_, sameBps_, msg.sender);
+    }
+
+    /// @notice the terminal's odds (ruling 55), behind the same root power and running-game rule as `setOdds`
+    function setTerminalOdds(uint16 counterBps_, uint16 sameBps_, uint16 beatenBps_) external {
+        roles.requirePower(msg.sender, ROOT_POWER);
+        roles.requireNoGameRunning();
+        if (counterBps_ > 10_000 || sameBps_ > 10_000 || beatenBps_ > 10_000) revert InvalidTerms();
+        terminalCounterBps = counterBps_;
+        terminalSameBps = sameBps_;
+        terminalBeatenBps = beatenBps_;
+        emit TerminalOddsSet(counterBps_, sameBps_, beatenBps_, msg.sender);
     }
 
     /// @notice the house fee and where it goes, together, so a fee above zero can never point at nobody

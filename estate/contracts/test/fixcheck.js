@@ -1686,10 +1686,12 @@ const errorNames = (abi) => Object.fromEntries(abi.filter((e) => e.type === 'err
     sgStranger === 'PowerNotHeld' && sgZero === 'ZeroAddress' && sgEoa === 'NotAContract' && sgOk === 'MOVED' && !!RG
     && (await ROLES.call('game')).out[0].toLowerCase() === RG.address.toLowerCase() && BigInt((await ROLES.call('runningGames')).out[0]) === 1n, JSON.stringify([sgStranger, sgZero, sgEoa, sgOk]));
   const underRun = [await sTry('setOdds', [6000, 5000], TEAM), await sTry('setFee', [0, FEES], TEAM), await sTry('setWindows', [301, 601, 601], TEAM), await sTry('setDice', [duel.address], TEAM),
+    await sTry('setTerminalOdds', [6000, 6000, 4000], TEAM),
     await gTry('setClocks', [LEN, JOINW, DELAY], TEAM), await gTry('setDefaults', [CUT, PLACES, MINP, GRID], TEAM)];
-  ok('WHILE A GAME RUNS every number\'s setter is refused, from root itself (GameRunning): RareDuel setOdds/setFee/setWindows/setDice and RareGame setClocks/setDefaults',
+  ok('WHILE A GAME RUNS every number\'s setter is refused, from root itself (GameRunning): RareDuel setOdds/setFee/setWindows/setDice/setTerminalOdds and RareGame setClocks/setDefaults',
     underRun.every((r) => r === 'GameRunning'), JSON.stringify(underRun));
-  const strangers = [await sTry('setOdds', [6000, 5000], STRANGER), await sTry('setFee', [0, FEES], STRANGER), await sTry('setWindows', [301, 601, 601], STRANGER), await sTry('setDice', [duel.address], STRANGER)];
+  const strangers = [await sTry('setOdds', [6000, 5000], STRANGER), await sTry('setFee', [0, FEES], STRANGER), await sTry('setWindows', [301, 601, 601], STRANGER), await sTry('setDice', [duel.address], STRANGER),
+    await sTry('setTerminalOdds', [6000, 6000, 4000], STRANGER)];
   ok('and a stranger gets PowerNotHeld, never GameRunning: the power is asked first, so a refusal teaches nothing about the game', strangers.every((r) => r === 'PowerNotHeld'), JSON.stringify(strangers));
   const decl2 = await gTry('declare', [2n, [GD, GC]], TEAM);
   ok('game 2 is declared and runningGames falls to 0', decl2 === 'MOVED' && BigInt(await gRead('runningGames')) === 0n, decl2 + ' ' + String(await gRead('runningGames')));
@@ -1707,6 +1709,16 @@ const errorNames = (abi) => Object.fromEntries(abi.filter((e) => e.type === 'err
   ok('with no game running root sets the odds to 60/50, the windows to 301/601/601 and the fee to 100 bps, and each getter reads the new value: stored state, not immutable; oddsBps(rock, paper) now says 4000',
     so === 'MOVED' && sw === 'MOVED' && sf === 'MOVED' && Number(await dRead('counterBps')) === 6000 && Number(await dRead('answerWindow')) === 301 && Number(await dRead('revealWindow')) === 601
     && Number(await dRead('rollWindow')) === 601 && Number(await dRead('feeBps')) === 100 && Number(await dRead('oddsBps', [1, 2])) === 4000, JSON.stringify([so, sw, sf]));
+  // the terminal's terms (ruling 55): opened at 70/70/50, a set of their own - moving the ordinary odds above did not
+  // touch them - and settable by root alone, with no game running, each within 0..10000
+  const tt0 = [await dRead('terminalCounterBps'), await dRead('terminalSameBps'), await dRead('terminalBeatenBps')].map(Number);
+  const stBad = await sTry('setTerminalOdds', [10001, 7000, 5000], TEAM), st = await sTry('setTerminalOdds', [6500, 7000, 5500], TEAM);
+  const tt1 = [await dRead('terminalCounterBps'), await dRead('terminalSameBps'), await dRead('terminalBeatenBps')].map(Number);
+  const tOdds = [await dRead('terminalOddsBps', [2, 1]), await dRead('terminalOddsBps', [1, 1]), await dRead('terminalOddsBps', [1, 2])].map(Number);
+  ok('RareDuel.setTerminalOdds: the terminal opened at 70/70/50 and moving the ordinary odds to 60/50 left it there; root sets 65/70/55 and terminalOddsBps reads it pick by pick; above 10000 is refused (InvalidTerms)',
+    JSON.stringify(tt0) === '[7000,7000,5000]' && stBad === 'InvalidTerms' && st === 'MOVED' && JSON.stringify(tt1) === '[6500,7000,5500]' && JSON.stringify(tOdds) === '[6500,7000,5500]',
+    JSON.stringify({ tt0, stBad, st, tt1, tOdds }));
+  await sTry('setTerminalOdds', [7000, 7000, 5000], TEAM);
   const finish = async (i) => {
     await duel.call('accept', [i, await commitOf(i, P2, 2, salt(i * 2 + 1))], P2);
     await duel.call('reveal', [i, 1, salt(i * 2)], P1);
@@ -1864,6 +1876,7 @@ const errorNames = (abi) => Object.fromEntries(abi.filter((e) => e.type === 'err
     ['RareMarket.setTerminalShareBps', () => ask(mkt, 'setTerminalShareBps', [1], GD)], ['RareMarket.setGate', () => ask(mkt, 'setGate', [FEES], GD)],
     ['RareDuel.setOdds', () => ask(duel, 'setOdds', [7000, 5000], GD)], ['RareDuel.setFee', () => ask(duel, 'setFee', [0, FEES], GD)],
     ['RareDuel.setWindows', () => ask(duel, 'setWindows', [301, 601, 601], GD)], ['RareDuel.setDice', () => ask(duel, 'setDice', [duel.address], GD)],
+    ['RareDuel.setTerminalOdds', () => ask(duel, 'setTerminalOdds', [7000, 7000, 5000], GD)],
     ['RareGame.setClocks', () => ask(RG, 'setClocks', [LEN, JOINW, DELAY], GD)], ['RareGame.setDefaults', () => ask(RG, 'setDefaults', [CUT, PLACES, MINP, GRID], GD)],
     ['RareGame.setCut', () => ask(RG, 'setCut', [dgid, 600], GD)], ['RareGame.setPlaces', () => ask(RG, 'setPlaces', [dgid, 2], GD)],
     ['RareGame.setLength', () => ask(RG, 'setLength', [dgid, LEN], GD)], ['RareGame.setFeeTo', () => ask(RG, 'setFeeTo', [FEES], GD)],
@@ -2425,6 +2438,70 @@ const errorNames = (abi) => Object.fromEntries(abi.filter((e) => e.type === 'err
     const dl = fs.readFileSync(path.join(ROOT, 'deploy.mjs'), 'utf8');
     ok('and deploy.mjs --fake-rf refuses before sending unless EVM_RPC is a loopback, unforked anvil; a real deploy refuses a token answering IS_FAKE_RF',
       /if \(FAKE && !LOCAL\)/.test(dl) && /requireUnforkedAnvil\(provider\)/.test(dl) && /IS_FAKE_RF\(\)/.test(dl), 'a guard is missing from deploy.mjs');
+  }
+
+  // ---------- 23. Ruling 74, M20 item 22: NO switch changes once a game has started ----------
+  // The deployer, 2026-10-01: "once it starts.. it's a no". Every on/off switch a game reads - demo mode and
+  // the launch whitelist's open/closed, both in RareRoles - flips freely before a game starts (and while one is
+  // only Open, which the per-game demo snapshot already covers) and is refused, from root itself, once one has
+  // started. `setGame` is refused too: it is the pointer every freeze reads, so re-pointing it would thaw them all.
+  // NOT here: RareMarket.setTradeable, the trading switch, which one marketplace serves to every game at once -
+  // DESIGN *Still open*, "Switches frozen: the marketplace's switches". A FRESH registry and game, so nothing
+  // above is disturbed and nothing above can leave a game running under these assertions.
+  console.log('\n--- 23. ruling 74: demo mode, the whitelist switch and the games pointer flip before a game starts and are refused once one has ---');
+  {
+    const DEP23 = '0xe000000000000000000000000000000000000023', PA23 = '0xe100000000000000000000000000000000000023';
+    const PB23 = '0xe200000000000000000000000000000000000023', STR23 = '0xe300000000000000000000000000000000000023';
+    for (const a of [DEP23, PA23, PB23, STR23]) await net.acct(a);
+    const R23 = C.roles ? await net.deploy(DEP23, C.roles, [DEP23]) : null;
+    const HOUR = 3600n, LEN23 = 168n * HOUR, JW23 = 24n * HOUR, SD23 = 1n * HOUR;
+    const G23 = C.gameC && R23 ? await net.deploy(DEP23, C.gameC, [R23.address, rf.address, FEES, LEN23, JW23, SD23, 500, 3, 2, ethers.id('fixcheck part 23')]) : null;
+    const G23b = C.gameC && R23 ? await net.deploy(DEP23, C.gameC, [R23.address, rf.address, FEES, LEN23, JW23, SD23, 500, 3, 2, ethers.id('fixcheck part 23 b')]) : null;
+    const E23 = Object.assign({}, C.roles ? errorNames(C.roles.abi) : {}, C.gameC ? errorNames(C.gameC.abi) : {});
+    const r23 = async (fn, args, from) => (R23 ? await tryCall(R23, E23, fn, args, from) : 'NO ROLES');
+    const g23 = async (fn, args, from) => (G23 ? await tryCall(G23, E23, fn, args, from) : 'NO GAME');
+    const rRead = async (fn) => (R23 ? (await R23.call(fn, [])).out[0] : null);
+    const SWITCHES = [['setDemoMode', 'demoMode'], ['setWhitelistOpen', 'whitelistOpen']];
+    const flipBoth = async () => { const out = []; for (const [fn, getter] of SWITCHES) { const was = await rRead(getter); out.push([fn, await r23(fn, [!was], DEP23), (await rRead(getter)) === !was]); } return out; };
+
+    const pointed = await r23('setGame', [G23 ? G23.address : DEP23], DEP23);
+    const before1 = await flipBoth(), before2 = await flipBoth();
+    ok('BEFORE ANY GAME: root flips demo mode and the whitelist switch each way, and each getter reads the new value; setGame points the guard at the fresh RareGame',
+      pointed === 'MOVED' && [...before1, ...before2].every(([, r, moved]) => r === 'MOVED' && moved), JSON.stringify({ pointed, before1, before2 }));
+
+    // set up a game: demo OFF and the list closed, two listed players, a free game created and joined
+    if ((await rRead('demoMode')) === true) await r23('setDemoMode', [false], DEP23);
+    if ((await rRead('whitelistOpen')) === true) await r23('setWhitelistOpen', [false], DEP23);
+    await r23('setWhitelisted', [[PA23, PB23], true], DEP23);
+    for (const a of [PA23, PB23]) { await rf.call('mint', [a, 10n ** 21n]); if (G23) await rf.call('approve', [G23.address, ethers.MaxUint256], a); }
+    const made = await g23('create', [0n], PA23), gid = G23 ? BigInt((await G23.call('gameCount')).out[0]) : 0n;
+    const joined = await g23('join', [gid], PB23);
+    const whileOpen = await flipBoth(), whileOpen2 = await flipBoth();
+    ok('a game created and joined but NOT STARTED does not freeze them: both switches still flip each way (the game holds its own demo bit from create)',
+      made === 'MOVED' && joined === 'MOVED' && [...whileOpen, ...whileOpen2].every(([, r, moved]) => r === 'MOVED' && moved), JSON.stringify({ made, joined, whileOpen, whileOpen2 }));
+
+    net.travel(Number(JW23 + SD23));
+    const started = await g23('start', [gid], STR23);
+    const running = R23 ? BigInt((await R23.call('runningGames')).out[0]) : -1n;
+    const snap = { demo: await rRead('demoMode'), open: await rRead('whitelistOpen'), game: await rRead('game') };
+    const under = {};
+    for (const [fn, getter] of SWITCHES) { under[fn] = await r23(fn, [!(await rRead(getter))], DEP23); under[fn + '(same value)'] = await r23(fn, [await rRead(getter)], DEP23); }
+    under.setGame = await r23('setGame', [G23b ? G23b.address : DEP23], DEP23);
+    const after = { demo: await rRead('demoMode'), open: await rRead('whitelistOpen'), game: await rRead('game') };
+    ok('ONCE A GAME HAS STARTED, from root itself: setDemoMode, setWhitelistOpen and setGame are each refused (GameRunning), and demoMode, whitelistOpen and game read back UNCHANGED',
+      started === 'MOVED' && running === 1n && Object.values(under).every((r) => r === 'GameRunning')
+      && after.demo === snap.demo && after.open === snap.open && String(after.game).toLowerCase() === String(snap.game).toLowerCase(),
+      JSON.stringify({ started, running: String(running), under, snap, after }));
+    const strangers23 = [await r23('setDemoMode', [true], STR23), await r23('setWhitelistOpen', [true], STR23), await r23('setGame', [G23b ? G23b.address : DEP23], STR23)];
+    ok('and a stranger gets PowerNotHeld, never GameRunning: the power is asked first, so a refusal teaches nothing about the game',
+      strangers23.every((r) => r === 'PowerNotHeld'), JSON.stringify(strangers23));
+
+    const declared = await g23('declare', [gid, [PA23, PB23]], DEP23);
+    const thawed = await flipBoth();
+    ok('the game is declared, runningGames falls to 0, and both switches flip again - the freeze is the game\'s life, not forever',
+      declared === 'MOVED' && R23 && BigInt((await R23.call('runningGames')).out[0]) === 0n && thawed.every(([, r, moved]) => r === 'MOVED' && moved), JSON.stringify({ declared, thawed }));
+    note('NOT FROZEN HERE, and why: RareMarket.setTradeable (one marketplace switch serves every game - DESIGN *Still open*, "Switches frozen: the marketplace\'s switches", unanswered);');
+    note('the allowlist and whitelist ENTRIES (setAllowed, setWhitelisted) are per-address lists, not on/off switches - whether ruling 74 reaches them is not asked yet.');
   }
 
   console.log(fails ? '\n' + fails + ' check(s) failed' : '\nall nine items hold, and the fight log, and the whitelist, and the duel\'s numbers are state a running game freezes, and a building is a row');

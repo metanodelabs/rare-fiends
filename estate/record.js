@@ -11,7 +11,7 @@
 //     is mid-walk, the trees' wood and the seams' growth. Saved beside the ledger, never hashed.
 //   - the MOVES, as a table: kind -> what it needs and what it changes. The table IS the list of what counts
 //     as history, and the list is DECIDED (the deployer, 2026-09-30: "all actions should be saved" - every
-//     action a player takes is a move; schema moveKind holds the same twelve and schemacheck/recordcheck hold
+//     action a player takes is a move, and a fight's result is a move our server writes; schema moveKind holds the same list and schemacheck/recordcheck hold
 //     the two together). A change the page makes that is not a move here is a change the record does not
 //     know, and the parity assertion below is what catches it. A later milestone that gives the player a new
 //     action adds its kind here and to the schema, never a change the record does not carry.
@@ -98,8 +98,10 @@
     return out;
   }
   // M8 ITEM 2: how long ONE Friend takes to raise this kind to this level - the row's own per-level buildMs.
+  // 0 is a time, not a missing one: a free rung (Keep I, under the decided 4 s per unit of materials, M8
+  // item 13) stands the moment it is placed. Only an absent or negative time is refused.
   function raiseMs(kind, level) {
-    const t = kindRow(kind).buildMs; if (!t || !(t[level - 1] > 0)) throw new Error(kind + ' has no raise time at level ' + level);
+    const t = kindRow(kind).buildMs; if (!t || !(t[level - 1] >= 0)) throw new Error(kind + ' has no raise time at level ' + level);
     return t[level - 1];
   }
   // M8 ITEM 3: each Friend up to the row's ceiling works at one Friend's pace, so n of them take the time
@@ -119,7 +121,8 @@
     }
     return clock > from ? w + (clock - from) * working(b.kind, n) : w;
   }
-  const progress = (b, clock) => (b.startedAt === null ? 1 : Math.max(0, Math.min(1, worked(b, clock) / raiseMs(b.kind, b.level))));
+  const progress = (b, clock) => { if (b.startedAt === null) return 1; const need = raiseMs(b.kind, b.level);
+    return need === 0 ? 1 : Math.max(0, Math.min(1, worked(b, clock) / need)); };
   const finished = (b, clock) => b.startedAt === null || worked(b, clock) >= raiseMs(b.kind, b.level);
   const standingLevel = (b, clock) => (finished(b, clock) ? b.level : b.level - 1);
   // Half of EVERYTHING spent - every material of every rung, summed off the ladder (Selling what you have
@@ -135,22 +138,33 @@
   }
   // M8 ITEM 6, How much you can hold (DECIDED): the collection depot holds crystals and fills up, and a silo
   // EXTENDS that reserve by a set amount. So the cap is the best STANDING depot's capacity plus every
-  // standing silo's, each at the level it stands at. A base with neither standing has no store at all and
-  // is left uncapped - the one stand-in here, so a bare base is not frozen at nothing; no rule says which.
+  // standing silo's, each at the level it stands at.
+  // M8 ITEM 14, RULING 62 (sweep row 45): a base with NO depot and NO silo standing holds what its standing
+  // keep's `capacity` says - 240.00 at every keep level. It is a FLOOR and not an addition: the moment a depot
+  // or a silo stands, the keep counts for nothing and the cap is exactly the best depot plus every silo. The
+  // keep is found by its row's `placement.isKeep`, never by its name. With the keep gone too, the cap is 0:
+  // gather refuses every haul, and the crystals already held stay where they are (nothing here takes them).
   // `without` is a building left out of the count: the cap the base has AFTER it is knocked down (ruling 56).
+  const isKeepKind = (kind) => !!(V.kinds[kind] && V.kinds[kind].placement && V.kinds[kind].placement.isKeep);
   function storeCap(ledger, clock, without) {
-    let depot = 0, silos = 0, any = false;
+    let depot = 0, silos = 0, any = false, floor = 0;
     ledger.buildings.forEach((b) => { if (b === without) return; const s = standingLevel(b, clock); if (s < 1) return;
       if (b.kind === 'collectionDepot') { any = true; depot = Math.max(depot, V.kinds.collectionDepot.capacity[s - 1]); }
-      else if (b.kind === 'silo') { any = true; silos += V.kinds.silo.capacity[s - 1]; } });
-    return any ? depot + silos : Infinity;
+      else if (b.kind === 'silo') { any = true; silos += V.kinds.silo.capacity[s - 1]; }
+      else if (isKeepKind(b.kind)) floor = Math.max(floor, (V.kinds[b.kind].capacity || [])[s - 1] || 0); });
+    return any ? depot + silos : floor;
   }
   const siloCap = storeCap;                               // the old name, kept readable: it is the same cap
   // RULINGS 15 AND 56: how much room a knock-down's refund is short of - the purse plus the refund, over the
   // cap the base has once that building is gone (a silo's own refund is not held by that silo; with two
-  // silos, the larger going leaves only the smaller's). 0 means it fits. A base left with no depot and no
-  // silo standing is uncapped by storeCap and always fits - that case is NOT settled by ruling 56.
+  // silos, the larger going leaves only the smaller's). 0 means it fits. The LAST depot or silo is tested
+  // against the keep's floor, 240.00, since ruling 62 - not against no cap at all.
   const refundShort = (purse, crystals, capAfter) => Math.max(0, purse + crystals - capAfter);
+  // RULING 62 (6): a player knocking down their OWN keep is exempt from that test - with the keep gone the cap
+  // is 0, so the test would refuse every keep that ever held a crystal. The exemption is ready here and in
+  // demolish below; `demolish` still refuses a keep while anything else stands ("the keep goes last"), which
+  // is M15 item 12's (ruins), not this one's.
+  const refundExempt = (kind) => isKeepKind(kind);
   const LOG = V.crystalUnit;                              // one log, in hundredths: wood is counted like crystals (ruling 17)
   // M10 ITEM 2: what a seam gives at the stage it is cut, in hundredths - `full` (a hand's handYield, or a
   // depot's level) times the stage's yield. Stages are equal shares of the growth cycle, as many as
@@ -170,10 +184,15 @@
   const no = (why) => { throw new Refused(why); };
   const building = (L, id) => L.buildings.find((b) => b.id === id) || no('no building ' + id);
   const row = (L, id) => L.roster.find((r) => r.id === id) || no('no roster row ' + id);
-  // pay a materials list: every material checked first, then every one taken, so a refusal takes nothing
+  // pay a materials list: every material checked first, then every one taken, so a refusal takes nothing.
+  // A bill is an OBJECT, { crystals, wood, ... }; a material it does not name costs nothing. Anything else -
+  // a bare number, a negative or fractional amount - throws rather than paying: `pay(L, 2000)` once made a
+  // purse of NaN and refused nothing (the harvester move, fixed in M13).
   const pay = (L, bill) => {
-    MATERIALS.forEach(([m]) => { if ((L.base[m] || 0) < bill[m]) no('cannot pay ' + bill[m] + ' ' + m + ': holds ' + (L.base[m] || 0)); });
-    MATERIALS.forEach(([m]) => { L.base[m] = (L.base[m] || 0) - bill[m]; });
+    if (!bill || typeof bill !== 'object') throw new Error('a bill is a materials list, not ' + JSON.stringify(bill));
+    const owe = (m) => { const n = bill[m] == null ? 0 : bill[m]; if (!Number.isInteger(n) || n < 0) throw new Error('a bill of ' + n + ' ' + m + ' is not whole hundredths'); return n; };
+    MATERIALS.forEach(([m]) => { if ((L.base[m] || 0) < owe(m)) no('cannot pay ' + owe(m) + ' ' + m + ': holds ' + (L.base[m] || 0)); });
+    MATERIALS.forEach(([m]) => { L.base[m] = (L.base[m] || 0) - owe(m); });
   };
   const covers = (b) => ((V.kinds[b.kind] && V.kinds[b.kind].footprint) || [[0, 0]]).map(([dx, dy]) => [b.x + dx, b.y + dy]);
   const unpostAll = (L, pred) => L.roster.forEach((r) => { if (r.post && pred(r)) r.post = null; });
@@ -203,6 +222,9 @@
       const b = building(L, m.b), row_ = V.kinds[b.kind];
       const restart = () => { const n = handsAt(b, m.at); b.startedAt = m.at; b.hands = n === 1 ? undefined : [[m.at, n]]; };
       if (m.level === b.level) { restart(); return; }
+      // M13 ITEM 8, ruling 37 (d): a base whose keep an opponent destroyed keeps using what it has and CANNOT
+      // UPGRADE IT. Replaying a build at its own level (above) is not an upgrade, and is still allowed.
+      if (L.keepLost) no('the keep was destroyed by an opponent (fight ' + L.keepLost.fight + '): nothing on this base can be raised');
       if (m.level !== b.level + 1) no('level ' + m.level + ' is not the next rung after ' + b.level);
       if (m.level > row_.tiers.length) no(b.kind + ' has no level ' + m.level);
       pay(L, materials(b.kind, m.level));
@@ -214,7 +236,7 @@
       const b = building(L, m.b);
       if ((V.kinds[b.kind].placement || {}).isKeep && L.buildings.length > 1) no('the keep goes last');
       const rf = refund(b.kind, b.level, b.harvesters);
-      const short = refundShort(L.base.crystals, rf.crystals, storeCap(L, m.at, b));
+      const short = refundExempt(b.kind) ? 0 : refundShort(L.base.crystals, rf.crystals, storeCap(L, m.at, b));
       if (short > 0) no('needs ' + (short / V.crystalUnit).toFixed(2) + ' room: the depot and silos left cannot hold the refund of ' + rf.crystals);
       L.base.crystals += rf.crystals; L.base.wood += rf.wood;
       unpostAll(L, (r) => r.post.building === b.id);
@@ -225,7 +247,7 @@
       const b = building(L, m.b);
       if (b.kind !== 'collectionDepot') no('building ' + m.b + ' is not a depot');
       if (b.harvesters + 1 > b.level) no('a level ' + b.level + ' depot runs ' + b.level + ' harvester' + (b.level > 1 ? 's' : ''));
-      pay(L, V.harvCost, 0);
+      pay(L, { crystals: V.harvCost });                   // harvCost is crystals, hundredths (values.js)
       b.harvesters += 1;
     },
     // crystals come in from the world: one haul at most, and never past what the depot and silos hold
@@ -279,7 +301,144 @@
       if (log.length && m.at < log[log.length - 1][0]) no('hands at ' + m.at + ' is before the last change, at ' + log[log.length - 1][0]);
       b.hands = log.concat([[m.at, m.n]]);
     },
+    // M13 ITEM 2: A FIGHT'S RESULT, one move on each record. Neither is ever a client's: our server resolves
+    // the fight (rulings 3 and 7; *Fights resolve on our server*) and writes both, through apply(), off each
+    // record's own head - and serve.py refuses either kind in a client's batch (SERVER_MOVES below). Each
+    // carries the fight's id and hash, so the record says which published fight changed it.
+    // `attack` - on the ATTACKER's record: the Friends it sent that went down leave the roster (ruling 53's
+    // reading of a death: out of the game, the token not lost), and a won attack brings home the loot.
+    attack(L, m) {
+      const sent = Array.isArray(m.sent) ? m.sent : no('an attack names the Friends it sent');
+      if (!sent.length || new Set(sent).size !== sent.length) no('an attack sends one or more Friends, each once');
+      sent.forEach((id) => row(L, id));
+      (m.lost || []).forEach((id) => { if (!sent.includes(id)) no('Friend ' + id + ' went down in a fight it was not sent to'); });
+      dropFriends(L, m.lost || []);
+      if (m.won) { const g = lootOf(m.loot); L.base.crystals += g.crystals; L.base.wood += g.wood; }
+      else if (lootOf(m.loot).crystals || lootOf(m.loot).wood) no('an attack that did not win brings nothing home');
+    },
+    // `attacked` - on the DEFENDER's record: its Friends that went down leave the roster, its wall sections
+    // that were broken come down (their crew step off), and if the attack won, EVERYTHING the base held goes
+    // (ruling 14 - the purse, all of it, never part) and its keep is destroyed (ruling 37 (d); keepLost below).
+    attacked(L, m) {
+      dropFriends(L, m.lost || []);
+      (m.walls || []).forEach((id) => { const b = building(L, id); if (b.kind !== 'wall') no('building ' + id + ' is not a wall');
+        unpostAll(L, (r) => r.post.building === id); L.buildings.splice(L.buildings.indexOf(b), 1); });
+      const g = lootOf(m.loot);
+      if (!m.won && (g.crystals || g.wood)) no('a base that held takes no loss of its purse');
+      if (m.won && (g.crystals !== L.base.crystals || g.wood !== L.base.wood)) no('a won attack takes everything (ruling 14): ' + JSON.stringify(g) + ' is not the purse ' + JSON.stringify({ crystals: L.base.crystals, wood: L.base.wood }));
+      L.base.crystals -= g.crystals; L.base.wood -= g.wood;
+      if (m.keep) {
+        if (!m.won) no('only a won attack destroys the keep');
+        const k = L.buildings.find((b) => (V.kinds[b.kind].placement || {}).isKeep) || no('there is no keep to destroy');
+        L.buildings.splice(L.buildings.indexOf(k), 1);
+        L.keepLost = { at: m.at, by: m.by, fight: m.fight };
+      }
+    },
   };
+  // the fight moves' two helpers: Friends leave the roster (and their posts) together; loot is whole hundredths
+  function dropFriends(L, ids) {
+    if (new Set(ids).size !== ids.length) no('a Friend goes down once');
+    ids.forEach((id) => { const r = row(L, id); L.roster.splice(L.roster.indexOf(r), 1); });
+  }
+  function lootOf(l) {
+    const g = { crystals: (l && l.crystals) || 0, wood: (l && l.wood) || 0 };
+    if (![g.crystals, g.wood].every((n) => Number.isInteger(n) && n >= 0)) no('loot is whole hundredths, never negative');
+    return g;
+  }
+  // The kinds only our server writes. serve.py reads this list off this file at start and refuses a client's
+  // batch that carries any of them - one list, here, and no copy of it in Python.
+  const SERVER_MOVES = ['attack', 'attacked'];
+
+  // ---------------------------------------------------------------------------------------------
+  // M13: AN ATTACK, SETTLED ON OUR SERVER (rulings 3 and 7). settle(attacker, defender, order, draw) takes
+  // both bases' records as the server holds them and the attacker's order - which of its Friends it sends
+  // (`sent`, roster ids: decision 13, as many as it chooses, no stake and no fee), from which side, and the
+  // head it chose them on - and the server's draw (the random word, and the fight's number). It returns both
+  // records with the result written into each, or a refusal in apply()'s own words. Nothing here is a
+  // second copy of a rule:
+  //   - THE DEFENCE IS READ OFF THE DEFENDER'S RECORD, through defense() - the buildings standing, the
+  //     Friends on their spots and posts, and THE STANDING ORDERS THEY WERE LEFT WITH (decision 2; ruling 50:
+  //     a standing order is a response). Every roster row carries an order (rosterRow: `order || 0`, HOLD),
+  //     so no Friend is ever without one, and ruling 47's "if they don't respond, they die" never arises.
+  //   - THE FIGHT IS combat.js's fight(), on values.js's numbers through Combat.rulesFrom - the one RareCombat.sol
+  //     is held to by the parity check. Its hash is combat.js's fightHash.
+  //   - BOTH WRITES GO THROUGH apply(), each a batch off its record's own head, so StaleParent still guards
+  //     both records: a client whose base was attacked while it held moves is refused on its next write and
+  //     put back on the record (index.html's lostTo), exactly as when a second machine writes the same seat.
+  // An attack cannot be refused (decision 2): the only refusals are a malformed order, an attacker whose own
+  // record moved under it (StaleParent - the attacker's belief about which Friends it holds), a base with
+  // nothing on it to attack, and a line-up past what the fight is bounded to (combat.js MAX_SIDE, Friends a side).
+  // There is no bound on wall sections (ruling 65): every finished section the defender has is fought.
+  // Where the attack comes in: `gapTiles` off the side chosen, the attack page's own default. A belief about
+  // where an attack starts, not a tuned number - kept here, once, until the deployer page holds it.
+  const ATTACK = { gapTiles: 4 };
+  // The ground a base stands on, as far as its record knows it: every tile a building covers, and every tile
+  // a Friend stands on. The record holds no ground yet (defense()'s `tiles`), so the attack's side is placed
+  // off this - read off the record alone, so anyone holding the two records can redo the fight.
+  function groundOf(L) {
+    const seen = new Map();
+    L.buildings.forEach((b) => covers(b).forEach(([x, y]) => seen.set(Math.floor(x) + ',' + Math.floor(y), { x: Math.floor(x), y: Math.floor(y) })));
+    L.roster.forEach((r) => { const x = Math.floor(r.x / 2), y = Math.floor(r.y / 2); seen.set(x + ',' + y, { x, y }); });
+    return [...seen.values()];
+  }
+  function settle(att, def, order, draw) {
+    const C = root.Combat || require('./combat.js');
+    if (!att || !def) return refuse('NoRecord', { why: 'both bases need a record on our server' });
+    if (att.base === def.base) return refuse('Invalid', { why: 'a base does not attack itself' });
+    if (!order || order.parent !== att.head) return refuse('StaleParent', { saw: order && order.parent, is: att.head, why: 'the attacker chose its Friends on a record that has moved on' });
+    const sent = order.sent;
+    if (!Array.isArray(sent) || !sent.length || sent.length > C.MAX_SIDE || new Set(sent).size !== sent.length || !sent.every(Number.isInteger))
+      return refuse('Invalid', { why: 'send 1 to ' + C.MAX_SIDE + ' of your own Friends, each once' });
+    const rows = sent.map((id) => att.ledger.roster.find((r) => r.id === id));
+    if (rows.some((r) => !r)) return refuse('Invalid', { why: 'a Friend sent is not on the attacker\'s roster' });
+    if (!C.SIDES.includes(order.side)) return refuse('Invalid', { why: 'an attack comes in from ' + C.SIDES.join(', ') });
+    if (!draw || typeof draw.word !== 'string' || !Number.isInteger(draw.fightId)) return refuse('Invalid', { why: 'the server draws the word and numbers the fight' });
+    const clock = def.at || 0, ground = groundOf(def.ledger);
+    if (!ground.length) return refuse('Nothing', { why: 'base ' + def.base + ' has no building and no Friend: there is nothing to attack' });
+    const D = defense(def.ledger, clock, ground);
+    const wallIds = def.ledger.buildings.filter((b) => b.kind === 'wall' && finished(b, clock)).map((b) => b.id);   // defense()'s walls, in its order
+    if (D.defenders.length > C.MAX_SIDE) return refuse('TooLarge', { why: 'the fight is bounded to ' + C.MAX_SIDE + ' Friends a side' });
+    const setup = { attackers: rows.map((r) => r.gen), entry: C.entry(D, order.side, ATTACK.gapTiles * 2),
+      walls: D.walls.map((w) => ({ x: w.x, y: w.y, vert: !!w.vert })),
+      defenders: D.defenders.map((d) => ({ gen: d.gen, x: d.x, y: d.y, tower: !!d.tower, order: d.order || 0, fx: d.fx, fy: d.fy })) };
+    const R = C.rulesFrom(V), ctx = { word: draw.word, contract: Chance.PREVIEW_CONTRACT, chainId: Chance.CHAIN_ID, fightId: draw.fightId };
+    // nobody home: every defender is already down, so the attack has won without a shot
+    const res = setup.defenders.length ? C.fight(R, setup, ctx)
+      : { winner: 'attack', reason: 'wiped', t: 0, shots: 0, hits: 0, rolls: 0, attackers: setup.attackers.map((g) => R.hp[g]), defenders: [], walls: setup.walls.map(() => R.wallHp) };
+    // the fight log is not deployed (M13 item 7 publishes nothing yet): the hash is taken against the zero address
+    const hash = C.fightHash(setup, res, { fightLog: Chance.PREVIEW_CONTRACT, chainId: Chance.CHAIN_ID, gameId: 0, fightId: draw.fightId, word: draw.word, rules: R });
+    const won = res.winner === 'attack';
+    const lostA = sent.filter((id, i) => res.attackers[i] === 0);
+    const lostD = def.ledger.roster.filter((r, i) => res.defenders[i] === 0).map((r) => r.id);   // defense() reads the roster in order
+    const broken = wallIds.filter((id, i) => res.walls[i] === 0);
+    const loot = won ? { crystals: def.ledger.base.crystals, wood: def.ledger.base.wood } : { crystals: 0, wood: 0 };
+    const keep = won && def.ledger.buildings.some((b) => (V.kinds[b.kind].placement || {}).isKeep);
+    const write = (rec, kind, body) => {
+      const S = session(rec.ledger, rec.head), at = rec.at || 0;
+      if (!S.note(kind, body, at)) return refuse('Invalid', { why: S.refused[0].why, base: rec.base });
+      return apply(rec, S.batch(at, rec.scene || null, rec.ledger.lastSeen || 0));
+    };
+    const A = write(att, 'attack', { fight: draw.fightId, hash, on: def.base, won, sent: sent.slice(), lost: lostA, loot });
+    if (!A.ok) return A;
+    const B = write(def, 'attacked', { fight: draw.fightId, hash, by: att.base, won, lost: lostD, walls: broken, loot, keep });
+    if (!B.ok) return B;
+    const fight = { id: draw.fightId, hash, word: draw.word, attacker: att.base, defender: def.base, side: order.side, sent: sent.slice(),
+      winner: res.winner, reason: res.reason, t: res.t, shots: res.shots, hits: res.hits, won, loot, keep,
+      lost: { attacker: lostA, defender: lostD }, walls: broken, orders: setup.defenders.map((d) => d.order),
+      heads: { attacker: A.record.head, defender: B.record.head } };
+    A.record.lastFight = fight; B.record.lastFight = fight;
+    return { ok: true, fight, setup, attacker: A.record, defender: B.record };
+  }
+  // THE SERVER'S HALF OF AN ATTACK: `node record.js attack` reads { attacker, defender, order, draw } off stdin
+  // and writes settle()'s answer to stdout - serve.py calls this, as it calls `apply`, and holds no rule itself.
+  if (typeof require !== 'undefined' && typeof module !== 'undefined' && require.main === module && process.argv[2] === 'attack') {
+    let s = ''; process.stdin.setEncoding('utf8'); process.stdin.on('data', (c) => { s += c; });
+    process.stdin.on('end', () => {
+      let out; try { const j = JSON.parse(s); out = settle(j.attacker || null, j.defender || null, j.order, j.draw); }
+      catch (e) { out = { ok: false, reason: 'BadInput', why: String((e && e.message) || e) }; }
+      process.stdout.write(JSON.stringify(out));
+    });
+  }
   function reduce(L, m) {
     if (!MOVES[m.kind]) no('no such move: ' + m.kind);
     if (m.seq !== L.seq) no('move ' + m.kind + ' is out of sequence: ' + m.seq + ' when the record is at ' + L.seq);
@@ -461,6 +620,7 @@
 
   const api = { head, hashOf, canon, baseRow, fresh, buildingRow, rosterRow, finished, standingLevel, refund, refundShort, siloCap, wallSlots,
     MOVES: Object.keys(MOVES), reduce, Refused, session, genesis, apply, defense, spotOf, browserStore, serverStore, POLL_MS, LOG, MAX_HAUL,
-    MATERIALS, materials, raiseMs, ceiling, handsAt, worked, progress, storeCap, stageOf, haulOf };
+    MATERIALS, materials, raiseMs, ceiling, handsAt, worked, progress, storeCap, stageOf, haulOf, refundExempt,
+    SERVER_MOVES, ATTACK, groundOf, settle };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.Record = api;
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -54,7 +54,9 @@ p b, li b, td b { color: #fff; font-weight: 500; }
 
 .facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 8px; margin: 0 0 12px; }
 .fact { border: 1px solid var(--faint); padding: 10px 12px; display: grid; gap: 4px; align-content: start; min-width: 0; }
-.fact .k { font-family: var(--display); font-size: 14px; letter-spacing: .1em; color: var(--dim); display: flex; justify-content: space-between; gap: 6px; align-items: center; }
+.fact .k { font-family: var(--display); font-size: 14px; letter-spacing: .1em; color: var(--dim); display: flex; justify-content: space-between; gap: 6px; align-items: center;
+  flex-wrap: wrap; }   /* a label and its tag wrap rather than push a 170px card past a 390-430px phone */
+.fact .v, .fact .s { overflow-wrap: anywhere; }
 .fact .v { font-family: var(--display); font-size: 28px; letter-spacing: .02em; font-variant-numeric: tabular-nums; }
 .fact .v small { font-size: 19px; color: var(--dim); font-family: var(--mono); letter-spacing: 0; margin-left: 3px; }
 .fact .s { font-size: 20px; color: var(--dim); }
@@ -101,6 +103,21 @@ li { margin: 0 0 5px; }
 #status { font-family: var(--display); font-size: 16px; letter-spacing: .1em; color: var(--dim); }
 .src { font-size: 18px; color: var(--dim); }
 .src code { color: rgba(255,255,255,.8); }
+/* the materials table (03): a wood and a crystals column per level. It scrolls inside its own box on a phone,
+   with the building's name held at the left edge so a row can still be read when scrolled. */
+.tw.mat table { font-size: 14px; }
+.tw.mat th, .tw.mat td { padding: 6px 4px; }
+.tw.mat tr > :first-child { padding-left: 8px; }
+.tw.mat th { font-size: 12px; letter-spacing: .04em; }
+.tw.mat .tag { font-size: 11px; }
+.tw.mat th { text-align: right; }
+.tw.mat th:first-child { text-align: left; }
+.tw.mat thead th[colspan] { text-align: center; }
+.tw.mat .lv { border-left: 1px solid rgba(255,255,255,.12); }
+.tw.mat tbody tr > :first-child, .tw.mat tfoot tr > :first-child, .tw.mat thead tr:first-child > :first-child { position: sticky; left: 0; background: #090B09; z-index: 1; }
+.tw.mat thead tr:first-child > :first-child { background: #0d0f0d; }
+.tw.mat .nil { color: var(--faint); }
+.tw.mat tbody tr > :first-child, .tw.mat tfoot tr > :first-child { white-space: normal; min-width: 96px; }   /* a long name wraps, not the table */
 iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -10px; border: 0; visibility: hidden; }
 </style>
 </head>
@@ -120,7 +137,7 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
     <span><span class="tag prop">PROPOSED</span> discussed, not built</span>
     <span><span class="tag open">NOT DECIDED</span> no answer yet</span>
   </div>
-  <div class="note warn"><b>All timings are demo speed.</b> Buildings go up in seconds and seams ripen every few seconds so the mockup can be played in a minute. The real pace (how long level 1 should take a new player) is not decided, and every rate below scales with it.</div>
+  <div class="note warn" id="pace"><b>Which pace the game is running is read from it below.</b></div>
   <div id="status">READING THE GAME…</div>
   <nav class="toc" id="toc"></nav>
   <div id="out"></div>
@@ -135,29 +152,24 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
   const T = { game: '<span class="tag game">IN THE GAME</span>', ph: '<span class="tag ph">PLACEHOLDER</span>',
               prop: '<span class="tag prop">PROPOSED</span>', open: '<span class="tag open">NOT DECIDED</span>',
               dec: '<span class="tag dec">DECIDED</span>' };
-  // PROPOSED power numbers. They are not in the game's code yet, so they live here, in one place,
-  // until they are agreed and built; every one is shown with the PROPOSED tag. Units: power (P).
-  const POWER = {
-    supply: { generator: [10, 25, 60] },                     // water wheel, water mill, turbine
-    // what each level needs to be BUILT: 'hand' (by hand, twice as fast with power), 'power' (can't be built without it)
+  // THE POWER NUMBERS. Ruling 64 (2026-10-01) decided the sweep's rows 26 and 29 to 32 as starting values, and
+  // the ones the game carries now have ONE home, values.js: what a generator supplies (`supply`), what each level
+  // draws while it runs (`energy`), and the capacitor's cost, store, release and leak. This page used to hold its
+  // own copy of every one of them; it now READS them off the probed game's base.ECON (built in render(), below,
+  // as POWER) and shows whatever values.js marks each column - DECIDED or PROPOSED - rather than a tag of its own.
+  // What is left HERE is what values.js does not carry yet, decided by ruling 64 all the same - so this page is
+  // still their only home, and the wrong kind of home: a key for each in values.js is owed (the game engineer's).
+  //   row 26  what each level needs to be BUILT: 'hand' (by hand, faster with power) or 'power' (not without it)
+  //   row 30  what a level draws while it goes up with power (the saw, the hoist)
+  //   row 26  how many times faster a powered build goes
+  //   row 29  what each harvester draws while it runs
+  // Charge time is NOT a column anywhere: it is set by the source, not by the capacitor's level
+  // (48 h from a water mill, then 24 h, 6 h, 2 h) - two independent ladders.
+  const POWER_RULES = {
     build: ['hand', 'hand', 'power', 'power'],
-    buildDraw: [3, 6, 12, 20],                          // drawn while it is going up with power (the saw, the hoist)
-    speedup: 2,                                         // powered building goes this many times faster
-    run: { keep: [0, 2, 6], hut: [0, 0, 0], silo: [0, 2, 4], tower: [0, 3, 6], wall: [0, 1, 3], cell: [2, 4, 8, 14], collectionDepot: [3, 6, 10] },
-    harvester: 4,                                       // each harvester while it runs
-    // FOUR levels, not three. Four is DECIDED (the leakage ladder names a tier IV), and `leak` below
-    // is decided too - 10% a day, 5%, 3%, none. The fourth level's store, release and cost did not
-    // exist anywhere, so they are PROPOSED by continuing this table's own ratios, cross-checked
-    // against the cell, the game's only other four-level building:
-    //   cell cost    50 · 150 · 400 · 900        steps ×3.00 ×2.67 ×2.25   (it decays)
-    //   capacitor    300 · 800 · 2,000 · ?       steps ×2.67 ×2.50 ×2.25 -> 2,000 × 2.25 = 4,500
-    //   store        500 · 1,500 · 4,000 · ?     steps ×3.00 ×2.67 ×2.50 -> 4,000 × 2.50 = 10,000
-    //   release      15 · 40 · 100 · ?           steps ×2.67 ×2.50 ×2.50 -> 100 × 2.50 = 250
-    // Charge time is NOT a column here: it is set by the source, not by the capacitor's level
-    // (48 h from a water mill, then 24 h, 6 h, 2 h) - two independent ladders.
-    capacitor: { tiers: ['CAPACITOR I', 'CAPACITOR II', 'CAPACITOR III', 'CAPACITOR IV'],
-                 store: [500, 1500, 4000, 10000], release: [15, 40, 100, 250], cost: [300, 800, 2000, 4500],
-                 leak: [10, 5, 3, 0] },                 // % a day, by the capacitor's own level - DECIDED
+    buildDraw: [3, 6, 12, 20],
+    speedup: 2,
+    harvester: 4,
   };
   // THE GAME YEAR. DECIDED: one game year is a QUARTER of the game's length — so a game is four game
   // years long, and at the seven-day default a year is 42 h. It is a ratio and not a number of days
@@ -190,6 +202,13 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
   const table = (head, rows, foot, words) => '<div class="tw' + (words ? ' words' : '') + '"><table><thead><tr>' + head.map(h => '<th>' + h + '</th>').join('') + '</tr></thead><tbody>' +
     rows.map(r => '<tr>' + r.map(c => '<td>' + c + '</td>').join('') + '</tr>').join('') + '</tbody>' +
     (foot ? '<tfoot><tr>' + foot.map(c => '<td>' + c + '</td>').join('') + '</tr></tfoot>' : '') + '</table></div>';
+  // WHAT values.js SAYS A COLUMN IS. Each building row carries `decided` and `proposed` marks, column by column;
+  // the tag shown is the game's own mark, read, never one this page decides. With neither, the number is simply
+  // what the game runs, IN THE GAME. DECIDED only when every kind given is marked decided for that column.
+  const markOf = (E, kinds, col) => {
+    const ms = kinds.map((k) => { const r = E.kinds[k] || {}; return r.decided && r.decided[col] ? 'dec' : r.proposed && r.proposed[col] ? 'prop' : 'game'; });
+    return ms.every((x) => x === 'dec') ? T.dec : ms.some((x) => x === 'prop') ? T.prop : T.game;
+  };
   const sec = (id, n, title, q, body) => '<section id="' + id + '"><h2><span class="n">' + n + '</span>' + title + '</h2><p class="q">' + q + '</p>' + body + '</section>';
 
   // wait for the three pages to publish their numbers
@@ -221,10 +240,19 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
     const twoSilos = cap([D(1), row(2, 'silo', 1), row(3, 'silo', 1)]);
     const top = dk.tiers.length, twoDepots = cap([D(1), row(4, 'collectionDepot', top)]);
     const none = cap([]);
-    return { depot, silo, adds, twoSilos, twoDepots, none, top,
+    // RULING 62 (sweep row 45): with no depot and no silo, the KEEP sets the store - values.js keep.capacity at
+    // every keep level - as a FLOOR, not an addition; with the keep gone too, 0. Run here like the rest, on a
+    // keep alone at each level and on a keep beside depot I. What it should hold is read from values.js, not typed.
+    const kk = V.kinds.keep, K = (l) => row(5, 'keep', l);
+    const keepAlone = kk ? kk.tiers.map((_, i) => cap([K(i + 1)])) : [];
+    const keepWant = kk && Array.isArray(kk.capacity) ? kk.capacity : null;
+    const keepDepot = kk ? cap([K(1), D(1)]) : null;
+    return { depot, silo, adds, twoSilos, twoDepots, none, top, keepAlone, keepWant, keepDepot,
       siloAdds: twoSilos === depot[0] + 2 * adds[0] && adds.every((a) => a > 0),
       bestDepot: twoDepots === Math.max(depot[0], depot[top - 1]),
       bareUncapped: none === Infinity,
+      keepFloor: !!keepWant && keepAlone.every((c, i) => c === keepWant[i]),
+      keepNotAdded: keepDepot === depot[0],
       depotProp: (dk.proposed && dk.proposed.capacity) || null, siloProp: (sk.proposed && sk.proposed.capacity) || null };
   }
   // The storage note: every sentence in it is the answer storeRule got back, and where the rule answered
@@ -233,7 +261,7 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
     const T_ = { game: '<span class="tag game">IN THE GAME</span>', prop: '<span class="tag prop">PROPOSED</span>' };
     if (!ST) return '<div class="note warn" id="store"><b>STORAGE NOT READ.</b> The probed game did not expose <code>Record.storeCap</code> (record.js), so this page says nothing about how much a base holds rather than guess.</div>';
     const L = (ok, yes, no) => '<li>' + (ok ? yes : '<b>DISAGREES - ' + no + '</b>') + '</li>';
-    return '<div class="note" id="store"><b>How much a base holds: the best standing depot, plus every standing silo.</b> ' +
+    return '<div class="note" id="store"><b>How much a base holds: the best standing depot, plus every standing silo - and with neither standing, what its keep holds.</b> ' +
       'Read by running the game\'s own rule, <code>Record.storeCap</code> (record.js), on bases built here - so these lines are what the rule returns, not a description of it:' +
       '<ul>' +
         '<li>a depot I alone holds <b>' + sc(ST.depot[0]) + '</b>; at level ' + ST.top + ', <b>' + sc(ST.depot[ST.top - 1]) + '</b></li>' +
@@ -242,7 +270,14 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
         L(ST.bestDepot, 'a depot I and a depot ' + ST.top + ' together hold <b>' + sc(ST.twoDepots) + '</b> - <b>the best depot counts</b>, not both',
           'a depot I and a depot ' + ST.top + ' together hold ' + sc(ST.twoDepots) + ', not the better of the two') +
         '<li>a silo I with no depot holds <b>' + sc(ST.silo[0]) + '</b></li>' +
-        '<li>a base with neither standing: <b>' + sc(ST.none) + '</b>' + (ST.bareUncapped ? ' - record.js\'s one stand-in, so a bare base is not frozen at nothing; no rule decides it' : '') + '</li>' +
+        (ST.keepWant
+          ? L(ST.keepFloor, 'a <b>keep alone</b>, with no depot and no silo, holds <b>' + ST.keepAlone.map(sc).join(' / ') + '</b> by keep level - <b>the keep sets the store</b> (ruling 62, values.js <code>keep.capacity</code>)',
+              'a keep alone holds ' + ST.keepAlone.map(sc).join(' / ') + ' by keep level, where values.js keep.capacity says ' + ST.keepWant.map(sc).join(' / ') + ' (ruling 62)')
+          : '<li><b>DISAGREES - values.js carries no <code>keep.capacity</code></b>: ruling 62 says the keep holds 240.00 when no depot and no silo stand, and the game has no number for it. A keep alone holds <b>' + ST.keepAlone.map(sc).join(' / ') + '</b>.</li>') +
+        L(ST.keepNotAdded, 'a keep beside depot I holds <b>' + sc(ST.keepDepot) + '</b> - the depot\'s own; <b>the keep is a floor, not an addition</b>',
+          'a keep beside depot I holds ' + sc(ST.keepDepot) + ', not the depot\'s ' + sc(ST.depot[0]) + ': the keep is being added, where ruling 62 makes it a floor') +
+        L(ST.none === 0, 'nothing standing at all - no keep, no depot, no silo: <b>' + sc(ST.none) + '</b>, so gathering is refused and what is held is kept (ruling 62)',
+          'nothing standing at all holds ' + sc(ST.none) + ', where ruling 62 makes it 0') +
       '</ul>' +
       (E.siloCaps === true ? '<code>base.bank()</code> clips every crystal entering a purse at this figure, so the game enforces it. ' : '<b>The game reports <code>base.ECON.siloCaps</code> is not true: nothing clips a purse at this figure.</b> ') + T_.game + ' ' +
       (ST.depotProp ? '<br><b>The depot\'s capacity, ' + ST.depot.map(sc).join(' / ') + ', is PROPOSED, not decided</b> (values.js: ' + ST.depotProp.replace(/</g, '&lt;') + '). ' + T_.prop : '') +
@@ -266,7 +301,7 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
     return Object.assign({}, E, { crystalUnit: U,
       startPurse: dv(E.startPurse), startWood: dv(E.startWood), harvCost: dv(E.harvCost), handYield: dv(E.handYield), treeWood: dv(E.treeWood),
       siloCap: (E.siloCap || []).map(dv), woodCost: dm(E.woodCost),
-      kinds: Object.fromEntries(Object.entries(E.kinds).map(([k, v]) => [k, Object.assign({}, v, { cost: (v.cost || []).map(dv) })])) });
+      kinds: Object.fromEntries(Object.entries(E.kinds).map(([k, v]) => [k, Object.assign({}, v, { cost: (v.cost || []).map(dv), wood: (v.wood || []).map(dv) })])) });
   };
   function render({ E: E0, C, S, ST }) {
     const E = scaleE(E0), U = E.crystalUnit;
@@ -280,8 +315,48 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
     const home = E.seams.filter(s => !s.wild), wild = E.seams.filter(s => s.wild);
     const ripeMs = E.growMs * 0.75;                                       // ripe for the last quarter; a harvest resets it
     const seamHandHr = 3600000 / ripeMs * E.handYield;
-    const l1Wood = kinds.reduce((a, k) => a + (E.woodCost[k] || 0), 0);
-    const l1Crys = kinds.reduce((a, k) => a + E.kinds[k].cost[0], 0);
+    // WHAT EACH LEVEL IS BUILT FROM (M8 item 16, ruling 76): values.js's `wood` and `cost` columns on every
+    // building row, level by level. Nothing here says which levels take wood - that is read off the columns,
+    // so the table and its heading stay true whatever values.js holds.
+    const maxTier = Math.max(...kinds.map((k) => E.kinds[k].tiers.length));
+    const LV = Array.from({ length: maxTier }, (_, i) => i);
+    const woodAt = (k, i) => i < E.kinds[k].tiers.length ? (E.kinds[k].wood[i] || 0) : null;   // null: the building has no such level
+    const crysAt = (k, i) => i < E.kinds[k].tiers.length ? (E.kinds[k].cost[i] || 0) : null;
+    const sumAt = (f, i) => kinds.reduce((a, k) => a + (f(k, i) || 0), 0);
+    const sumAll = (f, k) => LV.reduce((a, i) => a + (f(k, i) || 0), 0);
+    const l1Wood = sumAt(woodAt, 0), l1Crys = sumAt(crysAt, 0);
+    // Wood is held in hundredths like crystals. A whole figure prints whole; a fraction prints its two places
+    // rather than being rounded (the approved wall level 2 is 37.50). Crystals always print two places (decided).
+    const woodFig = (v) => Number.isInteger(v) ? n0(v) : c2(v);
+    const zero = (s) => '<span class="nil">' + s + '</span>';
+    const cellW = (v) => v === null ? zero('—') : v === 0 ? zero(woodFig(0)) : woodFig(v);
+    const cellC = (v) => v === null ? zero('—') : v === 0 ? zero(c2(0)) : c2(v);
+    const chop = (w) => { const ms = w * E.chopMs; return !w ? '—' : ms < 120000 ? secs(ms) : n1(ms / 60000) + ' min'; };   // minutes past two, so the column stays narrow
+    // A row's status is values.js's own mark on its `cost` and `wood` columns: PROPOSED if either is.
+    const matMark = (ks) => { const a = markOf(E, ks, 'cost'), b = markOf(E, ks, 'wood'); return a === T.prop || b === T.prop ? T.prop : a === T.dec && b === T.dec ? T.dec : a === T.dec ? b : a; };
+    function materialsTable() {
+      const lvHead = LV.map((i) => '<th colspan="2" class="lv">Level ' + (i + 1) + '</th>').join('');
+      const subHead = LV.map(() => '<th class="lv">Wood</th><th>Crystals</th>').join('');
+      const body = kinds.map((k) => {
+        const tw = sumAll(woodAt, k), tc = sumAll(crysAt, k);
+        return '<tr><td>' + (NAMES[k] || k) + '</td>' + LV.map((i) => '<td class="lv">' + cellW(woodAt(k, i)) + '</td><td>' + cellC(crysAt(k, i)) + '</td>').join('') +
+          '<td class="lv">' + cellW(tw) + '</td><td>' + cellC(tc) + '</td><td>' + chop(tw) + '</td><td>' + matMark([k]) + '</td></tr>';
+      }).join('');
+      const TW = kinds.reduce((a, k) => a + sumAll(woodAt, k), 0), TC = kinds.reduce((a, k) => a + sumAll(crysAt, k), 0);
+      const foot = '<tr><td>One of each</td>' + LV.map((i) => '<td class="lv">' + cellW(sumAt(woodAt, i)) + '</td><td>' + cellC(sumAt(crysAt, i)) + '</td>').join('') +
+        '<td class="lv">' + cellW(TW) + '</td><td>' + cellC(TC) + '</td><td>' + chop(TW) + '</td><td>' + matMark(kinds) + '</td></tr>';
+      return '<div class="tw mat" id="materials"><table><thead>' +
+        '<tr><th rowspan="2">Building</th>' + lvHead + '<th colspan="3" class="lv">Every level</th><th rowspan="2">Status</th></tr>' +
+        '<tr>' + subHead + '<th class="lv">Wood</th><th>Crystals</th><th>Chop time</th></tr>' +
+        '</thead><tbody>' + body + '</tbody><tfoot>' + foot + '</tfoot></table></div>';
+    }
+    // The sentence under the table, worked out from the same columns: which levels take wood, which take crystals.
+    function materialsSaid() {
+      const lvN = (i) => String(i + 1);
+      const wl = LV.filter((i) => sumAt(woodAt, i) > 0).map(lvN), cl = LV.filter((i) => sumAt(crysAt, i) > 0).map(lvN);
+      const list = (a) => !a.length ? 'no level' : a.length === 1 ? 'level ' + a[0] : 'levels ' + a.slice(0, -1).join(', ') + ' and ' + a[a.length - 1];
+      return 'As values.js stands, wood is paid at <b>' + list(wl) + '</b> and crystals at <b>' + list(cl) + '</b>.';
+    }
     const allCrys = kinds.reduce((a, k) => a + E.kinds[k].cost.reduce((x, y) => x + y, 0), 0);
     const odds = (a, d) => E.hp[a] / (E.hp[a] + E.hp[d]);
     const out = [];
@@ -332,11 +407,11 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
       '<div class="formula">one tree:  ' + E.treeWood + ' wood per (' + E.treeWood + ' × ' + secs(E.chopMs) + ' chopping + ' + secs(E.regrowMs) + ' regrowing) = ' + E.treeWood + ' per ' + secs(treeCycleMs) + '\n' +
         'the whole forest:  ' + trees + ' trees × that = ' + n1(forestMaxMin) + ' wood a minute, the most it can give however many Friends chop\n' +
         'one Friend alone:  60 s ÷ ' + secs(E.chopMs) + ' = ' + n1(perFriendMin) + ' wood a minute while there are trees standing</div>' +
-      '<h3>WOOD PER BUILDING (LEVEL 1 ONLY; UPGRADES ARE PAID IN CRYSTALS)</h3>' +
-      table(['Building', 'Wood', 'Crystals', 'Chops (one Friend)'],
-        kinds.map(k => [NAMES[k] || k, n0(E.woodCost[k] || 0), n0(E.kinds[k].cost[0]), (E.woodCost[k] ? secs((E.woodCost[k]) * E.chopMs) : '—')]),
-        ['One of each', n0(l1Wood), n0(l1Crys), secs(l1Wood * E.chopMs)]) +
-      '<p class="src">' + T.game + ' Read from <code>WOOD_COST</code>, <code>KIND</code>, <code>CHOP_MS</code>. The default base also has four wall sections: +' + n0(3 * (E.woodCost.wall || 0)) + ' wood for the other three.</p>'));
+      '<h3>WHAT EACH LEVEL IS BUILT FROM: WOOD AND CRYSTALS</h3>' +
+      materialsTable() +
+      '<p class="src">Read from values.js: each building row\'s <code>wood</code> and <code>cost</code> (crystals), one figure per level, with the mark values.js gives them; chop time is one Friend chopping all of it, from <code>chopMs</code>. ' +
+        materialsSaid() + ' A <b>—</b> is a level the building does not have. ' +
+        'The default base has four wall sections and <i>one of each</i> counts one: the other three add <b>' + woodFig(3 * (woodAt('wall', 0) || 0)) + '</b> wood and <b>' + c2(3 * (crysAt('wall', 0) || 0)) + '</b> crystals at level 1.</p>'));
 
     // 4 ---------- buildings and upgrades
     // Read live off the game, so the page states the disagreement rather than either number alone.
@@ -349,7 +424,7 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
         ['Everything, every level', '', '', '', '', n0(allCrys)]) +
       '<p class="src">Crystals per level ' + T.game + ' (the amounts themselves are ' + T.ph + ': chosen to make the mockup playable).</p>' +
       '<h3>WHAT MAKES AN UPGRADE AVAILABLE</h3>' +
-      '<ul><li><b>Crystals:</b> each level has a crystal price. ' + T.game + '</li>' +
+      '<ul><li><b>Wood and crystals:</b> each level has a price in each, read from values.js (the table in <a href="#wood">03</a>). ' + materialsSaid() + ' ' + T.game + '</li>' +
         '<li><b>The keep caps everything:</b> nothing can be raised past the keep\'s own level, so the keep is the first thing to upgrade. ' + T.game + '</li>' +
         '<li><b>Cells are gated by time, buildings and resources</b> — each level asks for an amount of time, some buildings already standing, and some crystals and wood. Which three is decided; the amounts are not. ' + T.dec + '</li>' +
         '<li><b>The operator gate is gone:</b> a cell no longer needs a qualified Friend posted at it. ' + T.dec + ' — and <b>the game still enforces it</b> (' + (cellGateOn.length ? 'cell ' + cellGateOn.join(', ') + ' still ask for one' : 'no longer') + '), which is the code being out of date, not a second answer.</li>' +
@@ -378,8 +453,10 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
       const p = odds(a, d), hits = Math.ceil(E.hp[d] / E.weapons[a].dmg);
       return n1(hits / p);
     })]);
-    const BHP = { keep: [1500, 3000, 6000], wall: [400, 800, 1600], collectionDepot: [350, 700, 1400], tower: [300, 600, 1200],
-                  silo: [250, 500, 1000], cell: [250, 500, 1000], hut: [200, 400, 800], generator: [200, 400, 800] };
+    // A BUILDING'S STRENGTH is values.js's `strength` column, read through base.ECON - this page kept a second copy
+    // (BHP) until ruling 64 decided the ladder, and the copy is gone. 0 is what the game treats as not a target.
+    const strengthOf = (k) => (E.kinds[k].strength || []);
+    const maxLv = Math.max(...kinds.map((k) => E.kinds[k].tiers.length));
     out.push(sec('hp', '05', 'HIT POINTS AND COMBAT', 'How many hit points can a generation take? A building? How much damage does each generation deal? The formula.',
       '<div class="note warn"><b>Nothing attacks the base yet.</b> These numbers drive the armoury, where every weapon can be fired at a dummy or a wall. Attacks are not built.</div>' +
       '<h3>A FRIEND\'S HIT POINTS AND WEAPON</h3>' +
@@ -397,10 +474,13 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
       table(['Attacker ↓ · defender →', ...gens.map(g => 'Gen ' + g)], matrix) +
       '<p class="src">An estimate: each shot is a roll, so any single fight can go longer or shorter. Range decides whether the defender can shoot back at all.</p>' +
       '<h3>A BUILDING\'S HIT POINTS</h3>' +
-      table(['Building', 'Level 1 (logs)', 'Level 2', 'Level 3', 'Status'],
-        kinds.map(k => [NAMES[k], ...(BHP[k] || ['—', '—', '—']).map(n0), k === 'wall' ? T.game.replace('IN THE GAME', 'LEVEL 1 IN THE ARMOURY') : T.prop]).concat([['Harvester', '150', '—', '—', T.prop]])) +
-      '<p class="src">Only the level-1 wall (' + n0(E.wallHp) + ' HP) is in the code, as the armoury\'s target. The rest were proposed in our discussion: each level doubles.</p>' +
-      '<div class="note"><b>One defence system is in the code.</b> The first mockup\'s defence numbers - the watchtower plaque\'s table by generation and a value for each body on a wall - are gone from the game (M8 items 9 and 12: defence is strength). A building\'s strength is its row\'s <code>strength</code> column in values.js; only the wall\'s level 1 (' + n0(E.wallHp) + ' HP) has a decided number, and every other row says so. ' + T.dec + '</div>'));
+      table(['Building', ...Array.from({ length: maxLv }, (_, i) => 'Level ' + (i + 1) + (i === 0 ? ' (logs)' : '')), 'Status'],
+        kinds.map(k => [NAMES[k], ...Array.from({ length: maxLv }, (_, i) => strengthOf(k)[i] === undefined ? '—' : n0(strengthOf(k)[i])), markOf(E, [k], 'strength')])
+          .concat([['Harvester', E.harvStrength === undefined ? '—' : n0(E.harvStrength), ...Array.from({ length: maxLv - 1 }, () => '—'), E.harvStrength === undefined ? T.open : T.dec]])) +
+      '<p class="src">Read from values.js, each row\'s <code>strength</code> column' + (E.harvStrength === undefined ? '' : ' and <code>harvStrength</code>') + ', with the mark values.js gives it. ' +
+        (E.strengthMax === undefined ? '<b>values.js carries no ceiling</b> (sweep row 7 decides 6,000). ' : 'Nothing may exceed <code>strengthMax</code>, <b>' + n0(E.strengthMax) + '</b> - values.js refuses to load a row over it. ') +
+        'A <b>0</b> is a level the game treats as not a target. The fight itself reads the wall\'s level 1 (' + n0(E.wallHp) + ' HP) and gives every wall that, whatever its level.</p>' +
+      '<div class="note"><b>One defence system is in the code.</b> The first mockup\'s defence numbers - the watchtower plaque\'s table by generation and a value for each body on a wall - are gone from the game (M8 items 9 and 12: defence is strength). A building\'s strength is its row\'s <code>strength</code> column in values.js, and nowhere else. ' + T.dec + '</div>'));
 
     // 6 ---------- the map
     const cell = 22, pad = 10 + 2 * cell;                // two tiles of margin each side: the wild seams sit past the edge
@@ -437,6 +517,14 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
       '<p>Minimum and maximum players per game: ' + T.open + ' See 08.</p>'));
 
     // 7 ---------- power
+    // THE POWER TABLE, read: values.js through base.ECON, plus the four rules values.js carries no key for (above).
+    // The shape is the one this page always published as `economy.POWER`, so a reader of it reads the game now.
+    const KC = E.kinds.capacitor || { tiers: [], capacity: [], release: [], cost: [], leak: [] };
+    const POWER = Object.assign({}, POWER_RULES, {
+      supply: { generator: (E.kinds.generator.supply || []).slice() },
+      run: Object.fromEntries(Object.entries(E.kinds).filter(([k]) => k !== 'generator' && k !== 'capacitor').map(([k, v]) => [k, (v.energy || []).slice()])),
+      capacitor: { tiers: KC.tiers, store: KC.capacity, release: KC.release, cost: KC.cost, leak: KC.leak },
+    });
     const m = E.kinds.generator, P = POWER, u = (v) => n0(v) + ' P';
     const drawOf = (b) => b.type === 'generator' ? 0 : (P.run[b.type] || [])[b.tier - 1] || 0;
     const startDraw = E.startBuildings.reduce((a, b) => a + drawOf(b), 0);
@@ -482,19 +570,22 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
       '<ul><li><b>Builds faster:</b> a water-powered saw against an axe. Ordinary buildings can go up by hand, and go up faster with power.</li>' +
         '<li><b>Builds what hands can\'t:</b> more complex structures need power to build at all.</li>' +
         '<li><b>Runs machines:</b> harvesters, and the depot that makes them, need power to run.</li></ul>' +
-      '<h3>SUPPLY: THE GENERATOR ' + T.prop + '</h3>' +
+      '<h3>SUPPLY: THE GENERATOR ' + markOf(E, ['generator'], 'supply') + '</h3>' +
       table(['Generator level', 'Name', 'Crystals', 'Needs the keep at', 'Makes'],
-        m.tiers.map((t, i) => ['Level ' + (i + 1), t.toLowerCase(), n0(m.cost[i]), E.kinds.keep.tiers[i].toLowerCase(), u(P.supply.generator[i])])) +
-      '<p class="src">Names, crystal costs and the keep cap ' + T.game + ' · power made ' + T.prop + '. P is a unit of power; nothing in the game uses it yet.</p>' +
-      '<h3>DEMAND: EVERY BUILDING, EVERY LEVEL ' + T.prop + '</h3>' +
+        m.tiers.map((t, i) => ['Level ' + (i + 1), t.toLowerCase(), n0(m.cost[i]), E.kinds.keep.tiers[i].toLowerCase(), u(P.supply.generator[i] || 0)])) +
+      '<p class="src">Names, crystal costs and the keep cap ' + T.game + ' · power made: read from values.js <code>generator.supply</code> ' + markOf(E, ['generator'], 'supply') + '. P is a unit of power.</p>' +
+      '<h3>DEMAND: EVERY BUILDING, EVERY LEVEL</h3>' +
       table(['Building', 'Level', 'To build it', 'Drawn while building', 'Drawn while running'], powerRows) +
+      '<p class="src"><b>Drawn while running</b> is read from values.js, each row\'s <code>energy</code> ' + markOf(E, Object.keys(P.run), 'energy') + '. ' +
+        '<b>To build it, drawn while building, the ×' + P.speedup + ' and a harvester\'s ' + u(P.harvester) + '</b> are DECIDED by ruling 64 (sweep rows 26, 29 and 30) ' + T.dec +
+        ' and values.js carries <b>no key for them yet</b>, so this page is still where they live - a home in values.js is owed.</p>' +
       '<div class="formula">build time        = base time ÷ ' + P.speedup + ' with power, base time by hand   (levels 1 and 2)\n' +
         '                    levels 3 and up, and the capacitor, can only be built with power\n' +
         'running           your base draws the sum of its buildings\' "while running" + ' + P.harvester + ' P per harvester working\n' +
         'short of power    (proposed) everything powered runs at supply ÷ demand of its speed; harvesters stop first</div>' +
       '<div class="note"><b>The starting base</b> (everything at level 1, ' + startHarv + ' harvester' + (startHarv === 1 ? '' : 's') + ') draws <b>' + u(startNeed) + '</b> against the water wheel\'s <b>' + u(startSupply) + '</b>: ' +
         (startNeed <= startSupply ? 'a level-1 base runs on its water wheel, just.' : 'it needs more than the water wheel makes.') +
-        ' A second harvester (' + u(startNeed + P.harvester) + ') needs the water mill. The hut never draws power, which is why it has no power bar. ' + T.prop + '</div>' +
+        ' A second harvester (' + u(startNeed + P.harvester) + ') needs the water mill. The hut never draws power, which is why it has no power bar. ' + markOf(E, ['generator'], 'supply') + '</div>' +
       '<h3>AFTER THE WATER MILL: THE YEAR, THEN STORAGE ' + T.dec + '</h3>' +
       '<div class="steps">' +
         '<div><b>1 · WATER WHEEL</b><span>the generator at level 1: power for a base of logs</span></div>' +
@@ -502,16 +593,17 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
         '<div><b>3 · ONE YEAR</b><span>when the countdown reaches one year, new upgrades open, starting with the capacitor</span></div>' +
         '<div><b>4 · CAPACITOR</b><span>stores power, releases it when it is needed: when the mill goes offline, as in an attack</span></div>' +
       '</div>' +
-      table(['Capacitor', 'Stores', 'Releases at most', 'Leaks a day ' + T.dec, 'Crystals', 'Wood'],
+      table(['Capacitor', 'Stores ' + markOf(E, ['capacitor'], 'capacity'), 'Releases at most ' + markOf(E, ['capacitor'], 'release'), 'Leaks a day ' + T.dec, 'Crystals ' + markOf(E, ['capacitor'], 'cost'), 'Wood'],
         P.capacitor.tiers.map((t, i) => [t.toLowerCase(), n0(P.capacitor.store[i]) + ' P·h', u(P.capacitor.release[i]),
           P.capacitor.leak[i] ? P.capacitor.leak[i] + '%' : 'none at all',
-          n0(P.capacitor.cost[i]) + (i === 3 ? ' ' + T.prop : ''), '0 (not a log building)'])) +
-      '<p class="src"><b>Four levels ' + T.dec + '</b>, and the leak ladder is decided with it. <b>Capacitor IV\'s store, release and cost did not exist anywhere</b> and are ' + T.prop + ' here, continuing this table\'s own ratios — store ×2.5 (4,000 → 10,000), release ×2.5 (100 → 250), cost ×2.25 (2,000 → 4,500) — and cross-checked against the cell, the only other four-level building, whose costs step ×3.00 ×2.67 ×2.25. ' +
+          n0(P.capacitor.cost[i]), '0 (not a log building)'])) +
+      '<p class="src"><b>Four levels ' + T.dec + '</b>, and the leak ladder is decided with it. Every figure in the table is read from values.js\'s <code>capacitor</code> row, tagged with the mark values.js gives it. ' +
+        'Capacitor IV\'s store, release and cost were first proposed on this page by continuing the table\'s own ratios — store ×2.5 (4,000 → 10,000), release ×2.5 (100 → 250), cost ×2.25 (2,000 → 4,500) — cross-checked against the cell, the only other four-level building, whose costs step ×3.00 ×2.67 ×2.25; ruling 64 (sweep row 32) approved them as starting values. ' +
         'Charge time is not a column: it is set by the <b>source</b> — 48 h from a water mill, then 24 h, 6 h, 2 h — and leakage by the <b>capacitor</b>. Two independent ladders. ' + T.dec + '</p>' +
       '<div class="formula">hours of cover     = stored ÷ min(what the base draws − what is still being made, the most it can release)\n' +
         'example           the starting base with a second harvester draws ' + u(exNeed) + '; an attack knocks the mill out.\n' +
         '                  A full capacitor I (' + n0(exStore) + ' P·h, up to ' + u(exRel) + ') carries it for ' + n0(exStore) + ' ÷ ' + n0(Math.min(exNeed, exRel)) + ' = ' + n1(exHours) + ' hours.</div>' +
-      '<p class="src">The year and the capacitor ' + T.dec + ' · the capacitor\'s numbers ' + T.prop + '.</p>' +
+      '<p class="src">The year and the capacitor ' + T.dec + ' · the capacitor\'s numbers ' + markOf(E, ['capacitor'], 'cost') + '.</p>' +
       '<h3>HOW LONG IS A YEAR? ' + T.dec + '</h3>' +
       '<p><b>One game year is a ' + yWord + ' of the game\'s length</b> — so a game is <b>' + yDen + ' game years</b> long, whatever length the deployer sets, and at the ' +
         YEAR.defaultDays + '-day default a year is <b>' + n0(yHours) + ' h</b>. It is a <b>ratio, not a number of days</b>: the length is a deployer parameter, so any duration would be right for exactly one setting of it and wrong for every other.</p>' +
@@ -594,27 +686,34 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
     // 11 ---------- open decisions
     out.push(sec('open', '11', 'STILL TO DECIDE', 'The answers this page could not give.',
       '<ul>' + [
-        'The real pace: how long level 1 should take a new player. Every rate here is demo speed.',
+        // ruling 64 decided the pace, the power numbers and building strength; what is left of each is said where it is
+        (E.demoPace && !E.demoPace.on ? '' : 'The game here runs at the demo pace (values.js has no decided pace loaded): ruling 64 decided minutes - a tree and a seam 15 min, 4 s of raising per unit of materials.'),
         'A maximum number of players per game (the minimum is decided: 2).',
-        'How long a game year is in real time (it sets when the capacitor opens).',
-        'The power numbers: what each generator makes and what each building draws (proposed in 07).',
         'The shared map: home, frontier, core, and how it scales.',
         'Whether upgrades can also be earned through combat.',
         'Whether the turbine counts as electricity, and what else the year after the water mill unlocks.',
-        'Building hit points (proposed), and retiring the old tower and wall defence numbers.',
+        'The capturing Friend\'s strength hit when the capture window expires (sweep rows 8 and 44): no number has been proposed.',
         'Crystals or $RF for challenge stakes; what is on chain.',
         'Where the seam at (−0.5, 2.5) moves to, and when seams come back.',
         (!ST ? 'What a depot holds and what a silo adds: this page could not read them.'
           : (ST.depotProp ? 'The depot\'s capacity, ' + ST.depot.map(sc).join(' / ') + ' by level, is proposed and not decided.' : '') +
             (ST.siloProp ? ' What a silo adds, +' + ST.adds.map(sc).join(' / +') + ', is proposed and not decided.' : '')) +
-          (ST && ST.bareUncapped ? ' And what a base with neither a depot nor a silo holds: the game leaves it uncapped, and no rule decides it.' : ''),
-      ].map(x => '<li>' + x + '</li>').join('') + '</ul>'));
+          (ST && !(ST.keepFloor && ST.keepNotAdded && ST.none === 0) ? ' And the game does not yet hold a base with neither a depot nor a silo to its keep, as ruling 62 decided (see 02).' : ''),
+      ].filter(Boolean).map(x => '<li>' + x + '</li>').join('') + '</ul>'));
 
     $('out').innerHTML = out.join('');
     $('toc').innerHTML = [['start', 'START'], ['crystals', 'CRYSTALS'], ['wood', 'WOOD'], ['buildings', 'BUILDINGS'], ['hp', 'HIT POINTS'],
       ['map', 'MAP'], ['power', 'POWER'], ['era', 'PLAYERS'], ['challenges', 'CHALLENGES'], ['chain', 'ON CHAIN'], ['open', 'TO DECIDE']]
       .map(([id, t]) => '<a href="#' + id + '">' + t + '</a>').join('');
     $('status').textContent = 'READ FROM THE GAME · ' + new Date().toLocaleString();
+    // THE PACE, read: values.js says which one loaded (demoPace.on). Ruling 64 decided minutes; the demo pace is
+    // the held seconds, and loads only when asked for. A game with no demoPace at all predates the decision.
+    const DP = E.demoPace;
+    $('pace').innerHTML = !DP
+      ? '<b>All timings are the demo pace</b>: this game predates ruling 64\'s decided pace (values.js carries no <code>demoPace</code>), so buildings go up in seconds and seams ripen in seconds. Ruling 64 decided minutes, and every rate below scales with it.'
+      : DP.on
+        ? '<b>This game is running the DEMO pace</b> (<code>pace=demo</code>): a seam ' + secs(DP.growMs) + ', a tree ' + secs(DP.regrowMs) + ', ' + secs(DP.buildMs) + ' to raise any level. The decided pace (ruling 64) is minutes, and every rate below scales with it.'
+        : '<b>This game is running the DECIDED pace</b> (ruling 64): a seam grows in ' + n1(E.growMs / 60000) + ' min, a tree in ' + n1(E.regrowMs / 60000) + ' min, and a level takes ' + secs(E.buildMsPerUnit || 0) + ' per unit of its materials by one Friend. The demo pace loads only with <code>pace=demo</code>.';
     // the probes are done: stop them drawing in the background
     ['pEstate', 'pChallenge', 'pStart'].forEach(id => $(id).remove());
     window.economy = { E, ST, POWER, YEAR, gameYear, yearWrong, CELL_REACH, reachWrong, cellGateOn, stakes: C.STAKES, era: { join: S.JOIN_WINDOW, start: S.START_AFTER_LOCK, min: S.MIN_PLAYERS } };

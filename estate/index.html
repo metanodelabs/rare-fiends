@@ -27,15 +27,20 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block
 .hud {
   flex-wrap: wrap;
   position: absolute; left: 0; right: 0; top: 0; display: flex; gap: 8px; align-items: center;
-  padding: 8px 88px 8px 10px;   /* the right gap is the STUDIO button's seat */
+  /* The right gap is the page buttons' seat. It clears the widest button the HUD's two lines sit beside
+     (ARMOURY, under STUDIO), not only STUDIO: at 88px CRYSTALS ran under STUDIO on every laptop. */
+  padding: 8px 150px 8px 10px;
   font-family: var(--display); font-size: 16px; letter-spacing: .08em;
   background: linear-gradient(180deg, rgba(0,0,0,.85), transparent);
   pointer-events: none;
 }
+#walletBtn { pointer-events: auto; font: inherit; letter-spacing: inherit; font-size: 14px; color: var(--signal); background: rgba(0,0,0,.6);
+  border: 1px solid var(--signal); padding: 1px 6px; line-height: 1.1; cursor: pointer; }   /* was an inline style; moved so a phone can size it */
 .hud .sp { flex: 1; }
 .hud b { color: var(--signal); font-weight: 400; }
 .tray {
-  position: absolute; left: 0; right: 246px; bottom: 0; display: flex; gap: 6px; padding: 8px 10px;
+  /* right: the BUILD / STANDINGS / MARKET row's width (332px measured) and its 10px margin, plus a gap */
+  position: absolute; left: 0; right: 350px; bottom: 0; display: flex; gap: 6px; padding: 8px 10px;
   background: linear-gradient(0deg, rgba(0,0,0,.9), transparent); overflow-x: auto; scrollbar-width: none;
 }
 .tray::-webkit-scrollbar { display: none; }
@@ -48,10 +53,14 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block
 .chip i { font-style: normal; font-family: var(--mono); font-size: 19px; color: #fff; }
 .chip.on i { color: var(--signal); }
 .note {
-  position: absolute; left: 10px; bottom: 54px; font-family: var(--display); font-size: 15px;
+  /* bottom: above the tray, which is 71px tall since the chips carry a card picture (M11 item 9) - at 54px
+     the note's lines ran over the first chips. max-width: under 960px the frame is short enough that a
+     wrapped note climbs level with the page buttons on the right, so it stops short of their column. */
+  position: absolute; left: 10px; bottom: 82px; font-family: var(--display); font-size: 15px;
   letter-spacing: .06em; color: rgba(255,255,255,.55); pointer-events: none;
-  max-width: calc(100vw - 20px);
+  max-width: calc(100% - 246px);
 }
+@media (min-width: 960px) { .note { max-width: calc(100% - 20px); } }
 .sel { color: var(--signal); }
 /* standing orders for the selected Friend, if the estate is attacked */
 .note .orders { pointer-events: auto; display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px 0; margin-left: 8px; color: rgba(255,255,255,.55); }
@@ -69,8 +78,12 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block
 .note > .face { vertical-align: middle; margin-right: 6px; }
 @media (max-width: 720px) { .note > .face { display: none; } }   /* a phone's note has no line to spare; the chip shows the picture */
 @media (max-width: 1200px) { .note .more { display: none; } }   /* the orders take the room the long hints had */
+/* BUILD, STANDINGS and MARKET are one row that lays itself out. Each used to be placed on its own at a
+   typed right offset (168, 78, 10px) that assumed a width the words do not have in Silkscreen: STANDINGS
+   is 138px wide and sat under both its neighbours ("BUISDANDINGSMARKET") at every size. */
+.actions { position: absolute; right: 10px; bottom: 12px; z-index: 6; display: flex; gap: 6px; align-items: stretch; }
 .standbtn {
-  position: absolute; right: 78px; bottom: 12px; z-index: 6; text-decoration: none;
+  text-decoration: none;
   font-family: var(--display); font-size: 16px; letter-spacing: .08em; color: #fff;
   border: 1px solid rgba(255,255,255,.5); padding: 8px 10px;
 }
@@ -96,7 +109,6 @@ body.reel:not(.menu) .panel { display: none !important; }   /* the studio keeps 
 }
 body.menu .buildbtn, body.menu .marketbtn, body.menu .standbtn { display: none; }
 .buildbtn {
-  position: absolute; right: 168px; bottom: 12px; z-index: 6;
   font-family: var(--display); font-size: 16px; letter-spacing: .08em; color: #fff;
   background: transparent; border: 1px solid rgba(255,255,255,.5); padding: 8px 10px; cursor: pointer;
 }
@@ -195,7 +207,6 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
 }
 .go[disabled] { background: none; border: 1px solid rgba(255,255,255,.3); color: rgba(255,255,255,.4); cursor: default; }
 .marketbtn {
-  position: absolute; right: 10px; bottom: 12px; z-index: 6;
   font-family: var(--display); font-size: 16px; letter-spacing: .08em; color: #000;
   background: var(--signal); border: 0; padding: 8px 12px; cursor: pointer;
 }
@@ -230,11 +241,17 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
 .term b { display: block; font-family: var(--display); font-size: 14px; letter-spacing: .06em; opacity: .75; }
 .mfoot { padding: 8px 12px; border-top: 1px solid rgba(255,255,255,.25); font-size: 18px; color: rgba(255,255,255,.5); }
 @media (max-width: 560px) { .card .terms { display: grid; grid-template-columns: 1fr; } }
-/* too narrow to sit beside the buttons: give the tray the full width and stack it above them */
-@media (max-width: 720px) {
-  .tray { right: 0; bottom: 44px; }
+/* Too narrow to sit beside the buttons: the button row takes the full width, the tray the full width above
+   it, and the note above that. 759px, not 720: below 744px the frame (two thirds of its width tall) is too
+   short for the page buttons' stack (it ends 442px down) and the button row both, so they collided there. */
+@media (max-width: 759px) {
+  .hud { font-size: 12px; letter-spacing: .05em; gap: 2px 8px; padding: 6px 96px 6px 8px; }   /* 96px: PAGES' seat */
+  #walletBtn { font-size: 11px; }
+  .actions { left: 8px; right: 8px; bottom: 8px; }
+  .actions > * { flex: 1 1 auto; text-align: center; font-size: min(16px, 4vw); padding: 8px 4px; }
+  .tray { right: 0; bottom: 52px; }
   .note {
-    bottom: 88px; left: 0; right: 0; padding: 4px 10px;
+    bottom: 124px; left: 0; right: 0; max-width: none; padding: 4px 10px;
     background: rgba(0,0,0,.82);      /* a band, so it never reads as part of the map */
   }
   .note .more { display: none; }      /* the long-form hints do not fit a phone */
@@ -260,6 +277,26 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
   body.pages #deployerBtn  { top: 186px; right: 10px; }
   body.pages #playerBtn    { top: 186px; right: 158px; }
 }
+/* A PHONE HELD UPRIGHT has the window's height to spare and a frame only 250-260px tall, which cannot hold
+   the HUD, the note, the tray and the button row and still show a map: the HUD wrapped under the note and
+   the note's third line ran under the tray. So the furniture leaves the frame. The note hangs under the map;
+   the button row and the tray sit at the foot of the window, under the thumb. The band ABOVE the frame is
+   left empty - announce.js puts the event overlay there when it is tall enough. A window at least 5/3 as
+   tall as it is wide (every phone held upright) has 320px under a centred 3:2 frame at any width over 320px.
+   A squarer narrow window (360x500, a desktop window dragged thin) has not, so its frame goes to the top
+   and the room is all below it; the overlay then seats itself inside the frame, under the HUD. Up to 0.87
+   wide-to-tall that leaves the 175px the note, tray and row need, at every width from 360 to 759px. */
+@media (max-width: 759px) and (min-aspect-ratio: 3/5) and (max-aspect-ratio: 87/100) {
+  body:not(.hero) { place-items: start center; }
+}
+@media (max-width: 759px) and (max-aspect-ratio: 87/100) {
+  body:not(.hero) .frame { overflow: visible; }
+  .actions { position: fixed; bottom: max(8px, env(safe-area-inset-bottom, 0px)); }
+  .tray { position: fixed; bottom: calc(max(8px, env(safe-area-inset-bottom, 0px)) + 44px); }
+  .note { top: calc(100% + 4px); bottom: auto; }
+  /* the market covers the frame; out here nothing covers these, so they step aside while it is open */
+  .frame:has(> .market:not([hidden])) :is(.actions, .tray, .note) { visibility: hidden; }
+}
 </style>
 </head>
 <body>
@@ -271,7 +308,7 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
          (see "M5 item 1, wired" in the sprite block). A typed ?wallet= or ?token= pins the base instead.
          FIRST in the HUD on purpose: on a phone the HUD wraps and every line after the first sits under
          the selected-Friend note, so the first line is the only place a tap can reach. -->
-    <button id="walletBtn" type="button" data-wallet style="pointer-events:auto; font:inherit; letter-spacing:inherit; font-size:14px; color:var(--signal); background:rgba(0,0,0,.6); border:1px solid var(--signal); padding:1px 6px; line-height:1.1; cursor:pointer">CONNECT WALLET</button>
+    <button id="walletBtn" type="button" data-wallet>CONNECT WALLET</button>
     <span>RARE FIENDS</span><span style="color:rgba(255,255,255,.5)">base of</span>
     <b id="genesisName">GENESIS #4</b>
     <span class="sp"></span>
@@ -303,13 +340,15 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
   <a class="studiobtn playerbtn" id="playerBtn" href="player.html" data-page="player.html">YOUR PAGE</a>
   <button class="studiobtn pagesbtn" id="pagesBtn" type="button" aria-expanded="false" aria-controls="studioBtn">PAGES</button>
   <div class="challenge" id="challenge" hidden></div>
-  <button class="buildbtn" id="buildBtn" type="button" aria-pressed="false">BUILD</button>
+  <div class="actions">
+    <button class="buildbtn" id="buildBtn" type="button" aria-pressed="false">BUILD</button>
+    <a class="standbtn" href="standings.html" data-page="standings.html">STANDINGS</a>
+    <button class="marketbtn" id="marketBtn" type="button">MARKET</button>
+  </div>
   <aside class="panel" id="panel" aria-hidden="true">
     <div class="head"><h2 id="ptitle">BUILD</h2><button class="x" id="pclose" type="button">CLOSE</button></div>
     <div class="body" id="pbody"></div>
   </aside>
-  <button class="marketbtn" id="marketBtn" type="button">MARKET</button>
-  <a class="standbtn" href="standings.html" data-page="standings.html">STANDINGS</a>
 
   <aside class="market" id="market" hidden>
     <div class="mhead">
@@ -2557,19 +2596,25 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
   // and fills up, and every silo EXTENDS that reserve - so it is the record's own rule, Record.storeCap, run
   // over this page's buildings in the record's shape. A building still raising counts at the level it stands
   // at, not the one it is climbing to (`build` is the page's "still going up", the record's unfinished). A
-  // base with no depot and no silo standing has no store and is left uncapped, as the record leaves it.
+  // base with no depot and no silo standing holds its standing keep's floor, 240.00, and 0 with the keep gone
+  // too (ruling 62, M8 item 14) - so the keep's row is passed in as well, found by `placement.isKeep`.
   // `bank()` is the ONE way crystals enter a purse from the world: it clips at the cap and returns what was
   // actually banked, so a caller can tell a full store from a credited one.
   // `without` leaves one building out: the cap the base has once it is knocked down (ruling 56).
   function siloCap(baseId, without) {
     // a start-plan building carries no `base` and is the home base's, the way ofBase reads it
-    const rows = buildings.filter(b => b !== without && (b.base == null ? HOME : b.base) === baseId && (b.type === 'silo' || b.type === 'collectionDepot'))
+    const rows = buildings.filter(b => b !== without && (b.base == null ? HOME : b.base) === baseId && (b.type === 'silo' || b.type === 'collectionDepot' || (KIND[b.type] && KIND[b.type].placement.isKeep)))
       .map(b => ({ kind: b.type, level: b.tier || 1, startedAt: b.build ? 0 : null }));   // going up: started at 0, read at 0, so not yet standing
     return Record.storeCap({ buildings: rows }, 0);
   }
   // `why` is 'gather' unless the caller says otherwise: a demolition's refund comes in through here too
   // (ruling 15) and is NOT gathering, so it is not a `gather` move and standing does not move.
   function bank(baseId, amount, why = 'gather') {
+    // the store is measured for the SAME base whose purse is credited: purse() reads a missing or unknown id as
+    // the home base (a start-plan depot carries no `base`), so the cap must too. Before ruling 62 a cap read for
+    // `undefined` found no store, came back uncapped, and hid this; with the keep's floor it came back 0 and the
+    // start base's harvester banked nothing.
+    baseId = baseId == null || !PURSES.has(baseId) ? HOME : baseId;
     const p = purse(baseId), room = Math.max(0, siloCap(baseId) - p.crystals), got = Math.min(amount, room);
     p.crystals += got;
     if (why === 'gather' && got > 0) noteMove(baseId, 'gather', { got });
@@ -3271,9 +3316,18 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
       sync(); return;
     }
     const hit = pick(px, py);
+    // M13 item 1: anything of another player's base - its Friends, its Genesis - is a target, not yours to
+    // select. A tap on it opens the attack chooser for that base (decision 2: every base is a target).
+    if (hit && SHARED && hit.base != null && hit.base !== HOME && openAttack(hit.base)) return;
     if (hit) { selected = hit; sync(); return; }
     // tap the watchtower to send the selected Friend up, or bring them down
     // walls first: a wall is hit on its own edge (wallHit), whichever axis it lies on
+    // M13 item 1: on a shared island another base's wall or tower is a TARGET, never a post for this base's
+    // Friends - a tap on it opens the attack chooser for that base, as a tap on one of its Friends does.
+    { const w = wallHit(px, py);
+      if (w && SHARED && !ofBase(HOME)(w) && openAttack(w.base)) return;
+      const t = buildings.find(x => x.type === 'tower' && !ofBase(HOME)(x) && (([tx2, ty2]) => Math.hypot(tx2 - px, ty2 - py - 30 / SCALE) < 26 / SCALE)(project(x.x, x.y)));
+      if (t && SHARED && openAttack(t.base)) return; }
     for (const b of [wallHit(px, py)].filter(Boolean)) {
       {
         const at = b.crew.indexOf(selected);
@@ -3591,12 +3645,13 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
   // the silo has no room for is REFUSED, and the screen says how much room is needed (ruling 15), rather
   // than losing the overflow. The room is measured with the building ALREADY GONE (ruling 56): a silo's
   // own refund is not held by that silo, and with two silos the larger going leaves only the smaller's
-  // cap. A depot's refund carries half of each harvester it built, and its harvesters go with it. A base
-  // left with no depot and no silo is uncapped (Record.storeCap) and always fits - not settled by ruling 56.
+  // cap. A depot's refund carries half of each harvester it built, and its harvesters go with it. The last
+  // depot or silo is tested against the keep's floor, 240.00 (ruling 62); knocking down your own keep is
+  // exempt from the test (Record.refundExempt), which matters only once M15 item 12 lets a keep go.
   function refundOf(b) {
     const base = b.base == null ? HOME : b.base, tier = b.tier || 1;
     const { crystals, wood } = Record.refund(b.type, tier, b.harvesters);   // the arithmetic lives with the record, which replays it
-    return { crystals, wood, short: Record.refundShort(purse(base).crystals, crystals, siloCap(base, b)) };
+    return { crystals, wood, short: Record.refundExempt(b.type) ? 0 : Record.refundShort(purse(base).crystals, crystals, siloCap(base, b)) };
   }
   // the keep goes last: nothing else can stand without it (KIND.keep.sub), so it cannot be knocked down
   // while anything else of its base stands
@@ -3646,6 +3701,7 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
   }
   function renderPanel() {
     const title = document.getElementById('ptitle'), body = document.getElementById('pbody');
+    if (panelFor && panelFor.attack != null) { renderAttack(panelFor.attack); return; }   // M13: the attack chooser
     if (!panelFor) {
       title.textContent = 'BUILD';
       body.innerHTML = '<p class="lede">' + (theKeep()
@@ -3674,7 +3730,11 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
     // The capacitor's row says TRUE as the rule stands, so Capacitor IV is unreachable under a three-tier
     // keep until the deployer picks a way out (Energy, "Capacitor IV is unreachable"); flipping that one
     // value is the recommended way, and it is a value, not a line here. The operator gate is gone - see CELL_NEEDS.
-    const capped = def.placement.cappedByKeepLevel && !maxed && next > ((theKeep() || {}).tier || 0);
+    // M13 ITEM 8, ruling 37 (d): a base whose keep an opponent destroyed cannot upgrade ANYTHING - the keep's
+    // own exemption and the cell's do not apply, because there is no keep left to be relative to. The record
+    // refuses the raise as well (record.js `raise`); this is the panel saying so before it is asked.
+    const keepGone = keepLostOf(b.base == null ? HOME : b.base);
+    const capped = !maxed && (!!keepGone || (def.placement.cappedByKeepLevel && next > ((theKeep() || {}).tier || 0)));
     const rf = refundOf(b), held = keepHolds(b);          // what knocking it down gives back, and whether it may go
     title.textContent = 'UPGRADE';
     body.innerHTML = '<p class="lede">' + def.sub + '</p>' +
@@ -3715,7 +3775,7 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
                '<span class="k">' + def.tiers[next - 1] + '</span><span class="v sig">' + billText(bill) + '</span>' +
                '<span class="k">You hold</span><span class="v">' + billText(purse(), 'nothing') + '</span></div>') +
       '<button class="go" id="pgo"' + (maxed || capped || !afford ? ' disabled' : '') + '>' +
-      (maxed ? 'MAXED' : capped ? 'RAISE THE KEEP TO ' + KIND.keep.tiers[next - 1] + ' FIRST'
+      (maxed ? 'MAXED' : capped && keepGone ? 'YOUR KEEP WAS DESTROYED · NOTHING CAN BE RAISED' : capped ? 'RAISE THE KEEP TO ' + KIND.keep.tiers[next - 1] + ' FIRST'
         : !afford ? 'NOT ENOUGH ' + shortOf.toUpperCase() : 'RAISE ' + def.tiers[next - 1]) + '</button>' +
       '<button class="go" id="pagain" style="background:none;border:1px solid rgba(255,255,255,.4);color:#fff">' +
       'REPLAY CONSTRUCTION</button>' +
@@ -5211,9 +5271,9 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
   // ---------- ENERGY (M10 item 4): the generator makes it, buildings draw it, the capacitor stores it ----------
   // Everything the loop reads is a column of the registry (values.js): `supply` on a row that makes power,
   // `energy` on every row for what it draws while running, and on a store `capacity` (P·h held), `release`
-  // (P let out at most) and `leak` (% a day). Nothing here types a number. Today every draw and every supply
-  // in values.js is 0 - the economist's figures are PROPOSED (question 21, rows 29 to 32) and a proposal is
-  // not written as a value - so no building starves until the deployer decides, and the loop is proved by a
+  // (P let out at most) and `leak` (% a day). Nothing here types a number. The draws and the supply are the
+  // DECIDED starting values since ruling 64 (question 21, rows 29 to 31; M8 item 13) - the starting base draws
+  // 5 P (cell I 2, depot I 3) against its water wheel's 10, so it runs, just - and the loop is proved by a
   // check that raises a draw above the supply at run time. Per base, each tick on the game's clock: supply
   // is the sum of its standing generators' output, demand the sum of its standing buildings' draws, and
   // `ratio` how much of the demand is met. Every drawing building gets `b.charge` = that share and
@@ -5393,11 +5453,15 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
   // ledger (ids kept; an unfinished one resumes its build from startedAt), harvesters respawned, the ground
   // re-derived from the cells, the Friends the page already made put where the record says and hired ones
   // hired again; then the scene. The clock resumes where it stopped, because progress is derived from it.
-  function restoreRecord(rec) {
+  // `opts.clock`: the world's clock to stand at instead of the scene's. A record our server wrote a fight into
+  // carries the scene of this base's LAST OWN write, which may be long ago for a player who sat idle; restoring
+  // its clock would wind the world back by that much. Progress is derived from the clock (startedAt), so the
+  // record's rows stand on this page's clock as they are (M13, lostTo).
+  function restoreRecord(rec, opts) {
     RESTORING = true;
     try {
       const L = rec.ledger, S = rec.scene || {};
-      simT = S.clock || 0;
+      simT = opts && typeof opts.clock === 'number' ? Math.max(opts.clock, S.clock || 0) : (S.clock || 0);
       Object.assign(purse(HOME), { crystals: L.base.crystals, wood: L.base.wood });
       razeBase(HOME);                                 // the home base's alone: on a shared island the other base is its own record's
       L.buildings.forEach(b => place(rowOf(b, HOME, 0)));
@@ -5417,6 +5481,10 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
           if (b) { if (r.post.kind === 'tower') b.occupant = a; else b.crew[r.post.slot] = a; } }
       });
       buildings.forEach(b => { if (b.crew) b.crew = b.crew.filter(Boolean); });
+      // M13: a Friend that went down in a fight has left the roster (record.js `attack`/`attacked`), and its
+      // body leaves the page. Only bodies the record has stopped naming: a body with no rid is not the record's.
+      { const named = new Set(L.roster.map(r => r.id));
+        FRIENDS().filter(ofBase(HOME)).filter(a => a.rid != null && !named.has(a.rid)).forEach(a => { byRid.delete(a.rid); dropBody(a); }); }
       // The record's token is the Friend's. The page claimed tokens in its own order as it made bodies, and
       // a hired Friend claimed a fresh one just now - so every restored body hands its token back to the
       // pool (claimedTokens, the sprites' ledger of who holds what) and takes the recorded one, and the
@@ -5504,6 +5572,8 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
       STORE.clearDraft(HOME);
       restoreRecord(rec);
       SESSION = Record.session(rec.ledger, rec.head);
+      // M13: attacked while away - the record's last change was a fight our server wrote into it
+      if (rec.lastFight && rec.lastFight.defender === HOME && rec.lastFight.heads && rec.lastFight.heads.defender === rec.head) LAST_FIGHT = rec.lastFight;
     } else {
       const seen = Date.now(), g = Record.genesis(viewLedger(HOME), sceneOf(), seen), r = await STORE.commit(g);
       if (r.ok) { LAST_WRITE = { why: 'genesis', seen, moves: 0, ok: true, head: r.record.head, writes: r.record.writes }; SESSION = Record.session(g.ledger, g.after); }
@@ -5514,6 +5584,7 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
       }
     }
     sync();
+    if (LAST_FIGHT && LAST_FIGHT.defender === HOME) flashNote(fightWords(LAST_FIGHT));
     pollShared();
     setInterval(pollShared, STORE.pollMs);
   }
@@ -5550,8 +5621,18 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
     const rec = await STORE.load(HOME).catch(() => null);
     if (!rec) return;
     const lost = SESSION ? SESSION.moves.length : 0;
-    restoreRecord(rec); SESSION = Record.session(rec.ledger, rec.head); STORE.clearDraft(HOME);
+    // M13: what moved the record may have been our server writing a fight into it - this base was attacked.
+    // It is said as that, not as "another client", because nobody else wrote this seat; and the world's clock
+    // stays where it is (restoreRecord's opts.clock) rather than winding back to this base's last own write.
+    const f = rec.lastFight, attacked = !!(f && f.defender === HOME && f.heads && f.heads.defender === rec.head);
+    restoreRecord(rec, attacked ? { clock: simT } : null); SESSION = Record.session(rec.ledger, rec.head); STORE.clearDraft(HOME);
     LAST_RESYNC = { reason, lost, head: rec.head, writes: rec.writes };
+    if (attacked) {                                   // said once a fight, however many times the record is re-read at its head
+      const told = LAST_FIGHT && LAST_FIGHT.id === f.id; LAST_FIGHT = f; LAST_RESYNC.fight = f.id;
+      console.warn('record: ' + fightWords(f) + ' - the record stands, and ' + lost + ' unwritten move(s) here were dropped');
+      sync(); if (!told) flashNote(fightWords(f));
+      return;
+    }
     console.warn('record: another client wrote this base first (' + reason + ') - the record stands, and ' + lost + ' unwritten move(s) here were dropped');
     flashNote('another client wrote this base first: the record stands (' + lost + ' unwritten move' + (lost === 1 ? '' : 's') + ' dropped)');
     sync();
@@ -5578,6 +5659,114 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
     } catch (e) { console.warn('record: the poll could not reach our server - ' + (e.message || e)); }
     finally { POLLING = false; }
   }
+  // ---------- AN ATTACK (M13): chosen here, settled on our server, written into both records ----------
+  // Every base is a target and an attack cannot be refused (decision 2). The player picks which of their own
+  // Friends to send - as many as they choose, no stake and no fee (decision 13) - and the side they come in
+  // from. The fight is NOT run here: serve.py's /attack hands both records to record.js's settle(), which reads
+  // the defence - buildings, posts and the standing orders its Friends were left with (ruling 50) - off the
+  // defender's record, runs combat.js's fight and writes the result into BOTH records through apply(). This
+  // page only shows what came back. The defender's page learns of it on its next poll or write: the record
+  // moved under it, so it is put back on the record (lostTo) and told it was attacked.
+  let LAST_FIGHT = null, ATTACKING = null;
+  const ATTACK_PICK = new Set();                      // the Friends ticked to send, in the attack panel
+  let ATTACK_SIDE = 'N';
+  // A body whose roster row is gone (a Friend that went down in a fight leaves the game - record.js's
+  // `attack`/`attacked`) leaves the page with it: off its post, out of the actors, its token back in the pool.
+  function dropBody(a) {
+    unpost(a);
+    const i = actors.indexOf(a); if (i >= 0) actors.splice(i, 1);
+    if (a.token != null) claimedTokens.delete(a.token);
+    picked.delete(a); ATTACK_PICK.delete(a);
+    if (selected === a) selected = actors.find(x => ofBase(HOME)(x)) || actors[0];
+  }
+  // M13 ITEM 8, ruling 37 (d): the record says whether an opponent destroyed this base's keep. While it has,
+  // nothing on the base can be raised - record.js's `raise` refuses it and renderPanel's `capped` reads this.
+  function keepLostOf(id = HOME) {
+    const L = id === HOME ? (SESSION && SESSION.ledger) : (OTHERS.get(id) || {}).ledger;
+    return (L && L.keepLost) || null;
+  }
+  // a fight in words, for the note bar and the panel: from this base's side of it
+  function fightWords(f) {
+    const mine = f.attacker === HOME, them = mine ? f.defender : f.attacker;
+    const lostMine = mine ? f.lost.attacker.length : f.lost.defender.length, lostTheirs = mine ? f.lost.defender.length : f.lost.attacker.length;
+    const loot = f.won ? fmtC(f.loot.crystals) + ' crystals and ' + fmtC(f.loot.wood) + ' wood' : 'nothing';
+    return (mine ? 'your attack on ' + groundName(them).replace("'s ground", '') + (f.won ? ' WON' : ' was REPELLED')
+      : groundName(them).replace("'s ground", '') + ' attacked you and ' + (f.won ? 'WON' : 'was REPELLED')) +
+      ' · you lost ' + lostMine + ' Friend' + (lostMine === 1 ? '' : 's') + ', they lost ' + lostTheirs +
+      (f.walls.length ? ' · ' + f.walls.length + ' wall section' + (f.walls.length === 1 ? '' : 's') + ' broken' : '') +
+      ' · ' + (mine ? 'taken: ' : 'lost: ') + loot + (f.keep ? ' · the keep was destroyed' : '') + ' (fight ' + f.id + ')';
+  }
+  // the attack itself. Everything this client has noted is written first, so the Friends it names are the
+  // ones on the record's head; the order carries that head, and a record that moved under it is StaleParent.
+  async function attackBase(on, friends, side) {
+    if (!SHARED || SERVER_DOWN || !SESSION) return { ok: false, reason: 'NotShared', why: 'an attack is made on a shared island, against our server' };
+    if (ATTACKING) return ATTACKING;
+    ATTACKING = (async () => {
+      for (let i = 0; i < 3 && (INFLIGHT || SESSION.moves.length); i++) await (INFLIGHT || saveShared('attack'));
+      if (INFLIGHT || SESSION.moves.length) return { ok: false, reason: 'Unwritten', why: 'this base\'s own moves could not be written first' };
+      const order = { on, sent: friends.map(a => a.rid), side, parent: SESSION.parent };
+      const r = await fetch('api/record/' + HOME + '/attack', { method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(order) })
+        .then(x => (x.ok ? x.json() : { ok: false, reason: 'HTTP ' + x.status })).catch(e => ({ ok: false, reason: 'Unavailable', why: String((e && e.message) || e) }));
+      if (r.ok) {
+        // this base: only what the fight changed - its Friends that went down, and the loot. No restore, so the
+        // world's clock and every body mid-walk carry on; the parity assertion holds the page to the record.
+        const L = r.attacker.ledger;
+        FRIENDS().filter(ofBase(HOME)).filter(a => a.rid != null && !L.roster.some(q => q.id === a.rid)).forEach(dropBody);
+        Object.assign(purse(HOME), { crystals: L.base.crystals, wood: L.base.wood });
+        SESSION = Record.session(L, r.attacker.head); STORE.clearDraft(HOME);
+        OTHERS.set(on, r.defender); showOther(r.defender);
+        LAST_FIGHT = r.fight; console.log('record: ' + fightWords(r.fight) + ' - hash ' + r.fight.hash);
+        sync(); flashNote(fightWords(r.fight));
+      } else if (r.reason === 'StaleParent') await lostTo('StaleParent');
+      else { console.warn('the attack was not made: ' + r.reason + ' - ' + (r.why || '')); flashNote('the attack was not made: ' + (r.why || r.reason)); }
+      if (panelFor && panelFor.attack != null) renderPanel();
+      return r;
+    })().finally(() => { ATTACKING = null; });
+    return ATTACKING;
+  }
+  // the chooser: a base's panel of its own (panelFor = { attack: id }), opened by a tap on anything of that base's
+  function openAttack(id) {
+    if (!SHARED || id === HOME || !BASES.includes(id)) return false;
+    ATTACK_PICK.clear(); picked.forEach(a => { if (ofBase(HOME)(a)) ATTACK_PICK.add(a); });
+    openPanel({ attack: id }); return true;
+  }
+  function renderAttack(id) {
+    const title = document.getElementById('ptitle'), body = document.getElementById('pbody');
+    const rec = OTHERS.get(id), L = rec && rec.ledger, mine = FRIENDS().filter(ofBase(HOME)).filter(a => a.rid != null);
+    const walls = L ? L.buildings.filter(b => b.kind === 'wall').length : 0;
+    const f = LAST_FIGHT && (LAST_FIGHT.defender === id || LAST_FIGHT.attacker === id) ? LAST_FIGHT : null;
+    // the fight is bounded to combat.js MAX_SIDE Friends a side (RareCombat.sol holds the same), and record.js
+    // settle() refuses a line-up past it, TooLarge. There is NO bound on wall sections (ruling 65): every finished
+    // section the defender has is fought. Counted as settle() counts: finished.
+    const D = L ? Record.defense(L, rec.at || 0, []) : null;
+    const tooBig = D && (D.defenders.length > Combat.MAX_SIDE || ATTACK_PICK.size > Combat.MAX_SIDE);
+    title.textContent = 'ATTACK';
+    body.innerHTML = '<p class="lede">' + groundName(id).replace("'s ground", '') + '. An attack cannot be refused: it meets whatever its record holds - ' +
+        (L ? L.roster.length + ' Friend' + (L.roster.length === 1 ? '' : 's') + ' on their standing orders and ' + walls + ' wall section' + (walls === 1 ? '' : 's') : 'a record not read yet') +
+        '. Send as many of your own Friends as you choose (up to ' + Combat.MAX_SIDE + '); the cost is the risk to them - a Friend that goes down leaves this game. No stake, no fee.</p>' +
+      '<span class="lab">SEND</span><div class="cells">' +
+        mine.map(a => '<button class="cell" type="button" data-send="' + a.rid + '"' + (ATTACK_PICK.has(a) ? ' aria-pressed="true"' : '') + '><b>G' + a.gen + '</b>' +
+          '<span class="sub">' + ((famOf(a) || a.name) + '').slice(0, 14) + '</span></button>').join('') + '</div>' +
+      '<span class="lab">FROM THE</span><div class="cells">' +
+        Combat.SIDES.map(s => '<button class="cell" type="button" data-side="' + s + '"' + (ATTACK_SIDE === s ? ' aria-pressed="true"' : '') + '><b>' + s + '</b></button>').join('') + '</div>' +
+      '<button class="go" id="pattack"' + (!ATTACK_PICK.size || ATTACKING || SERVER_DOWN || tooBig ? ' disabled' : '') + '>' +
+        (ATTACKING ? 'SETTLING ON OUR SERVER…' : SERVER_DOWN ? 'OUR SERVER CANNOT BE REACHED'
+          : tooBig ? (ATTACK_PICK.size > Combat.MAX_SIDE ? 'SEND ' + Combat.MAX_SIDE + ' AT MOST'
+            : 'A FIGHT TAKES ' + Combat.MAX_SIDE + ' FRIENDS A SIDE · THIS BASE HAS ' + D.defenders.length)
+          : !ATTACK_PICK.size ? 'PICK WHO TO SEND' : 'ATTACK WITH ' + ATTACK_PICK.size) + '</button>' +
+      (f ? '<div class="rule"></div><span class="lab">LAST FIGHT</span><p class="lede" id="pfight">' + fightWords(f) + '</p>' : '');
+    body.querySelectorAll('[data-send]').forEach(c => c.addEventListener('click', () => {
+      const a = mine.find(x => x.rid === +c.dataset.send); if (!a) return;
+      ATTACK_PICK.has(a) ? ATTACK_PICK.delete(a) : ATTACK_PICK.add(a); renderPanel();
+    }));
+    body.querySelectorAll('[data-side]').forEach(c => c.addEventListener('click', () => { ATTACK_SIDE = c.dataset.side; renderPanel(); }));
+    const go = document.getElementById('pattack');
+    if (go && !go.disabled) go.addEventListener('click', () => { const p = attackBase(id, [...ATTACK_PICK], ATTACK_SIDE); renderPanel(); return p; });
+  }
+  // what a check reads and drives - the same functions the panel calls
+  const ATTACK_API = { open: openAttack, attack: attackBase, keepLost: keepLostOf, get last() { return LAST_FIGHT; }, get pick() { return [...ATTACK_PICK].map(a => a.rid); },
+    maxSide: Combat.MAX_SIDE,
+    get side() { return ATTACK_SIDE; }, fights: () => fetch('api/record/fights', { cache: 'no-store' }).then(r => r.json()) };
   // OTHER BASES: another player's base drawn from its record - its buildings, its harvesters, its purse, and
   // its Friends walked to where the record says they stand and put on their posts. Each client's world runs
   // on its own clock, so a recorded build time is moved onto this page's clock by the record's own (`at`,
@@ -5599,6 +5788,8 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
           if (b) { if (r.post.kind === 'tower') b.occupant = a; else b.crew[r.post.slot] = a; } }
       });
       buildings.forEach(b => { if (b.crew) b.crew = b.crew.filter(Boolean); });
+      // M13: that base's Friends that went down in a fight are off its roster, and off this page
+      { const named = new Set(L.roster.map(r => r.id)); FRIENDS().filter(ofBase(id)).filter(a => a.rid != null && !named.has(a.rid)).forEach(dropBody); }
     } finally { RESTORING = false; }
   }
   window.addEventListener('pagehide', () => saveRecord('pagehide'));
@@ -5625,7 +5816,8 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
     get lastResync() { return LAST_RESYNC; }, get serverDown() { return SERVER_DOWN; }, get polls() { return POLLS; }, poll: () => pollShared(),
     view: viewLedger, scene: sceneOf, save: saveRecord, store: STORE,
     // the page's view and the record must hash the same after every move; a difference names what the page changed that no move carries
-    parity() { recordSync(); const v = viewLedger(HOME); if (SESSION) { v.gathered = SESSION.ledger.gathered; v.seq = SESSION.ledger.seq; v.lastSeen = SESSION.ledger.lastSeen; }   // the three the page's view does not hold: counters and the last-seen time are the record's alone
+    parity() { recordSync(); const v = viewLedger(HOME); if (SESSION) { v.gathered = SESSION.ledger.gathered; v.seq = SESSION.ledger.seq; v.lastSeen = SESSION.ledger.lastSeen;
+        if (SESSION.ledger.keepLost) v.keepLost = SESSION.ledger.keepLost; }   // M13 item 8: a keep lost to an attack is the record's alone too - written by our server, never by this page   // the three the page's view does not hold: counters and the last-seen time are the record's alone
       return { same: !!SESSION && Record.head(v) === SESSION.head(), view: v, ledger: SESSION ? SESSION.ledger : null }; } };
   // ---------- THE CAPTURE WINDOW (Capture ownership; ruling 19 of 2026-09-30; M14 item 2) ----------
   // A building another player has claimed sits in a five-minute window. While it does, the base is
@@ -5734,6 +5926,7 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
     headingFacing, setFrame, ROSTER, SETS, FACINGS,
     ownerAt, groundName, borderOf, neighboursOf, baseTiles, theKeep, UNCLAIMED,
     studioTarget: () => { const L = typeof liveOf === 'function' ? liveOf(ST.sub) : null; return L && (L.b || L.dr || L.a || L.n) || null; } };
+  window.base.attack = ATTACK_API;                    // M13: the attack chooser and the last fight, for a check
 })();
 </script>
 </body>

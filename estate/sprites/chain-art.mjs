@@ -10,7 +10,10 @@
 // A facing listed in a set's `drawnFacings` is OUR art (estate/sprites/colossus-facings.py) and differs from the
 // chain on purpose: it is reported "drawn, skipped", never compared and never overwritten.
 // family / seed / familyName / generation are not touched here.
-// friendSprites is NOT covered: its 16 words match no token in the file and no attribution is recorded.
+// friendSprites is GONE (M11 item 10): sixteen words that matched no token and recorded none. Every Friend in the
+// file now records its token, so every picture the game draws is held here - and a `friendSprites` field coming
+// back is itself a difference, because art with no token is exactly what this script cannot hold to the chain.
+// A Friend's card picture (sprites/friend-card.js) is one frame of these same clips, so it is held with them.
 //
 // `toolkit` - where the game's live reader (estate/sprites/friend-chain.js) finds a Friend - is held here too:
 // its registry against TOOLKIT.md, its generations against collector.py's GENERATIONS, its chainId against the
@@ -113,9 +116,10 @@ let toolkitOk = 0;
   if (chainId !== rpcId) diffs.push(`provider network ${chainId} and eth_chainId ${rpcId} disagree`);
 }
 
+if ('friendSprites' in D) { diffs.push('friendSprites is back: art that records no token cannot be held to the chain (M11 item 10) - draw from a roster token'); if (mode === 'write') delete D.friendSprites; }
 for (const d of drawn) console.log('drawn, skipped:', d);
 console.log(`${toolkitOk} of 4 toolkit fields match (registry, generations, chainId, transferStartBlock)`);
-console.log(`${clipsOk} chain clips match, ${genOk} Genesis px match, ${drawn.length} drawn clips skipped; friendSprites not covered (no token recorded)`);
+console.log(`${clipsOk} chain clips match, ${genOk} Genesis px match, ${drawn.length} drawn clips skipped; no art without a token`);
 for (const d of diffs) console.log('DIFFERS:', d);
 if (mode === 'write') {
   const out = py(D);

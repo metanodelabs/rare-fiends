@@ -558,6 +558,24 @@ let PROF = null, CH = null;
     /THE CONTRACT READS/.test(await ev('document.querySelector(\'[data-sw="demo"]\').closest(".p").querySelector(".rb").textContent')),
     await ev('document.querySelector(\'[data-sw="demo"]\').closest(".p").querySelector(".rb").textContent'));
 
+  // ---- THE FIGHT'S SETTINGS: rulings 44, 45, 46 and 47 (economist's spec for the check-writer) -------------
+  // Ruling 47 removed the fight's clock, so no row and no card for it. Ruling 45 moved cover from BEHIND a wall to
+  // ON one, so the card is named for that AND proves it by running the game's own fight three ways. The pace and the
+  // reach are decided and compared with what the game's combat.js builds.
+  let fcov = await card('Cover on a wall');
+  for (let i = 0; i < 60 && !/AGREES — THE GAME READS|DISAGREES|NOT READABLE —/.test(fcov); i++) { await sleep(250); fcov = await card('Cover on a wall'); }
+  const fpace = await card('Walking pace in a fight'), freach = await card('How far ENGAGE + DEFEND strays');
+  const fgone = JSON.parse(await ev(`JSON.stringify({row: deployerPage.rows.some(x=>x.id==='maxMs'), clock: [...document.querySelectorAll('#out .p .k')].some(e=>/fight's clock/i.test(e.textContent)), behind: [...document.querySelectorAll('#out .p .k')].some(e=>e.textContent==='Cover behind a wall')})`));
+  ok('ruling 47: the fight\'s clock has no row and no card on the page', !fgone.row && !fgone.clock, JSON.stringify(fgone));
+  ok('ruling 45: the card is "Cover on a wall", and "Cover behind a wall" is gone', !fgone.behind && fcov !== 'no such card', JSON.stringify(fgone) + ' ' + fcov.slice(0, 80));
+  ok('ruling 45, proved in the game: a shot at a Friend ON a wall lands half as often, BEHIND a wall no less often than in the open',
+    /AGREES — THE GAME COVERS A FRIEND ON A WALL, NOT BEHIND ONE: a shot lands 25% ON a wall, 50% BEHIND it, 50% in the open/.test(fcov), fcov.slice(0, 400));
+  ok('the cover divisor the game builds is the decided 2', /AGREES — THE GAME READS 2 ÷ · DECIDED 2 ÷/.test(fcov), fcov.slice(0, 400));
+  ok('ruling 44: the pace the game builds is the decided 1 tile a second', /AGREES — THE GAME READS 1 tiles\/s · DECIDED 1 tiles\/s/.test(fpace), fpace.slice(0, 400));
+  ok('ruling 46: the reach the game builds is the decided 5 tiles', /AGREES — THE GAME READS 5 tiles · DECIDED 5 tiles/.test(freach), freach.slice(0, 400));
+  ok('all three are DECIDED, and none says PROPOSED', [fcov, fpace, freach].every((c) => /DECIDED/.test(c) && !/PROPOSED/.test(c)),
+    [fcov, fpace, freach].map((c) => c.slice(0, 120)).join(' | '));
+
   // ---- the disagreement this page found, and how it ended -------------------------------------
   // DECIDED: a cell's reach at its four levels is 2, 3, 4, 5 tiles - the document's numbers - and
   // this page's read-back found the game reading 0, 1.5, 2.5, 3.5, 4.5 on its first run. THE

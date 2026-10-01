@@ -61,6 +61,13 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block
 .note .orders button[aria-pressed="true"] { background: var(--signal); color: #000; border-color: var(--signal); }
 .chip .ord { display: block; font-style: normal; font-size: 12px; color: var(--signal); letter-spacing: .04em; }
 .chip.picked { outline: 2px solid var(--signal); outline-offset: -2px; }
+/* M11 item 9: a Friend's card picture - one frame of its own frames() art, a pixel kept a pixel (2x for a 16x16
+   Friend, 4x for the 8x8 Genesis). Beside the chip's text, not above it, so the tray is no taller than it was. */
+.face { width: 32px; height: 32px; image-rendering: pixelated; flex: none; }
+.chip:has(> .face) { grid-template-columns: auto auto; column-gap: 6px; }
+.chip > .face { grid-column: 1; grid-row: 1 / span 2; align-self: center; }
+.note > .face { vertical-align: middle; margin-right: 6px; }
+@media (max-width: 720px) { .note > .face { display: none; } }   /* a phone's note has no line to spare; the chip shows the picture */
 @media (max-width: 1200px) { .note .more { display: none; } }   /* the orders take the room the long hints had */
 .standbtn {
   position: absolute; right: 78px; bottom: 12px; z-index: 6; text-decoration: none;
@@ -320,11 +327,13 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
 <script src="gif.js"></script>
 <script src="mapgen.js"></script>
 <script src="sprites/friendsdk.js"></script><!-- the toolkit's walking, navigation, collision and props, at the TOOLKIT.md pin (M11 item 6) -->
+<script src="sprites/friend-card.js"></script><!-- a Friend's card picture: one frame of its frames() art (M11 item 9) -->
 <script src="chance.js"></script>
 <script src="chainlive.js"></script><!-- remembers ?rpc=local for the tab, so the page buttons stay on the fork -->
 <script src="combat.js"></script>
 <script src="values.js"></script><!-- the chain's table: every number this page plays by, declared once (M3 item 1) -->
 <script src="record.js"></script><!-- the base's record: what survives the tab closing, and the one rule that takes a session's write (M6) -->
+<script src="announce.js"></script><!-- the event overlay: announcements as they happen (the deployer's ruling of 2026-10-01) -->
 <script>
 (async function () {
   'use strict';
@@ -1049,13 +1058,9 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
   let viewX = 0;                                      // slides the island clear of an open side panel
 
   /* ---------- sprites ---------- */
-  const rows16 = (hex) => { const v = BigInt('0x' + hex);
-    return Array.from({ length: 16 }, (_, y) => Array.from({ length: 16 },
-      (_, x) => (v >> BigInt(y * 16 + x)) & 1n ? '#' : '.').join('')); };
   const rows8 = (hex) => { const v = BigInt(hex);
     return Array.from({ length: 8 }, (_, y) => Array.from({ length: 8 },
       (_, x) => (v >> BigInt(y * 8 + x)) & 1n ? '#' : '.').join('')); };
-  const FRIEND = D.friendSprites.map(rows16);
   const GENESIS = rows8(D.genesis.px);
 
   // Every Genesis and Generations sprite carries a knockout rim, the way the original art
@@ -1163,9 +1168,12 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
     // them), so the family-6 side fallback below is not needed for it. Read off the data, never
     // off the family number: remove the field and the SDK's side-only behaviour comes back.
     const drawnF = Array.isArray(set.drawnFacings) ? set.drawnFacings : [];
+    // `card`: the Friend's card and roster picture (M11 item 9) - one frame of this same frames() art, chosen
+    // by sprites/friend-card.js and never a second drawing. Our drawn facings are passed over: the card is the chain's.
     return { token: set.token, family: set.family, familyName: set.familyName,
              seed: set.seed, generation: set.generation,
              drawn: drawnF.includes('down') && drawnF.includes('up'),
+             card: FriendCard.word(set), cardFacing: FriendCard.facing(set),
              idle: clip(set.idle), walk: clip(set.walk) };
   };
   // SETS is the family art reference: one real token per family, all nine of them, every one at
@@ -1175,6 +1183,23 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
   // nothing is dealt out in turn: its token decides its family, its seed and its picture.
   const SETS = (D.spriteSets || []).map(decodeSet);
   const ROSTER = (D.friendRoster || []).map(decodeSet);
+  // M11 item 10: THE STAND-IN IS A REAL FRIEND. `FRIEND` is the art a Friend with no token keeps in `a.rows` - today
+  // only the three ?doopies=1 Doopies, which draw their PNG and use it for nothing but their size - and every
+  // Friend's `a.rows` is what sets how tall it stands on a watchtower (powerAnchor and the tower's plaque read
+  // `occupant.rows.length`). It used to be `friendSprites`, sixteen words in base-data.json that matched no token
+  // and recorded none. It is now the first roster Friend's own frames() art, front idle then front walk: a
+  // token chain-art.mjs holds to the chain, sixteen frames of sixteen rows, so the watch stands as tall as before.
+  const STAND_IN = ROSTER[0] || SETS[0];
+  if (!STAND_IN) throw new Error('base-data.json holds no friendRoster and no spriteSets: there is no Friend to draw');
+  const FRIEND = [...STAND_IN.idle.down, ...STAND_IN.walk.down];
+  // The picture on a Friend's tray chip and in the note bar: its set's `card` frame (above), drawn by
+  // sprites/friend-card.js. A Genesis shows its own on-chain 8x8 (tokenURI's pixels, D.genesis.px). A Friend
+  // with no token - a Doopie - has no card, and says so by showing none.
+  const cardOf = (a) => !a ? null
+    : a.kind === 'genesis' ? { url: FriendCard.url(D.genesis.px, 8), n: 8, token: D.genesis.id, facing: 'down' }
+    : a.set && a.set.card ? { url: FriendCard.url(a.set.card, 16), n: 16, token: a.set.token, facing: a.set.cardFacing } : null;
+  const cardImg = (a, cls) => { const c = cardOf(a); return c ? '<img class="' + cls + '" alt="" src="' + c.url
+    + '" data-card="' + c.token + '" data-facing="' + c.facing + '">' : ''; };
   // M11 items 1 and 2: A FRIEND READ OFF THE CHAIN, NOT OUT OF THE CACHE. `?wallet=0x...` reads which Friends
   // that address holds (the toolkit's readOwnedFriends: generation 0 left out) and `?token=437,94` names
   // tokens outright. Each is drawn from familyOf(id), seedOf(id) and frames(family, seed) on the registry,
@@ -3436,7 +3461,7 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
     actors.forEach(a => {
       const b = document.createElement('button');
       b.className = 'chip' + (a === selected ? ' on' : '');
-      b.innerHTML = '<i>' + (a.kind === 'genesis' ? 'GEN' : 'G' + a.gen) + '</i>' +
+      b.innerHTML = cardImg(a, 'face') + '<i>' + (a.kind === 'genesis' ? 'GEN' : 'G' + a.gen) + '</i>' +
         (a.kind === 'genesis' ? 'GENESIS' : (a.rented ? 'RENTED' : (famOf(a) || 'GEN ' + a.gen).slice(0, 9))) +
         (a.kind === 'friend' && a.order && a.order !== 'hold' ? '<em class="ord">' + ORDER_SHORT[a.order] + '</em>' : '');
       if (picked.has(a)) b.classList.add('picked');
@@ -3472,7 +3497,7 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
     // The note bar names the Friend the way the chain does: its family, and the token it is. The
     // token is what makes "the one it actually is" checkable by looking — two Gen 6 Hollows are
     // told apart by it, and it is the id the registry drew this art from.
-    document.getElementById('note').innerHTML = 'selected <span class="sel">' + selected.name
+    document.getElementById('note').innerHTML = cardImg(selected, 'face') + 'selected <span class="sel">' + selected.name
       + (famOf(selected) ? ' · ' + famOf(selected) : '')
       + (selected.token !== undefined && selected.token !== null ? ' #' + selected.token : '') + '</span>' +
       (selected.kind === 'friend' ? ' <span class="orders" role="group" aria-label="standing order if attacked">' +
@@ -3868,8 +3893,9 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
   // decided by the order it happened to be pushed into the array, and every one of those nine
   // tokens is at generation 0 on chain with six of the nine not even held any more. Each Friend now
   // claims a real hardwired token of its own generation at the moment it is made (claimFriend), so
-  // there is nothing left to deal. A Friend with no token left in the pool keeps a.rows, the old
-  // 1-bit art, rather than borrowing somebody else's face.
+  // there is nothing left to deal. A Friend with no token left in the pool keeps a.rows, the stand-in
+  // (FRIEND, the first roster token's own frames - M11 item 10), and shows no card picture. The roster
+  // holds 15 and the page asks for at most 15, so today only the Doopies below go without a token.
   // the Doopie evolutions, standing on the estate alongside the Friends. Off for now: kept out of the game
   // until they're decided on; the art and code stay, so ?doopies=1 brings them back to look at.
   (DOOPIES ? ['v1', 'v2', 'v3'] : []).forEach((k, i) => {
@@ -5607,39 +5633,66 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
   // intruder's strength, never the base's buildings (Combat.captureFight refuses to return if a wall was
   // touched), and the intruder may abort and run. Data the game reads, not numbers baked into a fight:
   // the window is one constant here, and the fight's rules are ECON's, through Combat.rulesFrom.
+  // WHO KEEPS THE BUILDING (the deployer's ruling of 2026-10-01): "If I don't [leave], then I MAY die. Maybe
+  // I am stronger than my opponent. Maybe they sent out all their Friends... then I can win that takeover. If
+  // it doesn't happen, I die and the building goes back to the owner." Three ends, and only one returns it:
+  //   killed  (r.beaten)  - onIntruderBeaten: the owner's again at once, the claim gone.
+  //   ran     (r.fled, or abort()) - the claim is gone; the building never left the owner.
+  //   won     (r.won: no defender standing, nobody home, or nobody can reach anybody) - onIntruderWon: the
+  //           claim STANDS for the rest of its window, and the owner cannot fight it again.
   const CAPTURE = { windowMs: 5 * 60 * 1000, active: [] };
   // begin(b, intruder): the building enters the window; the intruder stands on it. Returns the window.
   function beginCapture(b, intruder) {
     const [x, y] = spotOf(b.x, b.y);
     const w = { building: b, owner: b.base == null ? HOME : b.base, intruder: { gen: intruder.gen, name: intruder.name, x, y },
-      opened: simT, closes: simT + CAPTURE.windowMs, fought: null, aborted: false, returned: false };
+      opened: simT, closes: simT + CAPTURE.windowMs, fought: null, aborted: false, returned: false, won: false };
     b.claim = w;                                      // the taker's claim sits on the building while the window is open
+    if (window.Announce) Announce.on.captured(w);    // the event overlay; never throws
     CAPTURE.active.push(w); return w;
   }
+  // isOpen(w): the window can still be fought (or run from) - not yet fought, run from, returned or closed.
   const captureOpen = (w) => !w.aborted && !w.fought && !w.returned && simT < w.closes;
-  // claimOn(b): the open claim on a building, or null - a claim whose window has closed is no claim.
-  const claimOn = (b) => (b.claim && captureOpen(b.claim)) ? b.claim : null;
+  // claimLive(w): the taker's claim stands - open, or fought and WON, and still inside its window. A fight
+  // the intruder won does not end the claim; one it lost or ran from does.
+  const claimLive = (w) => !w.aborted && !w.returned && simT < w.closes && (!w.fought || w.won);
+  // claimOn(b): the standing claim on a building, or null - a claim whose window has closed is no claim.
+  const claimOn = (b) => (b.claim && claimLive(b.claim)) ? b.claim : null;
   // fightBack(w, ctx, opts): the owner's base fights the intruder. ctx is the roll's (word, contract, chainId,
   // fightId); opts.abortMs is the game-clock ms at which the intruder runs, if it does. Settles on our
   // server in v1 - this is the same fight the server runs, so the page can show it and the hash can be
   // checked against it.
   function fightBack(w, ctx, opts) {
     if (!captureOpen(w)) throw new Error('the capture window is closed');
+    if (window.Announce) Announce.on.fightStarted(w);
     const R = Combat.rulesFrom(V), D = defense(w.owner);   // the chain's table, not the page's view of it
     const r = Combat.captureFight(R, D, w.intruder, ctx, opts);
     w.fought = r;
-    if (r.fled) w.aborted = true;
+    if (r.fled) { w.aborted = true; w.building.claim = null; }   // it ran: the building stays the owner's
     else if (r.beaten) onIntruderBeaten(w);
+    else if (r.won) onIntruderWon(w);
+    else throw new Error('a capture fight ended with nobody winning: ' + r.reason);   // no fourth end exists; say so if one appears
+    if (window.Announce) Announce.on.fightEnded(w, r);
     return r;
   }
   // abortCapture(w): the intruder leaves before any fight. The window ends; the intruder keeps its strength.
-  function abortCapture(w) { if (!captureOpen(w)) throw new Error('the capture window is closed'); w.aborted = true; w.building.claim = null; return w; }
+  function abortCapture(w) { if (!captureOpen(w)) throw new Error('the capture window is closed'); w.aborted = true; w.building.claim = null;
+    if (window.Announce) Announce.on.returned(w, 'ran');
+    return w; }
   // Beating the intruder returns the building at once (DESIGN, "Can the owner end the claim early?":
   // "Answered: yes, by fighting the intruder... take the building back"). The building is the owner's
   // again, the taker's claim is gone, and the window closes now - the five-minute clock stops.
   function onIntruderBeaten(w) {
     w.beatenAt = simT; w.returned = true; w.closes = simT;
     w.building.base = w.owner; w.building.claim = null;
+    if (window.Announce) Announce.on.returned(w, 'beaten');
+  }
+  // The defence could not beat or reach the intruder - nobody home, every defender down, or a stalemate
+  // (ruling of 2026-10-01). The intruder wins the takeover: the claim stays on the building and runs to the
+  // end of its own window, and the owner's fight-back is spent (isOpen is false, a second fight refused).
+  function onIntruderWon(w) {
+    w.won = true; w.wonAt = simT;
+    w.building.claim = w;
+    if (window.Announce) Announce.on.won(w);
   }
   // Named line-ups a check can prove `spare` against - data, so a check does not invent a base.
   // siegeAtWall: a catapult (gen 1, the siege weapon, doubled against a building) standing one spot north of
@@ -5652,7 +5705,7 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
          walls: [{ x: 0, y: 0, vert: false, tile: [0, 0] }], towers: [],
          defenders: [{ gen: 6, name: 'Watch', rented: false, order: ORDERS.indexOf('hold'), x: 0, y: 11, fx: 0, fy: 11, tower: false, post: '' }] },
     intruder: { gen: 1, name: 'Siege', x: 0, y: -1 } }) };
-  const capture = { CAPTURE, begin: beginCapture, fightBack, abort: abortCapture, isOpen: captureOpen, claimOn, onIntruderBeaten, fixtures };
+  const capture = { CAPTURE, begin: beginCapture, fightBack, abort: abortCapture, isOpen: captureOpen, claimLive, claimOn, onIntruderBeaten, onIntruderWon, fixtures };
 
   window.base = { capture, defense, record, spotOf, trees, levelAt, heightAt, tileKey, onLand, TILES, WALLS, PLAN, WATER_SITES, WORLDGEN, get wood() { return purse().wood; }, purse, BASES, HOME, sendToChop, buildings, actors, nodes, drones, tiles, openPanel, startBuild, project, screenToWorld, CAM, reclaim,
     route, bank, siloCap, demolish, refundOf,

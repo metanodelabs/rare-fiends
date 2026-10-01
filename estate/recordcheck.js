@@ -272,6 +272,11 @@ async function attachTab(port, pick) {
   // wait on the GAME'S clock, not the wall's (woodcheck's lesson): until `expr` is true or `ms` of simT pass
   const untilSim = async (expr, ms) => { const t0 = await ev('base.simT'); for (let i = 0; i < 400; i++) { if (await ev(expr)) return true; if ((await ev('base.simT')) - t0 > ms) return false; await sleep(100); } return false; };
   const watch = await require('./pagewatch.js').attach(ws, send);
+  // every caller opened or reloaded a base page a fixed 1.5-2.5 s before attaching, and under -j 4 that was not
+  // always long enough: "the M8/M10 browser part threw: base is not defined". So the tab is handed back only once
+  // the game is up and its clock has moved - waited on the page, capped at 30 s of wall clock, and a page that
+  // never comes up is handed back anyway so the assertion that reads it says so.
+  for (let i = 0; i < 120 && (await ev('!!(window.base && typeof base.simT === "number" && base.simT > 0)')) !== true; i++) await sleep(250);
   return { send, ev, J, tapWorld, untilSim, watch, targetId: t.id, ws };
 }
 // the BROWSER's own socket, for making tabs: it outlives a renderer that a tab crashed, which a page's socket does not
@@ -432,9 +437,18 @@ const uniq = (a) => new Set(a).size === a.length;
     const done = await M.untilSim(`!base.buildings.find(b => b.id === ${r0.id}).build`, need + 2000);
     const fin = await M.ev('base.simT');
     ok(done && fin >= expect - 1 && fin <= expect + 250 && fin < r0.t0 + need - 200, 'row 3: the HALL stood at ' + Math.round(fin - r0.t0) + ' ms of game clock, where two Friends put it (' + Math.round(expect - r0.t0) + ') and not one Friend\'s ' + need);
-    // the record agrees to the millisecond about when it stands
-    const rowOk = await M.ev(`(function(){ const b = base.record.ledger.buildings.find(b => b.id === ${r0.id}); return !Record.finished(b, ${expect} - 1) && Record.finished(b, ${expect}); })()`);
-    ok(rowOk === true, 'row 3: the ledger row says the same - not standing at ' + Math.round(expect - 1 - r0.t0) + ', standing at ' + Math.round(expect - r0.t0));
+    // the record agrees, to a microsecond of game clock, about when it stands. It was asked at EXACTLY
+    // `expect` and failed about one run in a hundred under -j 4 ("not standing at 1407, standing at 1408"):
+    // under load a frame passes between the RAISE and the PUT ONE ON, so t0 and t1 are fractional and
+    // different, and `worked()` - (t1-t0)*1 + (clock-t1)*2 - lands a rounding error (~1e-12 ms) short of
+    // raiseMs at `expect` itself, a quarter of the time when they differ. That is floating point, not the
+    // rule, so the window is +-1 microsecond: a billion times the rounding, and a thousand times tighter than
+    // the 1 ms it used to allow below the stand.
+    const EPS = 0.001;
+    const rowAt = JSON.parse(await M.ev(`(function(){ const b = base.record.ledger.buildings.find(b => b.id === ${r0.id});
+      return JSON.stringify([Record.finished(b, ${expect} - ${EPS}), Record.finished(b, ${expect} + ${EPS}), Record.worked(b, ${expect}) - Record.raiseMs(b.kind, b.level)]); })()`));
+    ok(rowAt[0] === false && rowAt[1] === true, 'row 3: the ledger row says the same - not standing 1 us before ' + (expect - r0.t0).toFixed(3) + ' ms, standing 1 us after'
+      + ' (t1 - t0 = ' + (t1 - r0.t0).toFixed(3) + ' ms; worked - raiseMs at that moment = ' + rowAt[2] + ')');
     const before = JSON.parse(await M.J(STATE));
     await M.send('Page.reload'); await sleep(2500);
     M = await attachTab(PORT1, (all) => all[0]); seen.push(M);

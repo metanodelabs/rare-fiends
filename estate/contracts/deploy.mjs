@@ -1,21 +1,31 @@
 // M20: deploy the game contracts to Robinhood Chain (4663). Run by the deployer, at their keyboard.
-//   DEPLOYER_KEY=... RF_TOKEN_ADDRESS=0x.. ATTESTOR_ADDRESS=0x.. TEAM_ADDRESS=0x.. FEE_TO_ADDRESS=0x.. node deploy.mjs [--dry-run]
+//   DEPLOYER_KEY=... RF_TOKEN_ADDRESS=0x.. ATTESTOR_ADDRESS=0x.. FEE_TO_ADDRESS=0x.. node deploy.mjs [--dry-run]
 //   ... RARE_RULES=0x.. RULES_ID=0x<32 bytes> [GAME_PLACES=n] node deploy.mjs --game [--dry-run]   # the SIXTH, RareGame, after RareRules is frozen
+//   EVM_RPC=http://127.0.0.1:<port> ... node deploy.mjs --fake-rf [--game]   # LOCAL ONLY: the fake-$RF world (deploy/local-chain.sh fake)
 // The key is read from the environment only, never printed, never written. Every transaction needs a typed yes.
 // Each address is written to estate/bridge-config.json the moment its deploy is mined. --dry-run sends and writes nothing.
 import { writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { Wallet, Contract, ContractFactory, getCreateAddress } from 'ethers';
-import { HERE, chainlive, duelTerms, compileAll, readKey, envAddress, connect, confirm, eth, banner, cfgPath, readCfg } from './deploylib.mjs';
+import { Wallet, Contract, ContractFactory, getCreateAddress, id } from 'ethers';
+import { HERE, chainlive, duelTerms, compileAll, readKey, envAddress, connect, confirm, eth, banner, cfgPath, readCfg, LOCAL, EVM_RPC, requireUnforkedAnvil, readRealRfShape } from './deploylib.mjs';
 
 const DRY = process.argv.includes('--dry-run');
 const GAME = process.argv.includes('--game');   // the sixth phase: RareGame alone, roles read from the config the five wrote
+// --fake-rf: THE LOCAL FAKE WORLD. Before the five, deploy FakeRF (the real $RF's name, symbol, decimals and
+// INITIAL_SUPPLY, read from 4663 by eth_call), LocalEntropy (Pyth's stand-in) and MockGenesis, and point every
+// contract at them. Refused unless EVM_RPC is a loopback, UNFORKED anvil (deploylib requireUnforkedAnvil), and
+// FakeRF / LocalEntropy refuse an Arbitrum chain again in their own constructors. With --game it reads the fake
+// token from the config the five wrote instead of from env.
+const FAKE = process.argv.includes('--fake-rf');
+// refused before a single request leaves this process: with no loopback EVM_RPC the RPC would be chain 4663 itself
+if (FAKE && !LOCAL) { console.error('--fake-rf: EVM_RPC is not a loopback address (' + (EVM_RPC || 'unset - that is chain 4663 itself') + '). The fake $RF goes only on an UNFORKED local anvil. Refusing.'); process.exit(2); }
 const KEY = readKey([path.join(HERE, 'deploy.mjs'), path.join(HERE, 'deploylib.mjs')]);
 
 // ---- inputs: addresses only, checksummed, never a key ----
-const RF       = envAddress('RF_TOKEN_ADDRESS');            // $RF on 4663: not in the repo anywhere, so the deployer supplies it; checked for code below
+let RF         = FAKE ? null : envAddress('RF_TOKEN_ADDRESS');   // $RF on 4663: not in the repo anywhere, so the deployer supplies it; checked for code below
 const FEE_TO   = envAddress('FEE_TO_ADDRESS');
-// ATTESTOR/TEAM are ShadowFriends' and are read where the five are planned (below), so --game alone needs neither
+// ATTESTOR is ShadowFriends' and is read where the five are planned (below), so --game alone does not need it. There is no TEAM_ADDRESS any more:
+// ShadowFriends.setAttestor is SET_ATTESTOR in RareRoles (deployer ruling 2026-10-01), held by root and granted to the gamemaster by grant.mjs
 // ---- the game's inputs (--game only). Nothing here has a starting value in the code: each is the deployer's or the chain's ----
 const RULES    = GAME ? envAddress('RARE_RULES') : null;    // RareRules, deployed and frozen by deploy/local-chain.sh (or the deployer) before this phase
 const RULES_ID = GAME ? process.env.RULES_ID : null;
@@ -36,8 +46,8 @@ const N = {
   maxFeeBps:    [1000, 'DESIGN.md question 13, decided 2026-09-30: 10% ceiling'],
   feeBps:       [150, 'DESIGN.md: marketplace fee 1.5%'],
   partners:     ['0x0000000000000000000000000000000000000000', 'no partnership layer deployed; RareMarket accepts zero'],
-  // Ruling 54: a planted terminal's cut, paid OUT OF the market fee, in bps OF THE FEE. Both are the economist's.
-  maxTerminalShareBps: [5000, 'PROPOSED (chain engineer, 2026-10-01) - ruling 54 ceiling: at most half our fee; IMMUTABLE once deployed'],
+  // Ruling 54: a planted terminal's cut, paid OUT OF the market fee: min(fee x share, price x ceiling, fee).
+  maxTerminalPriceBps: [100, 'DECIDED - deployer ruling 2026-10-01: hard ceiling 1% of the sale PRICE; IMMUTABLE once deployed'],
   terminalShareBps:    [3333, 'PROPOSED (chain engineer, 2026-10-01) - ruling 54 size is the economist\'s: a third of the fee, ~0.5% of a sale at 1.5%; setTerminalShareBps changes it'],
   // RareGame (every one a PARAMETER with a starting value; setClocks / setDefaults change them after deploy)
   gameLength:   [168 * 3600, 'DESIGN.md Starting a game: a game is seven days (168 h)'],
@@ -58,7 +68,22 @@ console.log((DRY ? 'DRY RUN - nothing will be sent or written\n' : '') + banner(
 console.log('deployer ' + wallet.address + '  balance ' + eth(await provider.getBalance(wallet.address)));
 const gasPrice = (await provider.getFeeData()).gasPrice;
 console.log('gas price (live) ' + gasPrice + ' wei');
-for (const [n, a] of [['RF_TOKEN_ADDRESS', RF], ...(GAME ? [['RARE_RULES', RULES]] : [])]) if ((await provider.getCode(a)) === '0x') { console.error(n + ' ' + a + ' has no code on 4663. Refusing.'); process.exit(2); }
+let DICE = live.dice, DICE_SRC = 'chainlive.js DICE', RF_SRC = 'env RF_TOKEN_ADDRESS ($RF), has code on 4663';
+if (FAKE) {
+  const info = await requireUnforkedAnvil(provider);
+  console.log('FAKE $RF WORLD: unforked anvil at ' + EVM_RPC + ' (chain ' + info.environment.chainId + ', no fork, no ArbSys) - the real $RF is not here and is not touched');
+  if (GAME) {
+    if (!cfg.fakeRF || !cfg.localEntropy) { console.error(path.basename(cfgFile) + ' has no fakeRF - run deploy.mjs --fake-rf (the five) first. Refusing.'); process.exit(2); }
+    RF = cfg.fakeRF; RF_SRC = 'FakeRF, from ' + path.basename(cfgFile);
+  }
+}
+for (const [n, a] of [...(RF ? [['RF_TOKEN_ADDRESS', RF]] : []), ...(GAME ? [['RARE_RULES', RULES]] : [])]) if ((await provider.getCode(a)) === '0x') { console.error(n + ' ' + a + ' has no code on 4663. Refusing.'); process.exit(2); }
+// The other lock, for a REAL deploy: the token named as $RF must not be the fake one. FakeRF answers IS_FAKE_RF();
+// the real $RF has no such function and the call reverts. Off a loopback anvil this is the end of the run.
+if (RF && !LOCAL) {
+  let fake = false; try { fake = (await provider.call({ to: RF, data: '0x' + id('IS_FAKE_RF()').slice(2, 10) })) !== '0x' + '0'.repeat(64); } catch { fake = false; }
+  if (fake) { console.error('RF_TOKEN_ADDRESS ' + RF + ' answers IS_FAKE_RF() - it is the LOCAL fake $RF. Refusing to deploy against it.'); process.exit(2); }
+}
 
 process.stdout.write('compiling ' + HERE + ' ... ');
 const C = compileAll(); console.log('solc ' + C.solc + ', cancun, optimizer 200');
@@ -109,16 +134,27 @@ if (GAME && !DRY && !cfg.rareRoles) { console.error(path.basename(cfgFile) + ' h
 let roles = cfg.rareRoles || null;
 if (FIVE) {
 const ATTESTOR = envAddress('ATTESTOR_ADDRESS');            // attestor-keygen.mjs printed this on the VPS
-const TEAM     = envAddress('TEAM_ADDRESS');                // immutable in ShadowFriends; zero refused
+if (FAKE) {
+  // the real token's shape, READ from 4663 (eth_call only); cached beside the local chain's scratch for offline runs
+  const shape = await readRealRfShape({ cacheFile: path.join(process.env.HOME || HERE, '.cache/rare-fiends-local/rf-shape.json') });
+  console.log(`\nthe real $RF at ${shape.token}, read ${shape.from === 'live' ? 'live from ' + shape.rpc : 'from ' + shape.from}: "${shape.name}" / ${shape.symbol} / ${shape.decimals} decimals / INITIAL_SUPPLY ${shape.initialSupply}`);
+  RF = await step('FakeRF', C.FakeRF, [A('name_', shape.name, 'real $RF name(), eth_call on 4663'), A('symbol_', shape.symbol, 'real $RF symbol()'),
+    A('decimals_', shape.decimals, 'real $RF decimals()'), A('initialSupply_', shape.initialSupply, 'real $RF INITIAL_SUPPLY(), all minted to the faucet'),
+    A('faucet_', wallet.address, 'the sending wallet: the one address supply enters through')]);
+  RF_SRC = 'FakeRF, step 0a (LOCAL fake $RF)';
+  DICE = await step('LocalEntropy', C.LocalEntropy, []); DICE_SRC = 'LocalEntropy, step 0b (Pyth stand-in; deliver/deliverAuto)';
+  await step('MockGenesis', C.MockGenesis, []);   // a stand-in Genesis collection to sell on the market; open mint, LOCAL only
+  if (!DRY) { cfg.fakeWorld = true; cfg.rfShape = shape; writeFileSync(cfgFile, JSON.stringify(cfg, null, 2) + '\n'); }
+}
 roles = await step('RareRoles', C.RareRoles, [A('deployer_', wallet.address, 'the sending wallet (DEPLOYER_KEY)')]);
 await step('RareFightLog', C.RareFightLog, [A('roles_', roles, 'RareRoles, step 1')]);
 // M20 item 10: the sealed orders' commit and reveal. Holds nothing, takes only Roles; grant.mjs gives the server role RECORD_ORDERS.
 await step('RareOrders', C.RareOrders, [A('roles_', roles, 'RareRoles, step 1')]);
-const shadow = await step('ShadowFriends', C.ShadowFriends, [A('attestor_', ATTESTOR, 'env ATTESTOR_ADDRESS'), A('team_', TEAM, 'env TEAM_ADDRESS (immutable)'), A('roles_', roles, 'RareRoles, step 1 (launch whitelist)')]);
+const shadow = await step('ShadowFriends', C.ShadowFriends, [A('attestor_', ATTESTOR, 'env ATTESTOR_ADDRESS'), A('roles_', roles, 'RareRoles, step 1 (launch whitelist; SET_ATTESTOR)')]);
 if (!DRY) { cfg.attestor = ATTESTOR; writeFileSync(cfgFile, JSON.stringify(cfg, null, 2) + '\n'); }
 await step('RareDuel', C.RareDuel, [
-  A('token_', RF, 'env RF_TOKEN_ADDRESS ($RF), has code on 4663'),
-  A('entropy_', live.dice, 'chainlive.js DICE'), A('provider_', live.provider, 'chainlive.js PROVIDER'),
+  A('token_', RF, RF_SRC),
+  A('entropy_', DICE, DICE_SRC), A('provider_', live.provider, 'chainlive.js PROVIDER'),
   A('counterBps_', terms.counterBps, 'duel.js TERMS'), A('sameBps_', terms.sameBps, 'duel.js TERMS'), A('feeBps_', terms.feeBps, 'duel.js TERMS (house fee zero)'),
   A('feeTo_', FEE_TO, 'env FEE_TO_ADDRESS'),
   A('answerWindow_', N.answerWindow[0], N.answerWindow[1]), A('revealWindow_', N.revealWindow[0], N.revealWindow[1]), A('rollWindow_', N.rollWindow[0], N.rollWindow[1]),
@@ -126,10 +162,10 @@ await step('RareDuel', C.RareDuel, [
 // Ruling 54: the market asks the 1/1 gate whether a terminal's shadow is a one-of-one, so the gate is deployed first.
 const gate = await step('RareDoopieGate', C.RareDoopieGate, [A('shadows_', shadow, 'ShadowFriends, step 4')]);
 await step('RareMarket', C.RareMarket, [
-  A('rf_', RF, 'env RF_TOKEN_ADDRESS ($RF)'), A('roles_', roles, 'RareRoles, step 1'), A('partners_', N.partners[0], N.partners[1]),
+  A('rf_', RF, RF_SRC), A('roles_', roles, 'RareRoles, step 1'), A('partners_', N.partners[0], N.partners[1]),
   A('maxFeeBps_', N.maxFeeBps[0], N.maxFeeBps[1]), A('feeBps_', N.feeBps[0], N.feeBps[1]), A('feeTo_', FEE_TO, 'env FEE_TO_ADDRESS'),
   A('shadows_', shadow, 'ShadowFriends, step 4 (immutable: the terminal cut is paid to its ownerOf)'), A('gate_', gate, 'RareDoopieGate, step 6'),
-  A('maxTerminalShareBps_', N.maxTerminalShareBps[0], N.maxTerminalShareBps[1]), A('terminalShareBps_', N.terminalShareBps[0], N.terminalShareBps[1])]);
+  A('maxTerminalPriceBps_', N.maxTerminalPriceBps[0], N.maxTerminalPriceBps[1]), A('terminalShareBps_', N.terminalShareBps[0], N.terminalShareBps[1])]);
 }
 if (GAME) {
   // RareGame.sol:83 `currentRulesId` is written once per game: the ladder under it must already be frozen (RareRules.sol:45 `frozen`).
@@ -143,7 +179,7 @@ if (GAME) {
   }
   await step('RareGame', C.RareGame, [
     A('roles_', roles, cfg.rareRoles ? 'RareRoles, from ' + path.basename(cfgFile) : 'RareRoles, step 1 (predicted, dry run)'),
-    A('rf_', RF, 'env RF_TOKEN_ADDRESS ($RF), has code on 4663'), A('feeTo_', FEE_TO, 'env FEE_TO_ADDRESS'),
+    A('rf_', RF, RF_SRC), A('feeTo_', FEE_TO, 'env FEE_TO_ADDRESS'),
     A('length_', N.gameLength[0], N.gameLength[1]), A('joinWindow_', N.joinWindow[0], N.joinWindow[1]), A('startDelay_', N.startDelay[0], N.startDelay[1]),
     A('cutBps_', N.cutBps[0], N.cutBps[1]), A('places_', N.places[0], N.places[1]),
     A('minPlayers_', N.minPlayers[0], N.minPlayers[1]), A('rulesId_', RULES_ID, 'env RULES_ID, frozen on RareRules ' + RULES)]);

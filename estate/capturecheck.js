@@ -137,6 +137,47 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     let msg = 'accepted'; try { base.capture.fightBack(w, __cc.ctx(4)); } catch (e) { msg = e.message; } return { open: base.capture.isOpen(w), msg }; })()`);
   ok('abort() closes the window and a fight on it is refused', f4 && f4.open === false && /closed/.test(f4.msg), JSON.stringify(f4));
 
+  // 6. WHO KEEPS THE BUILDING (ruling of 2026-10-01): only a killed intruder returns it; a defence that cannot
+  //    beat or reach it loses the takeover; an intruder that runs leaves it with the owner.
+  //    The base's VIEW is substituted (the defenders the fight sees), never the rule: the real
+  //    Combat.captureFight and the real fightBack / onIntruderWon run on it.
+  await ev(`window.__view = (edit) => { const C = window.Combat, real = C.captureFight;
+    C.captureFight = (R, D, it, ctx, o) => { const v = edit(D, it); return real(R, v.D, v.it, ctx, o); };
+    return () => { C.captureFight = real; }; }; true`);
+  const after6 = (label, edit) => ev(`(() => { const b = __cc.pick(0), owner0 = b.base; const w = base.capture.begin(b, { gen: 6, name: '${label}' });
+    const undo = __view(${edit}); let r; try { r = base.capture.fightBack(w, __cc.ctx(60)); } catch (e) { undo(); return { threw: e.message }; } undo();
+    let again = 'accepted'; try { base.capture.fightBack(w, __cc.ctx(61)); } catch (e) { again = e.message; }
+    return { reason: r.reason, winner: r.winner, won: r.won, beaten: r.beaten, undefended: r.undefended, shots: r.shots, rolls: r.rolls, intruderHp: r.intruderHp,
+      claimStands: base.capture.claimOn(b) === w, bClaim: b.claim === w, baseSame: b.base === owner0, wwon: w.won, wonAt: w.wonAt, returned: w.returned,
+      window: w.closes - w.opened, open: base.capture.isOpen(w), again }; })()`);
+  // 6a. nobody home: every Friend sent out (the view has no defenders)
+  const nh = await after6('nobody-home', '(D, it) => ({ D: Object.assign({}, D, { defenders: [] }), it })');
+  ok('NOBODY HOME: the intruder wins the takeover - winner attack, reason "wiped", no roll taken, hp untouched',
+    nh && nh.winner === 'attack' && nh.reason === 'wiped' && nh.won === true && nh.undefended === true && nh.rolls === 0 && nh.intruderHp > 0, JSON.stringify(nh));
+  ok('NOBODY HOME: the claim STANDS on the building (claimOn(b) is the window, w.won, not returned) and the window keeps its 300,000 ms',
+    nh && nh.claimStands && nh.bClaim && nh.wwon === true && typeof nh.wonAt === 'number' && nh.returned === false && nh.window === 300000, JSON.stringify(nh));
+  ok('NOBODY HOME: the owner\'s fight-back is spent - not open, a second fight refused', nh && nh.open === false && /closed/.test(nh.again), JSON.stringify(nh));
+  // 6b. out of reach: the intruder walled in on its own spot (it is spared, so it may not break out), the
+  //     only defenders far off on HOLD. Nobody can move or shoot: a stalemate, and the intruder's.
+  const box = `(D, it) => { const x = it.x, y = it.y; return { it, D: Object.assign({}, D, {
+      walls: [{x:x-1,y:y-1},{x:x+1,y:y-1},{x:x-1,y:y+1},{x:x+1,y:y+1},{x:x-1,y,vert:true},{x:x+1,y,vert:true}],
+      defenders: [{gen:3,x:x+40,y:y+40,tower:false,order:0},{gen:2,x:x+41,y:y+40,tower:false,order:0}] }) }; }`;
+  const st = await after6('walled-in', box);
+  ok('OUT OF REACH: a walled-in intruder nobody can reach ends in a STALEMATE that the intruder wins - reason "stalemate", winner attack, no shot',
+    st && st.reason === 'stalemate' && st.winner === 'attack' && st.won === true && st.shots === 0 && st.beaten === false, JSON.stringify(st));
+  ok('OUT OF REACH: the claim stands on the building, the building is not returned, and the fight-back is spent',
+    st && st.claimStands && st.bClaim && st.baseSame && st.wwon === true && st.returned === false && st.open === false && /closed/.test(st.again), JSON.stringify(st));
+  // 6c. the contrast, on the same machinery: killed returns it (section 2 proves the rest of that), ran leaves it
+  ok('KILLED (section 2, read again): the building went back - the only end that returns it', back && back.returned === true && back.claim === null && back.base === back.owner, JSON.stringify(back));
+  const ran = await ev(`(() => { const b = __cc.pick(0), owner0 = b.base; const w = base.capture.begin(b, { gen: 1, name: 'runs' });
+    const r = base.capture.fightBack(w, __cc.ctx(62), { abortMs: 1 });
+    const w2 = base.capture.begin(__cc.pick(1) || b, { gen: 3, name: 'leaves' }); base.capture.abort(w2);
+    return { reason: r.reason, won: r.won, claim: b.claim === null, claimOn: base.capture.claimOn(b) === null ? null : 'a claim', baseSame: b.base === owner0, wwon: w.won,
+      abortClaim: w2.building.claim === null, abortOn: base.capture.claimOn(w2.building) === null ? null : 'a claim' }; })()`);
+  ok('RAN (abortMs, and abort()): the claim is gone from the building and the owner keeps it - never won',
+    ran && ran.reason === 'fled' && ran.won === false && ran.claim && ran.claimOn === null && ran.baseSame && ran.wwon === false && ran.abortClaim && ran.abortOn === null,
+    JSON.stringify(ran));
+
   ok('the page loaded and ran clean (pagewatch: no 4xx/5xx, no error logged)', watch.clean(), watch.why());
   console.log(bad ? '\n' + bad + ' FAILED' : '\nALL PASS');
   } finally { if (process.env.BREAK !== 'leak') await require('./pagewatch.js').shutdown(ch, prof); }

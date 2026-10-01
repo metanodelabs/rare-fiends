@@ -61,7 +61,12 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   let bad = 0; const ok = (n, c, v) => { console.log((c ? '  ok  ' : 'FAIL  ') + n + (c ? '' : '   -> ' + v)); if (!c) bad++; };
 
   try {
-    await sleep(2000);
+    // Waited on the page itself, not a stopwatch: a fixed 2 s was a claim about how much CPU the run had, and
+    // under `-j 4` base.html was not up yet - the first J() then threw on a ReferenceError and took the check down.
+    const READY = '!!(window.base && base.SETS && base.ROSTER && base.FACINGS && base.headingFacing && base.setFrame)';
+    const t0 = Date.now();
+    while (Date.now() - t0 < 30000 && (await ev(READY)) !== true) await sleep(250);
+    console.log('      (waited ' + (Date.now() - t0) + ' ms of wall clock for the estate, at most 30000)');
     ok('the estate is up and its sprite tables are on the page',
       await ev('!!(window.base && base.SETS && base.ROSTER && base.FACINGS && base.headingFacing && base.setFrame)') === true,
       await J('Object.keys(window.base||{}).filter(k=>/SET|ROSTER|FACING|Frame|Facing/.test(k))'));

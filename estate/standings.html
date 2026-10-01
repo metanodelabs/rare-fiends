@@ -100,7 +100,9 @@ tr.row:hover td { background: rgba(255,255,255,.04); }
     players: [
       { k: 'rank', t: '#' }, { k: 'token', t: 'GENESIS' },
       { k: 'banked', t: 'BANKED', num: true },
-      { k: 'land', t: 'LAND', num: true, hide: true }, { k: 'hired', t: 'HIRED', num: true, hide: true },
+      // TEAM UP (ruling 38): partnerships replace hiring. Nothing records a partnership yet - RarePartners is
+      // not deployed and standings-data.json carries none - so the column says so rather than show a number.
+      { k: 'land', t: 'LAND', num: true, hide: true }, { k: 'team', t: 'TEAM UP', hide: true, fixed: true },
     ],
     friends: [
       { k: 'rank', t: '#' }, { k: 'token', t: 'FRIEND' },
@@ -118,11 +120,11 @@ tr.row:hover td { background: rgba(255,255,255,.04); }
   }
   function render() {
     $('head').innerHTML = '<tr>' + COLS[tab].map(c =>
-      '<th class="' + (c.num ? 'num ' : '') + (c.hide ? 'hide-s' : '') + '" data-k="' + c.k + '"' +
+      '<th class="' + (c.num ? 'num ' : '') + (c.hide ? 'hide-s' : '') + '" data-k="' + c.k + '"' + (c.fixed ? ' style="cursor:default"' : '') +
       (sort === c.k ? ' data-on="1"' : '') + '>' + c.t + '</th>').join('') + '</tr>';
     $('head').querySelectorAll('th').forEach(th => th.addEventListener('click', () => {
       const k = th.dataset.k;
-      if (k === 'rank') return;
+      if (k === 'rank' || COLS[tab].find(c => c.k === k).fixed) return;   // TEAM UP has nothing to sort by
       if (sort === k) dir = -dir; else { sort = k; dir = -1; }
       render();
     }));
@@ -136,22 +138,26 @@ tr.row:hover td { background: rgba(255,255,255,.04); }
           ' · ' + r.n + ' genesis · ' + r.plan + '</span></td>',
         '<td class="num"><span class="val sig">' + r.banked.toLocaleString() + '</span><span class="sub">crystals</span></td>',
         '<td class="num hide-s"><span class="val">' + r.land + '</span><span class="sub">tiles</span></td>',
-        '<td class="num hide-s"><span class="val">' + r.hired + '</span><span class="sub">mercs</span></td>',
+        // no partnership is recorded anywhere yet, so nothing is shown as one - not even "none"
+        '<td class="hide-s"><span class="pill off">NOT RECORDED</span></td>',
       ] : [
         '<td class="rank' + (place <= 3 ? ' top' : '') + '">' + place + '</td>',
-        '<td><span class="tok">Friend #' + r.token + '</span><span class="sub">Gen ' + r.gen +
-          ' · ' + r.wage + ' RF or ' + r.share + '%</span></td>',
+        '<td><span class="tok">Friend #' + r.token + '</span><span class="sub">Gen ' + r.gen + '</span></td>',
         '<td class="num"><span class="val sig">' + r.earned + '</span><span class="sub">RF earned</span></td>',
-        '<td><span class="pill ' + (r.status === 'dormant' ? 'off' : r.status === 'free' ? '' : 'on') + '">' +
-          r.status.toUpperCase() + '</span></td>',
+        // 'hired' is hiring's status, and hiring is removed (M16 item 8): the sample still carries it, the page does not show it
+        r.status === 'hired' ? '<td><span class="sub">—</span></td>' :
+        '<td><span class="pill ' + (r.status === 'dormant' ? 'off' : r.status === 'free' ? '' : 'on') + '">' + r.status.toUpperCase() + '</span></td>',
         '<td class="num hide-s"><span class="val">' + r.served + '</span><span class="sub">tourneys</span></td>',
       ];
       tr.innerHTML = cells.join('');
       body.appendChild(tr);
     });
     $('note').textContent = tab === 'players'
-      ? 'Standing is crystals banked when the era closes. Land and Genesis counts are read from the chain; era figures are illustrative until an era runs.'
-      : 'Each Friend shows its generation, what it has earned, and where it is now. Dormant Friends must be woken before they can serve. Figures are illustrative until an era runs.';
+      ? 'Standing is crystals banked when the era closes. Land and Genesis counts are read from the chain; era figures are illustrative until an era runs. ' +
+        'TEAM UP: two players can partner and share what each earns from then on, at a split they agree between them. Genesis teams up with Genesis, Generation with Generation, one partnership at a time at launch, and each keeps the controls of their own base. ' +
+        'No partnership is recorded anywhere yet - nothing in the game or on chain holds one - so the TEAM UP column has nothing to show.'
+      : 'Each Friend shows its generation, what it has earned, and where it is now. Dormant Friends must be woken before they can serve. Figures are illustrative until an era runs. ' +
+        'Hiring is gone - partnerships replace it - so a Friend shows no wage, no share and no hired status.';
   }
   $('tabs').addEventListener('click', (e) => {
     const b = e.target.closest('button'); if (!b) return;

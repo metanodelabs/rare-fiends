@@ -79,6 +79,9 @@ contract RareRules {
         uint32[] capacity;       // per level: a silo's crystals (hundredths), a wall's crew, a depot's harvesters, a store's P.h
         uint32[] reach;          // per level, in tiles; 0 for a kind that reaches nowhere
         int16[] footprint;       // relative tile offsets, x,y pairs; a one-tile building is [0, 0]
+        uint8 hands;             // M8 item 3 (schema.json buildingType.hands, uint8, ONE per kind - not per level): the
+                                 // ceiling on Friends working one build. record.js `ceiling` reads it; each Friend up to
+                                 // it takes the time down linearly, past it another adds nothing. PROPOSED 4, a wall's 2
         Placement placement;
         uint16 abilityId;        // 0 = none. A pointer to behaviour at an address this contract does not know -
                                  // an ability table does not exist yet, and the id is stored so the row has the slot
@@ -188,6 +191,7 @@ contract RareRules {
         s.capacity = k.capacity;
         s.reach = k.reach;
         s.footprint = k.footprint;
+        s.hands = k.hands;
         // field by field: a calldata struct holding a dynamic array cannot be assigned to storage whole
         Placement storage p = s.placement;
         p.needsKeep = k.placement.needsKeep;

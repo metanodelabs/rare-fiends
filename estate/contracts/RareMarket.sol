@@ -115,7 +115,7 @@ interface IRarePartners {
 /// anywhere names another), the partnership claim, the fee ceiling, the registry it asks about demo mode,
 /// the escrow-free shape, **and the terminal's cut (below): where it comes from, its ceiling, its shadow
 /// token and the form of what the server signs.** **What can:** a collection, through the switch, with no
-/// redeploy; the terminal's share under its ceiling; and which gate answers *is this a one-of-one*.
+/// redeploy; the terminal's share of the fee (the 1%-of-price ceiling never moves); and which gate answers *is this a one-of-one*.
 ///
 /// ## A planted terminal's cut (DESIGN ruling 54, M20 item 20)
 ///
@@ -143,8 +143,15 @@ interface IRarePartners {
 /// share **of the fee** the sale already pays, so the buyer pays and the seller receives exactly what they
 /// would without a terminal, and `quote()` is unchanged. The alternative - a cut out of the seller's money, as
 /// the partner's is - would let a BUYER standing at their own terminal take part of a SELLER's proceeds
-/// without the seller agreeing to anything. Out of the fee, the worst any abuse can do is spend our fee,
-/// bounded by `maxTerminalShareBps`. A trade with no terminal pays exactly as it always did: `buy` and
+/// without the seller agreeing to anything. Out of the fee, the worst any abuse can do is spend our fee.
+///
+/// **The cut, exactly** (deployer ruling, 2026-10-01): `min(fee × terminalShareBps / 10000, price ×
+/// maxTerminalPriceBps / 10000, fee)`. The second term is the HARD CEILING - **a terminal's owner never receives
+/// more than 1% of a sale** (`maxTerminalPriceBps` = 100, immutable) - and it holds whatever the fee is set to,
+/// up to the fee's own 10% ceiling. The third term means the cut can never exceed the fee actually taken.
+///
+/// **A 1/1 holder trading at their own terminal is paid the cut.** Decided by the deployer (2026-10-01), not
+/// overlooked: there is deliberately no `host == buyer || host == seller` exclusion. A trade with no terminal pays exactly as it always did: `buy` and
 /// `acceptOffer` keep their signatures and settle through the same path with nothing about a terminal read.
 contract RareMarket is EIP712 {
     using SafeERC20 for IERC20;
@@ -167,9 +174,10 @@ contract RareMarket is EIP712 {
     /// @notice the shadow token whose `ownerOf` is paid a terminal's cut. Permanent: it is the ledger of who
     /// holds a 1/1 on this chain, and a settable one would be a lever that names a payee.
     IERC721 public immutable shadows;
-    /// @notice the most of our fee a terminal may ever be given, in bps OF THE FEE (10,000 = all of it). Fixed
-    /// at deployment so a holder of `SET_TERMINAL` cannot hand our whole fee to a 1/1 they hold.
-    uint16 public immutable maxTerminalShareBps;
+    /// @notice the HARD CEILING on a terminal's cut, in bps OF THE SALE PRICE: 100, so a terminal's owner never
+    /// receives more than 1% of a sale (deployer ruling, 2026-10-01). Fixed at deployment, so no holder of
+    /// `SET_TERMINAL` and no fee change can lift it. The cut is also never more than the fee actually taken.
+    uint16 public immutable maxTerminalPriceBps;
     /// @notice how long a terminal authorization may live, at most: the deadline it carries must be no more
     /// than this far ahead. The same fifteen minutes as `ShadowFriends.CLAIM_TTL`, for the same reason - a
     /// signature is a standing permission and it should not stand longer than the act it permits.
@@ -204,7 +212,8 @@ contract RareMarket is EIP712 {
     /// first and opened deliberately, not left open and policed."*
     mapping(address => bool) public tradeable;
     /// @notice the terminal's share of OUR fee, in bps of the fee. Starts at a constructor argument whose
-    /// value is PROPOSED (the economist's, ruling 54); never above `maxTerminalShareBps`.
+    /// value is PROPOSED (the economist's, ruling 54); at most 10,000 (the whole fee). Whatever it is, the cut
+    /// paid is capped by `maxTerminalPriceBps` of the price and by the fee itself.
     uint16 public terminalShareBps;
     /// @notice who answers *is this shadow a one-of-one* - `RareDoopieGate`, which is the repairable tier by
     /// its own design (a collection can rename a trait), so it is re-pointable here behind `SET_TERMINAL`
@@ -332,8 +341,8 @@ contract RareMarket is EIP712 {
     /// address - is a lever that redirects a seller's money, in the one contract that must not have one.
     /// @param shadows_ `ShadowFriends`: whose `ownerOf` a terminal's cut is paid to. Immutable.
     /// @param gate_ `RareDoopieGate`: re-pointable later behind SET_TERMINAL. Both must hold code.
-    /// @param maxTerminalShareBps_ the ceiling on the terminal's share, in bps OF THE FEE. Immutable.
-    /// @param terminalShareBps_ the starting share - PROPOSED, the economist's to set (ruling 54).
+    /// @param maxTerminalPriceBps_ the HARD CEILING on the cut, in bps OF THE PRICE - 100, decided. Immutable.
+    /// @param terminalShareBps_ the starting share of the fee - PROPOSED, the economist's to set (ruling 54).
     constructor(
         address rf_,
         address roles_,
@@ -343,7 +352,7 @@ contract RareMarket is EIP712 {
         address feeTo_,
         address shadows_,
         address gate_,
-        uint16 maxTerminalShareBps_,
+        uint16 maxTerminalPriceBps_,
         uint16 terminalShareBps_
     ) EIP712("RareMarket", "1") {
         if (rf_ == address(0) || roles_ == address(0) || feeTo_ == address(0)) revert ZeroAddress();
@@ -352,8 +361,8 @@ contract RareMarket is EIP712 {
         if (gate_.code.length == 0) revert NotAContract(gate_);
         if (maxFeeBps_ > 10_000) revert CeilingAboveWhole(maxFeeBps_);
         if (feeBps_ > maxFeeBps_) revert FeeAboveCeiling(feeBps_, maxFeeBps_);
-        if (maxTerminalShareBps_ > 10_000) revert CeilingAboveWhole(maxTerminalShareBps_);
-        if (terminalShareBps_ > maxTerminalShareBps_) revert FeeAboveCeiling(terminalShareBps_, maxTerminalShareBps_);
+        if (maxTerminalPriceBps_ > 10_000) revert CeilingAboveWhole(maxTerminalPriceBps_);
+        if (terminalShareBps_ > 10_000) revert FeeAboveCeiling(terminalShareBps_, 10_000);
         rf = IERC20(rf_);
         roles = IRareRoles(roles_);
         partners = IRarePartners(partners_);
@@ -362,7 +371,7 @@ contract RareMarket is EIP712 {
         feeTo = feeTo_;
         shadows = IERC721(shadows_);
         gate = IDoopieGate(gate_);
-        maxTerminalShareBps = maxTerminalShareBps_;
+        maxTerminalPriceBps = maxTerminalPriceBps_;
         terminalShareBps = terminalShareBps_;
         // the opening state, so the log starts at deployment rather than at the first change
         emit FeeBpsSet(feeBps_, msg.sender);
@@ -391,11 +400,21 @@ contract RareMarket is EIP712 {
         toSeller = uint256(price) - fee - owed;   // reverts on an over-claim, the same as a real sale would
     }
 
-    /// @notice what a terminal would be paid out of a fee of `fee`, and to whom, if a sale settled now: zero
-    /// and nobody unless the shadow is a live one-of-one. The buyer's price and the seller's proceeds are
-    /// `quote()`'s, unchanged - the cut is inside `fee`, never added to it. Never reverts, so a broken gate
-    /// or a burned shadow cannot stop a sale; it can only stop the cut.
-    function terminalCut(uint256 shadowId, uint256 fee) public view returns (address host, uint256 paid) {
+    /// @notice how much a terminal's cut is on a sale at `price` paying `fee`, before asking who (if anyone)
+    /// is owed it: `min(fee × share, price × maxTerminalPriceBps, fee)`. Never more than 1% of the price
+    /// (the immutable ceiling) and never more than the fee actually taken, whatever the fee and share are set to.
+    function terminalCutAmount(uint256 price, uint256 fee) public view returns (uint256 paid) {
+        paid = (fee * terminalShareBps) / 10_000;
+        uint256 cap = (price * maxTerminalPriceBps) / 10_000;   // the hard ceiling, in bps of the PRICE
+        if (paid > cap) paid = cap;
+        if (paid > fee) paid = fee;                               // the cut comes out of the fee, never past it
+    }
+
+    /// @notice what a terminal would be paid on a sale at `price` paying `fee`, and to whom, if it settled
+    /// now: zero and nobody unless the shadow is a live one-of-one. The buyer's price and the seller's
+    /// proceeds are `quote()`'s, unchanged - the cut is inside `fee`, never added to it. Never reverts, so a
+    /// broken gate or a burned shadow cannot stop a sale; it can only stop the cut.
+    function terminalCut(uint256 shadowId, uint256 price, uint256 fee) public view returns (address host, uint256 paid) {
         try gate.isOneOfOne(shadowId) returns (bool one) {
             if (!one) return (address(0), 0);
         } catch {
@@ -406,7 +425,7 @@ contract RareMarket is EIP712 {
         } catch {
             return (address(0), 0);
         }
-        paid = (fee * terminalShareBps) / 10_000;
+        paid = terminalCutAmount(price, fee);
     }
 
     /// @notice the EIP-712 digest a `TerminalSale` is signed over, so the server and a page can compute the
@@ -614,7 +633,7 @@ contract RareMarket is EIP712 {
             // scoped so the host's two words leave the stack before `Sold` needs nine
             address host;
             uint256 hostPaid;
-            if (via) (host, hostPaid) = terminalCut(shadowId, fee);
+            if (via) (host, hostPaid) = terminalCut(shadowId, s.price, fee);
             if (fee - hostPaid != 0) rf.safeTransferFrom(s.buyer, feeTo, fee - hostPaid);
             if (hostPaid != 0) rf.safeTransferFrom(s.buyer, host, hostPaid);   // the terminal, out of our fee
             if (via) emit TerminalCut(s.collection, s.tokenId, shadowId, host, hostPaid);
@@ -642,10 +661,11 @@ contract RareMarket is EIP712 {
         emit FeeToSet(to, msg.sender);
     }
 
-    /// @notice set the terminal's share of our fee. Never above the ceiling fixed at deployment.
+    /// @notice set the terminal's share of our fee, at most the whole fee. Whatever it is set to, the cut paid
+    /// never passes `maxTerminalPriceBps` of the price (1%) - that ceiling is immutable and no setter reaches it.
     function setTerminalShareBps(uint16 bps) external {
         roles.requirePower(msg.sender, SET_TERMINAL);
-        if (bps > maxTerminalShareBps) revert FeeAboveCeiling(bps, maxTerminalShareBps);
+        if (bps > 10_000) revert FeeAboveCeiling(bps, 10_000);
         if (bps == terminalShareBps) revert TerminalShareUnchanged();
         terminalShareBps = bps;
         emit TerminalShareSet(bps, msg.sender);

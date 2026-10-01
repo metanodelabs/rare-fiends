@@ -219,6 +219,10 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
     maxFeeBps:    { v: 10,  u: '%', src: 'Ruling 1 (2026-09-30): the marketplace fee\'s ceiling is 10% (1000 basis points). A constructor argument, immutable once deployed.' },
     minPlayers:   { v: 2,   u: 'players', src: 'DECIDED: "It is 2 and it is decided" - the fewest players a game needs to start.' },
     partnerWait:  { v: 24,  u: 'h', src: 'Set the waiting period - how long a paused partnership has to agree new terms before it ends by itself. "24 hours to start".' },
+    // THE FIGHT'S THREE SETTINGS, decided 2026-10-01. There is no fourth: ruling 47 removed the fight's clock.
+    fightSpeed:   { v: 1,   u: 'tiles/s', src: 'Ruling 44 (2026-10-01): every Friend walks at the same speed, 1 tile a second - the starting value, and a deployer setting, so it can be tuned after testing.' },
+    coverDiv:     { v: 2,   u: '÷', src: 'Ruling 45 (2026-10-01): standing BEHIND a wall gives no protection; standing ON a standing wall - the wall\'s crew - gives 50%, read as halving the chance a shot lands. A wall keeps its strength and can be broken, and its crew lose the cover when it falls.' },
+    defendReach:  { v: 5,   u: 'tiles', src: 'Ruling 46 (2026-10-01): an ENGAGE + DEFEND Friend strays at most 5 tiles from its post.' },
   };
   // The two thresholds behind the game-length warning. M4 item 13, and both are decided.
   const CAP_USEFUL = 96, CAP_BUILD = 64;
@@ -307,8 +311,29 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
   }
   const gameWin = () => { try { const w = $('pBase').contentWindow.base; return (w && w.ECON) ? w : null; } catch (e) { return null; } };
   const G = () => { const w = gameWin(); return w ? w.ECON : null; };
-  // the fight's rules as combat.js builds them from the game's tables with NO proposal passed - the defaults the fight runs on today
-  const CR = () => { const E = G(); if (!E || typeof Combat === 'undefined' || !Combat.rulesFrom) return null; try { return Combat.rulesFrom(E, {}); } catch (e) { return null; } };
+  // the fight's rules as the GAME builds them: the combat.js the probed game loaded, run on the game's tables with
+  // no settings passed - which is how the game calls it (index.html fightBack: Combat.rulesFrom(V)). Not this page's
+  // own copy of combat.js: a setting is proved where the game reads it, not where this page happens to load it.
+  const GC = () => { try { const w = $('pBase').contentWindow; return (w && w.base && w.Combat && w.Combat.rulesFrom) ? w.Combat : null; } catch (e) { return null; } };
+  const CR = () => { const E = G(), C = GC(); if (!E || !C) return null; try { return C.rulesFrom(E); } catch (e) { return null; } };
+  // RULING 45, PROVED RATHER THAN NAMED: one bow shot (generation 3) at a generation 3 defender, fought by the game's
+  // own Combat.fight on its own test ground (Combat.proving), three ways - standing ON the wall, standing BEHIND it,
+  // and in the open - and the chance each first shot was given (the log's bps) read back. The rule is "on a wall",
+  // not "behind a wall", only if ON is the open chance ÷ coverDiv and BEHIND is the open chance unchanged.
+  function coverProof() {
+    const E = G(), C = GC(), w = $('pBase').contentWindow, Ch = w && w.Chance; if (!E || !C || !Ch || !C.proving) return null;
+    try {
+      const R = C.rulesFrom(E), ctx = { word: Ch.hex(Ch.keccak256(Ch.encode(45))), contract: Ch.PREVIEW_CONTRACT, chainId: Ch.CHAIN_ID, fightId: 1 };
+      const first = (opt) => { const b = C.proving(3, opt);
+        const r = C.fight(R, { attackers: [3], entry: C.entry(b, 'N', 2), walls: b.walls, defenders: b.defenders }, ctx, { log: true });
+        const e = r.log.find((x) => x.who[0] === 'A' && x.at[0] === 'D'); return e ? e.bps : null; };
+      const on = first({ onWall: true }), behind = first({ wall: true }), open = first({});
+      if (on == null || behind == null || open == null) return { c: 'nr', t: 'NOT READABLE — the test fight fired no shot at the defender' };
+      const good = behind === open && on === Math.floor(open / R.coverDiv) && on < open;
+      return { c: good ? 'ag' : 'no', t: (good ? 'AGREES — THE GAME COVERS A FRIEND ON A WALL, NOT BEHIND ONE: ' : 'DISAGREES WITH RULING 45 — ') +
+        'a shot lands ' + on / 100 + '% ON a wall, ' + behind / 100 + '% BEHIND it, ' + open / 100 + '% in the open (combat.js, run in the game)' };
+    } catch (e) { return { c: 'no', t: 'DISAGREES — the game\'s Combat.fight threw: ' + e.message }; }
+  }
   const eraWin = () => { try { const e = $('pEra').contentWindow.era; return (e && e.S) ? e : null; } catch (e) { return null; } };
 
   // amounts are stored in hundredths; the divisor is the game's own crystalUnit, read and never typed. No unit, no number.
@@ -427,22 +452,20 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
       read: () => { const g = G(); return g && g.combat.towerRange; }, where: 'base.ECON.combat.towerRange' },
     { g: 'fight', id: 'landVsBuilding', k: 'What land damage does to a building', e: 'rules', f: 'landVsBuildingBps', u: 'bps',
       read: () => { const g = G(); return g && g.combat.landVsBuildingBps; }, where: 'base.ECON.combat.landVsBuildingBps' },
-    // The four are PROPOSED TOGETHER (question 21): the corpus of measured fight lengths - 1v1 gen6 35.3 s, 3v3 50.2 s,
-    // 12v12 gen6 with 6 walls 53.1 s, 12v12 with 16 walls 81.9 s - was measured with speed 1, cover ÷2 and a 5-tile
-    // reach, and the clock is set FROM that corpus. Move one and the other three are measured against a fight that no
-    // longer exists. CURRENT is read out of combat.js (Combat.rulesFrom defaults), never typed here; PROPOSED is pv.
-    { g: 'fight', id: 'maxMs', k: "The fight's clock", e: 'rules', f: 'maxMs', u: 's', prop: true, tab: true, pv: 120,
-      read: () => { const R = CR(); return R && R.maxMs / 1000; }, where: 'Combat.rulesFrom default (combat.js) - the fight reads it, nothing sets it',
-      s: '<b>PROPOSED 120 s - keep.</b> The longest measured fight, the declared maximum (12v12, 16 walls), ends at 81.9 s, so 120 s (1.47× that) lets every measured fight end by force and none by clock. <b>Lower it</b> to 90 s and the wall-heavy fight sits 10% under the clock: a defence that builds walls starts winning by the clock instead of the fight. <b>Raise it</b> and the replay reference (gas.json fightMax, fought to the clock) grows with it; a v1 fight resolves on the server, so nothing on chain pays for the extra seconds. One of the five PROPOSED rules fields the schema says blocks freezing the table per game.' },
-    { g: 'fight', id: 'speed', k: 'Walking pace in a fight', e: 'rules', f: 'stepMs', u: 'tiles/s', prop: true, tab: true, pv: 1,
-      read: () => { const R = CR(); return R && 1000 / (2 * R.stepMs); }, where: 'Combat.rulesFrom default (combat.js), read back out of stepMs: a spot is half a tile',
-      s: '<b>PROPOSED 1 tile/s - keep.</b> It decides the free shots a longer weapon gets while the other closes: catapult (5 tiles) over club (0.5) is 4.5 s of walking, two siege shots at 3.2 s a shot; bow (3) over club is one shot. <b>Faster</b> and range stops mattering - a gen 6 club closes on a gen 2 crossbow before it fires twice, and the six generations collapse toward hit points alone. <b>Slower</b> and the three ranged generations kill melee before contact, and every fight in the corpus lengthens, so the clock has to move with it. Friends on the base ease toward each step; this is the only set pace in the game.' },
-    { g: 'fight', id: 'coverDiv', k: 'Cover behind a wall', e: 'rules', f: 'coverDiv', u: '÷', prop: true, tab: true, pv: 2,
-      read: () => { const R = CR(); return R && R.coverDiv; }, where: 'Combat.rulesFrom default (combat.js)',
-      s: '<b>PROPOSED ÷2 - keep.</b> An equal-generation shot lands 50% of the time (the hit-points ratio); behind a standing wall, 25%. Measured: going from 6 walls to 16 lengthened 12v12 from 53.1 s to 81.9 s (+54%), which is the wall earning its cost without deciding the fight. <b>÷3</b> and the same fight heads for the clock - see the clock\'s trade-off. <b>÷1</b> and a wall is only something to walk around and knock down, so the wall\'s 400 HP is the whole of what it buys.' },
-    { g: 'fight', id: 'defendReach', k: 'How far ENGAGE + DEFEND strays', e: 'rules', f: 'defendReach', u: 'tiles', prop: true, tab: true, pv: 5,
-      read: () => { const R = CR(); return R && R.defendReach / 2; }, where: 'Combat.rulesFrom default (combat.js), read back out of defendReach in spots',
-      s: '<b>PROPOSED 5 tiles - keep.</b> Five is the longest weapon range (catapult), so a DEFEND Friend can reach an attacker shelling its post from the far edge of any range in the game. <b>Below 5</b> a catapult stands off and shells a post its defender is not allowed to leave - DEFEND becomes HOLD with extra steps. <b>Above 5</b> DEFEND drifts into ENGAGE and the third standing order has no reason to exist. Not measured against a base\'s size, which the map decides; that comparison is owed.' },
+    // THE FIGHT'S SETTINGS, DECIDED 2026-10-01 (rulings 44, 45, 46). There were four, proposed together; ruling 47
+    // removed the fourth, the fight's clock - a fight runs until one side wins - so it has no row. What each card
+    // shows is read out of the combat.js THE GAME loaded (GC), built the way the game builds it, and compared with
+    // the ruling; nothing here is a copy of the number the fight uses. They are deployer settings by ruling and
+    // this page cannot set them yet: nothing the game reads carries them except combat.js's own defaults.
+    { g: 'fight', id: 'speed', k: 'Walking pace in a fight', e: 'rules', f: 'stepMs', u: 'tiles/s', dec: 'fightSpeed', ro: true, exp: () => DEC.fightSpeed.v,
+      read: () => { const R = CR(); return R ? 1000 / (2 * R.stepMs) : undefined; }, where: 'Combat.rulesFrom in the game (combat.js), read back out of stepMs: a spot is half a tile',
+      s: '<b>Every Friend, 1 tile a second.</b> It decides the free shots a longer weapon gets while the other closes: catapult (5 tiles) over club (0.5) is 4.5 s of walking. <b>A deployer setting by ruling 44, and not settable from this page yet:</b> the game calls <code>Combat.rulesFrom</code> with no settings, so the pace it runs is combat.js\'s own default, and changing it today means changing that file.' },
+    { g: 'fight', id: 'coverDiv', k: 'Cover on a wall', e: 'rules', f: 'coverDiv', u: '÷', dec: 'coverDiv', ro: true, exp: () => DEC.coverDiv.v, verify: coverProof,
+      read: () => { const R = CR(); return R ? R.coverDiv : undefined; }, where: 'Combat.rulesFrom in the game (combat.js): coverDiv, applied in Combat.fight only to a defender ON a standing wall (onWall)',
+      s: '<b>A defender standing ON a standing wall\'s spot - the wall\'s crew - is hit half as often. Standing behind a wall gives nothing.</b> The line above is the game\'s own fight run three ways, so it proves where the cover applies, not only the divisor. Not settable from this page yet, for the same reason as the pace.' },
+    { g: 'fight', id: 'defendReach', k: 'How far ENGAGE + DEFEND strays', e: 'rules', f: 'defendReach', u: 'tiles', dec: 'defendReach', ro: true, exp: () => DEC.defendReach.v,
+      read: () => { const R = CR(); return R ? R.defendReach / 2 : undefined; }, where: 'Combat.rulesFrom in the game (combat.js), read back out of defendReach in spots',
+      s: '<b>5 tiles</b> - the longest weapon range (catapult), so a DEFEND Friend can reach an attacker shelling its post from the far edge of any range in the game. Decided by ruling 46 and kept here as a deployer setting; not settable from this page yet, for the same reason as the pace.' },
     { g: 'fight', id: 'splashFalloff', k: 'What splash loses with distance', e: 'rules', f: 'splashFalloff', open: true,
       read: () => undefined, where: 'nothing', sweep: { row: 5, t: '÷2 per spot, as a field of RareCombat.Rules' },
       s: 'Named in DESIGN and <b>missing from the rules table altogether</b>: <code>combat.js</code> halves it per spot in its own code, so there is no number to read.' },

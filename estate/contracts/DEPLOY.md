@@ -31,7 +31,7 @@ an argument that is `immutable` - it can never be changed once the transaction i
 | 1 | `RareRoles` | `(address deployer_)` | the deployer's own wallet - the one sending the transactions. Stored as role membership, **not** immutable: it can be added to and handed over (DESIGN decision 21: rules stay repairable) | Everything else asks it who may do what. First, because three others take its address |
 | 2 | `RareFightLog` | `(IRareRoles roles_)` | **`roles`** = step 1's address | Fights resolve on the server for v1 and only their hashes land here; it needs only Roles |
 | 2b | `RareOrders` | `(address roles_)` | **`roles`** = step 1's address | M20 item 10: the sealed standing orders - the session key seals one word per base (`RECORD_ORDERS`, granted by `grant.mjs`), anyone with the preimage opens it per fight. Holds no token; needs only Roles. `deploy.mjs` deploys it right after the fight log |
-| 3 | `ShadowFriends` | `(address attestor_, address team_)` | `attestor_` = the **public address** of the attestor key (section 3 - it must exist first). Settable later by `team` via `setAttestor`, so not permanent. **`team`** = the address that may rotate the attestor, and nothing else - immutable, so a lost `team` key means the attestor can never be rotated | Independent of Roles. Placed here so the bridge can be proved before the duel and market exist |
+| 3 | `ShadowFriends` | `(address attestor_, IRareRoles roles_)` | `attestor_` = the **public address** of the attestor key (section 3 - it must exist first). Settable later via `setAttestor` by any holder of `SET_ATTESTOR` in RareRoles - the deployer (root) and the gamemaster role, which `grant.mjs` grants (ruling 2026-10-01; it was an immutable `team` address, and a lost team key would have been permanent). **`roles`** = step 1 | After Roles. Placed here so the bridge can be proved before the duel and market exist |
 | 4 | `RareDuel` | `(address token_, address entropy_, address provider_, uint16 counterBps_, uint16 sameBps_, uint16 feeBps_, address feeTo_, uint64 answerWindow_, uint64 revealWindow_, uint64 rollWindow_, address roles_)` | **all eleven are immutable.** `token` = `$RF` on 4663 (from `chainlive.js`/DESIGN, not typed here); `entropy` and `provider` = the Dice/Entropy contract and provider `chainlive.js` already reads (`DICE`, `PROVIDER`); `counterBps`/`sameBps`/`feeBps` = DESIGN's decided numbers via the economist; `feeTo` = the fee wallet; `answerWindow`/`revealWindow`/`rollWindow` = DESIGN (`rollWindow` 10 minutes = 600, per the M20 row; BINDING §20.5 records an earlier 300 - **read DESIGN, the later ruling wins**); `roles` = step 1. Constructor reverts if `token_`, `entropy_` or `roles_` has no code | After Roles. Blocked until `gameId` lands (section 3) |
 | 5 | `RareMarket` | `(address rf_, address roles_, address partners_, uint16 maxFeeBps_, uint16 feeBps_, address feeTo_)` | **all six immutable.** `rf` = `$RF`; `roles` = step 1; `partners` = `address(0)` unless a partnership layer is deployed first (the contract allows zero and it means nothing is owed); **`maxFeeBps` = 1000** (decided 2026-09-30, DESIGN question 13 - 10%, the ceiling `setFeeBps` can never exceed); `feeBps` = **150** (DESIGN's marketplace fee); `feeTo` = the fee wallet | After Roles. `partners` decides whether something deploys before it |
 | 6 | `RareCombatLab` | no `RareCombatLab.sol` exists as a file - `RareCombat` is a library inlined into whatever deploys it (BINDING §0), and the lab is a `view` harness. **Confirm with the chain engineer whether it is deployed at all**; if it is, it takes no address that the others need | Last, because nothing depends on it |
@@ -53,7 +53,7 @@ One line each. Once mined, none of these can be changed without a redeploy and a
   collection, mask[16], palette, pixels, colors, count, imageHash, deadline, name, traitKeys, traitValues`
   as read today - a changed field order changes the hash and orphans every signature); the 1/1 trait bytes
   the attestor signs - `Evolution` = `0x45766f6c7574696f6e00…`, `1/1` = `0x312f3100…` (DESIGN question 10,
-  closed - the on-chain consumer is the chain engineer's and may not be built yet); **`team`** (immutable).
+  closed - the on-chain consumer is the chain engineer's and may not be built yet); **`roles`** (immutable; it holds `SET_ATTESTOR`).
   The attestor address is *not* permanent (`setAttestor`) but is live from the first block.
 - **Step 4 `RareDuel`** - every constructor argument, the `$RF` currency included. `gameId` is a per-duel
   field, not a constructor argument.
@@ -86,8 +86,8 @@ One line each. Once mined, none of these can be changed without a redeploy and a
 - [ ] **A funded deployer wallet on 4663.** Its private key is the deployer's, entered as an environment
       variable for one session and never stored. It needs ETH for six deployments (section 5) plus the
       role grants in section 6.
-- [ ] **The `team` address for `ShadowFriends`** - decide whether it is the deployer wallet or a separate
-      cold key. It is immutable; losing it means the attestor can never be rotated.
+- [x] ~~**The `team` address for `ShadowFriends`**~~ - gone (ruling 2026-10-01). The attestor is rotated by
+      `set-attestor.mjs` from any key holding `SET_ATTESTOR` in RareRoles: the deployer, or a gamemaster.
 - [ ] **`deploy/deploy-fiends.sh` publishes the landing page and nothing else.** It does not publish
       contracts and **must not** be taught to: a chain deploy is irreversible and belongs behind its own
       typed `yes`, not at the tail of a site publish.

@@ -48,9 +48,11 @@
 // THE END: every defender down, the attack wins. Every attacker down, the defence holds. THERE IS NO CLOCK
 // (ruling 47, 2026-10-01): a fight runs until one side wins. An attack always ends - every living attacker
 // shoots or steps on every turn, and every shot has a chance to land. The one fight that can stand still is a
-// SPARED capture fight (below) whose intruder cannot reach anyone: when every living Friend has had a turn
-// and nobody moved or shot, nothing can ever change again, and the defence holds ('held'). That is a
-// stalemate read off the field, not a time limit. The chain runs no spared fight. The Genesis never fights.
+// SPARED capture fight (below) whose intruder cannot reach anyone and whom nobody can reach: when every living
+// Friend has had a turn and nobody moved or shot, nothing can ever change again ('stalemate'). That is read
+// off the field, not a time limit, and THE INTRUDER WINS IT (ruling of 2026-10-01: the building goes back
+// only when the intruder is killed; a defence that cannot beat or reach it loses the takeover). Before that
+// ruling a stalemate was 'held', the defence's. The chain runs no spared fight. The Genesis never fights.
 (function (root) {
   'use strict';
   const Chance = root.Chance || (typeof require !== 'undefined' ? require('./chance.js') : null);
@@ -208,8 +210,9 @@
     const snap = () => trace && trace.push({ t, U: U.map(u => [u.x, u.y, u.hp]), W: W.map(w => w.hp) });
     snap();
     // the stalemate (see THE END): the living Friends that have had a turn since anyone last moved or shot.
-    // Once it holds every living Friend the field is fixed for good. Unreachable while an attacker that is
-    // not spared lives, since such an attacker always shoots or steps - so RareCombat.sol needs no copy.
+    // Once it holds every living Friend the field is fixed for good, and the attack - the intruder - wins.
+    // Unreachable while an attacker that is not spared lives, since such an attacker always shoots or steps -
+    // so RareCombat.sol needs no copy.
     const still = new Set();
     for (;;) {
       if (!U.some(u => !u.att && u.hp > 0)) { reason = 'wiped'; break; }
@@ -223,9 +226,9 @@
         if (u.x !== x0 || u.y !== y0 || shots !== s0) still.clear(); else still.add(u);
       }
       snap();
-      if (still.size === U.filter(u => u.hp > 0).length) { reason = 'held'; break; }
+      if (still.size === U.filter(u => u.hp > 0).length) { reason = 'stalemate'; break; }
     }
-    return { winner: reason === 'wiped' ? 'attack' : 'defence', reason, t, shots, hits, rolls: rolls.used,
+    return { winner: reason === 'wiped' || reason === 'stalemate' ? 'attack' : 'defence', reason, t, shots, hits, rolls: rolls.used,
       attackers: U.filter(u => u.att).map(u => u.hp), defenders: U.filter(u => !u.att).map(u => u.hp), walls: W.map(w => w.hp),
       at: U.map(u => [u.x, u.y]), log, trace };
   }
@@ -280,7 +283,7 @@
   }
   // resultHash: the outcome - who won and why, when it ended, each unit's final hp, each wall's, and the
   // event count (every shot is one event; rolls is how many the word was asked for).
-  const REASONS = ['wiped', 'repelled', 'held', 'fled'];
+  const REASONS = ['wiped', 'repelled', 'stalemate', 'fled'];   // index 2 was 'held' (the defence's) before the ruling of 2026-10-01
   function resultHash(r) {
     const v = [sw(r.winner === 'attack' ? 1 : 0), sw(REASONS.indexOf(r.reason)), sw(r.t), sw(r.shots), sw(r.hits), sw(r.rolls)];
     v.push(sw(r.attackers.length)); for (const h of r.attackers) v.push(sw(h));
@@ -300,8 +303,10 @@
   // Friend that took it - is the one enemy inside. It stands on the building it took, so it comes from no
   // side; the base's own defenders fight it under their standing orders. The fight harms the intruder,
   // never the base: spare = true, so no wall takes damage. The intruder may abort and run: abortMs is the
-  // game-clock ms at which it leaves (the defence then holds with reason 'fled', and it keeps whatever hp
-  // it has left). Its strength is gone when its hp is 0 (reason 'repelled').
+  // game-clock ms at which it leaves (reason 'fled': the building stays the owner's, and it keeps whatever hp
+  // it has left). Its strength is gone when its hp is 0 (reason 'repelled'): the ONLY outcome that returns the
+  // building (ruling of 2026-10-01). Every other end is the intruder's - won: 'wiped' (no defender left
+  // standing, or none there to begin with) or 'stalemate' (nobody can reach anybody).
   //   D: base.defense() (tiles, walls, defenders);  intruder: { gen, x, y } in spots;  ctx as for fight()
   function captureSetup(D, intruder) {
     return { attackers: [intruder.gen], entry: { x: intruder.x, y: intruder.y, ax: 0, ay: 0 },
@@ -310,10 +315,16 @@
   }
   function captureFight(R, D, intruder, ctx, opts) {
     const setup = captureSetup(D, intruder);
-    const r = fight(R, setup, ctx, Object.assign({}, opts || {}, { spare: true }));
+    // nobody home - every Friend sent out, or none ever placed: there is nobody to fight, and fight() (like
+    // RareCombat.sol) takes 1 to MAX_SIDE a side. It is what fight() would say of an empty side: every
+    // defender is down at t 0, 'wiped', the intruder untouched, no roll taken.
+    const r = setup.defenders.length ? fight(R, setup, ctx, Object.assign({}, opts || {}, { spare: true }))
+      : { winner: 'attack', reason: 'wiped', t: 0, shots: 0, hits: 0, rolls: 0, attackers: [R.hp[intruder.gen]], defenders: [],
+          walls: setup.walls.map(() => R.wallHp), at: [[intruder.x, intruder.y]], log: opts && opts.log ? [] : null, trace: opts && opts.trace ? [] : null };
     const wallsBefore = setup.walls.map(() => R.wallHp);
     if (r.walls.some((h, i) => h !== wallsBefore[i])) throw new Error('a capture fight harmed the base');
-    return Object.assign(r, { setup, intruderHp: r.attackers[0], fled: r.reason === 'fled', beaten: r.attackers[0] === 0 });
+    return Object.assign(r, { setup, intruderHp: r.attackers[0], fled: r.reason === 'fled', beaten: r.attackers[0] === 0,
+      won: r.winner === 'attack', undefended: !setup.defenders.length });
   }
 
   const api = { rulesFrom, fight, sample, entry, proving, spots, rulesHash, setupHash, resultHash, fightHash, captureSetup, captureFight, REASONS, MAX_SIDE, MAX_WALLS, SIDES, DIRS, ORDERS, HOLD, ENGAGE, DEFEND, FALLBACK };

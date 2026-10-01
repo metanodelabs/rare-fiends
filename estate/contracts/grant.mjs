@@ -1,9 +1,10 @@
 // M20, last phase: give the game server's hot key a narrow role holding RECORD_FIGHT, RECORD_SYNC, RECORD_ORDERS and SIGN_TERMINAL on RareRoles.
 //   DEPLOYER_KEY=... SERVER_ADDRESS=0x.. node grant.mjs [--dry-run]
 // Reads RareRoles from estate/bridge-config.json. Adds role keccak256("rarefriends.role.server"), grants the four powers,
-// adds the server address as a member, then proves it with hasPower before exiting.
+// adds the server address as a member, grants SET_ATTESTOR to the GAMEMASTER role (ShadowFriends.setAttestor, ruling
+// 2026-10-01), then proves it with hasPower / roleHasPower before exiting.
 import path from 'node:path';
-import { Wallet, Contract, id } from 'ethers';
+import { Wallet, Contract, id, NonceManager } from 'ethers';
 import { HERE, chainlive, compileAll, readKey, envAddress, connect, confirm, eth, banner, cfgPath, readCfg } from './deploylib.mjs';
 
 const DRY = process.argv.includes('--dry-run');
@@ -13,7 +14,8 @@ const cfg = readCfg();
 if (!cfg.rareRoles) { console.error(path.basename(cfgPath()) + ' has no rareRoles address - run deploy.mjs first. Refusing.'); process.exit(2); }
 const provider = await connect(chainlive().rpcs);
 const wallet = new Wallet(KEY, provider);
-const roles = new Contract(cfg.rareRoles, compileAll().RareRoles.abi, wallet);
+const signer = new NonceManager(wallet);   // counts its own nonces: back-to-back sends on an instant-mining anvil were refused 'nonce too low' (2026-10-01)
+const roles = new Contract(cfg.rareRoles, compileAll().RareRoles.abi, signer);
 const ROLE = id('rarefriends.role.server');
 const gasPrice = (await provider.getFeeData()).gasPrice;
 console.log((DRY ? 'DRY RUN\n' : '') + banner() + 'RareRoles ' + cfg.rareRoles + '  from ' + wallet.address + '  server ' + SERVER + '  role ' + ROLE);
@@ -38,6 +40,16 @@ if (cfg.rareMarket) {
 }
 await call('grant SIGN_TERMINAL (a planted terminal\'s cut, ruling 54)', 'grantPower', [SIGN_TERMINAL, ROLE, true]);
 await call('add the server key to the role', 'setRoleMember', [ROLE, SERVER, true]);
+// Deployer ruling 2026-10-01: the bridge's attestor key is changed through RareRoles, held by the deployer (root,
+// already) and the GAMEMASTER role - granted here, under the same roleChangeDelay as every other grant. The power is
+// ShadowFriends' constant, read off the deployed contract when there is one and held equal to the spelling here.
+const SET_ATTESTOR = id('rarefriends.power.setAttestor');
+if (cfg.shadowFriends) {
+  const onChain = await new Contract(cfg.shadowFriends, compileAll().ShadowFriends.abi, provider).SET_ATTESTOR();
+  if (onChain !== SET_ATTESTOR) { console.error('ShadowFriends.SET_ATTESTOR is ' + onChain + ', not ' + SET_ATTESTOR + '. Refusing.'); process.exit(1); }
+}
+const GAMEMASTER = await roles.GAMEMASTER();
+await call('grant SET_ATTESTOR to the gamemaster role (the deployer holds it as root)', 'grantPower', [SET_ATTESTOR, GAMEMASTER, true]);
 if (DRY) { console.log('\nDRY RUN complete. Nothing sent.'); process.exit(0); }
 // RareRoles reads roleChangeDelay (M20 item 4): at the decided zero the grants count in the same block; at anything
 // else they are PENDING until grantFrom/memberFrom, and the proof below says so rather than failing silently.
@@ -45,5 +57,7 @@ const delay = await roles.roleChangeDelay();
 if (delay !== 0n) console.log(`\nroleChangeDelay is ${delay} s: the grants and the membership above count from then, not now (RareRoles.grantFrom / memberFrom)`);
 const f = await roles.hasPower(SERVER, await roles.RECORD_FIGHT()), s = await roles.hasPower(SERVER, await roles.RECORD_SYNC()), o = await roles.hasPower(SERVER, await roles.RECORD_ORDERS());
 const t = await roles.hasPower(SERVER, SIGN_TERMINAL);
-console.log(`\nproof: hasPower(server, RECORD_FIGHT) = ${f}, hasPower(server, RECORD_SYNC) = ${s}, hasPower(server, RECORD_ORDERS) = ${o}, hasPower(server, SIGN_TERMINAL) = ${t}` + (delay !== 0n ? ' (pending under the delay)' : ''));
-process.exit((f && s && o && t) || delay !== 0n ? 0 : 1);
+const a = await roles.roleHasPower(SET_ATTESTOR, GAMEMASTER), aServer = await roles.hasPower(SERVER, SET_ATTESTOR);
+console.log(`\nproof: hasPower(server, RECORD_FIGHT) = ${f}, hasPower(server, RECORD_SYNC) = ${s}, hasPower(server, RECORD_ORDERS) = ${o}, hasPower(server, SIGN_TERMINAL) = ${t}, roleHasPower(SET_ATTESTOR, GAMEMASTER) = ${a}, hasPower(server, SET_ATTESTOR) = ${aServer}` + (delay !== 0n ? ' (pending under the delay)' : ''));
+if (aServer) { console.error('the server key holds SET_ATTESTOR - it must not. Refusing.'); process.exit(1); }
+process.exit((f && s && o && t && a) || delay !== 0n ? 0 : 1);

@@ -1444,7 +1444,8 @@ scan on chain.
 
 **Why the deadline is M20 and not M21.** `ShadowFriends` has **no proxy, no initializer and no upgrade
 path** — `team` is `immutable` and `setAttestor` is the only thing it can change, commented in the source
-as *"may change the attestor, and nothing else"* (line 66). **A view that is not in the bytecode at deploy
+as *"may change the attestor, and nothing else"* (line 66). *(Since §68, `team` is gone and `setAttestor` is
+guarded by `SET_ATTESTOR` in RareRoles; there is still no upgrade path.)* **A view that is not in the bytecode at deploy
 time can never be added.** So this is the same kind of deadline as the ERC-721 name (DESIGN question 21):
 a small change that becomes impossible at the moment M20 runs.
 
@@ -2289,7 +2290,7 @@ In the style of §6 and §10: named, because an unnamed revert in an explorer te
 | `NotAllowedInDemoMode(address caller)` | demo mode is on and the caller is not allowed, on a create or a join. Named for the **mode**, not for the list, because the player's question is *"why can't I play"* and the answer is *"the game is not open yet"* |
 | `PaidInDemoMode()` | an entry fee or a stake above zero is named while demo mode is on. §29.1 |
 | `DuelsClosedInDemoMode()` | `challenge` while demo mode is on. Its own error rather than `PaidInDemoMode`, because the reason is different: a duel is not made free, it is refused (26.1) |
-| `PowerNotHeld(address caller, bytes32 power)` | the setter, called by an address the role does not hold. `ShadowFriends`' `NotTeam()` is the shape; a role that can gain an address without a redeploy is the difference |
+| `PowerNotHeld(address caller, bytes32 power)` | the setter, called by an address the role does not hold. `ShadowFriends`' `NotTeam()` was the shape; a role that can gain an address without a redeploy is the difference. Since §68 `ShadowFriends.setAttestor` raises this too, and `NotTeam()` is gone |
 | `DemoModeUnchanged()` | setting the flag to the value it already has. One line, and it stops a no-op emitting an event that reads like a launch |
 | `AllowlistUnchanged(address who)` | the same for the list |
 
@@ -5176,6 +5177,17 @@ is folded from the batches' moves in order (they are already in each batch) and 
 owner is whoever holds the 1/1's shadow on 4663. **Deploy-blocking:** `RareMarket` is permanent (§49), so the cut
 had to be in it before M20 item 9 deploys it. **The size is the economist's and is open.**
 
+**Two deployer rulings on it, 2026-10-01, both DECIDED and built:**
+
+1. **A hard ceiling of 1% of the sale PRICE.** A terminal's owner can never receive more than 1% of a sale. The
+   cut is also never more than the fee actually taken, because it comes out of our fee. So
+   **cut = min(fee × share, price × 1%, fee)**. The 1% is `maxTerminalPriceBps` = 100, immutable. This
+   replaces the first build's PROPOSED ceiling of "half the fee". The share stays a third of the fee and stays
+   PROPOSED.
+2. **A 1/1 holder trading at their own terminal is ALLOWED and gets the cut.** That is decided, not overlooked.
+   `RareMarket` has deliberately no `host == buyer || host == seller` exclusion, and `fixcheck` part 20 asserts
+   that the self-trade pays.
+
 ### 65.1 What the chain could not see, and what was there to work with
 
 Nothing in a sale recorded where it was made, and `_settle` paid three parties (partner, fee, seller). Where a
@@ -5190,14 +5202,14 @@ signed-claim pattern (`CLAIM_TTL`, replay refused), and `RareRoles` powers.
 | | **A. Server-signed authorization, cut out of OUR fee** (built) | **B. Server-signed authorization, cut out of the SELLER's proceeds**, as the partner's is |
 | --- | --- | --- |
 | Who can fake a host | Nobody without a key holding `SIGN_TERMINAL`. The signature binds terminal, actor, sale, nonce and deadline | Same |
-| What a buyer at their own terminal can do | Take part of **our** fee as a rebate, bounded by the immutable ceiling | Take part of **the seller's** money, with no consent from the seller. **This is the reason B is rejected** |
+| What a buyer at their own terminal can do | Take part of **our** fee as a rebate, never more than 1% of the price (allowed, ruling 2 above) | Take part of **the seller's** money, with no consent from the seller. **This is the reason B is rejected** |
 | What a leaked server key can do | Send part of our fee to the holder of a live 1/1 shadow, on sales that really happen. It cannot name a payee | The same, but it comes out of sellers |
 | `quote()` and the parties' numbers | Unchanged: the buyer pays and the seller receives exactly what a plain trade gives | The seller's line changes depending on where the **buyer** stood |
-| Gas | +19,603 execution gas over `buy` (§65.6) | About the same |
+| Gas | +19,927 execution gas over `buy` (§65.6) | About the same |
 | Permanent | The source of the cut (the fee), its ceiling, the shadow token, the signed form | The same, plus a seller-facing deduction nobody agreed to |
 
 **A was chosen** because of one property: under A, no abuse of the terminal path, faked or authorized, can move
-a player's money. The worst case is that our own fee is spent, and the ceiling bounds that. Paying from the fee
+a player's money. The worst case is that our own fee is spent, and the 1%-of-price ceiling bounds that. Paying from the fee
 also keeps *"the fee is pinned at the moment the party who pays it acts"* (§48) true without a new rule: the cut
 is a share of whatever fee the sale already pays.
 
@@ -5222,8 +5234,11 @@ is a share of whatever fee the sale already pays.
   (`TerminalAuthTooLong`); `TERMINAL_AUTH_TTL` is 15 minutes, the same as `ShadowFriends.CLAIM_TTL`. Each digest
   is spent in `terminalAuthUsed` before any money moves (`TerminalAuthUsed`). The nonce lets two identical sales
   each carry their own authorization.
-- **Who is paid.** `terminalCut(shadowId, fee)`: if `gate.isOneOfOne(shadowId)` holds **now**, the payee is
-  `shadows.ownerOf(shadowId)` **now**, and the sum is `fee * terminalShareBps / 10000`. Both reads are in
+- **Who is paid, and how much.** `terminalCut(shadowId, price, fee)`: if `gate.isOneOfOne(shadowId)` holds
+  **now**, the payee is `shadows.ownerOf(shadowId)` **now**. The sum is `terminalCutAmount(price, fee)` =
+  `min(fee × terminalShareBps / 10000, price × maxTerminalPriceBps / 10000, fee)`, in that order with each
+  division floored. The price cap is computed from the **price**, not the fee, so raising the fee to its own 10%
+  ceiling cannot lift it. Both reads are in
   `try`/`catch`, so a revoked shadow, an unknown id, an ordinary Doopie or a broken gate pays nobody **and the
   sale still settles**. **The signature never carries a payee.** A 1/1 sold on Solana is revoked, then re-claimed
   under the same id by its new holder, and from then on pays the new holder.
@@ -5232,31 +5247,37 @@ is a share of whatever fee the sale already pays.
   byte. A terminal sale also emits `TerminalCut(collection, tokenId, shadowId, host, paid)`, with host and paid
   zero when the terminal paid nobody. It is emitted before `Sold`, inside the scope that holds the host's two
   words; the stack would not take both.
-- **The setters.** `setTerminalShareBps` (≤ `maxTerminalShareBps`, `TerminalShareUnchanged` on a no-op) and
+- **The setters.** `setTerminalShareBps` (≤ 10000, the whole fee, and `TerminalShareUnchanged` on a no-op;
+  whatever it is set to, the 1% cap still holds, and no setter can reach `maxTerminalPriceBps`) and
   `setGate` (code required, `GateUnchanged` on a no-op), both behind `SET_TERMINAL =
   keccak256("rarefriends.power.setTerminal")`, both logged. **No setter names a payee or the shadow token.**
   `setGate` exists because `RareDoopieGate` is the repairable tier by its own design (a collection can rename a
   trait). The worst a bad gate can do is say yes for a shadow whose live holder is then paid out of our fee, and
   only on a sale the server signed.
 - **The constructor** takes four more arguments: `shadows_` (immutable, must hold code), `gate_` (must hold
-  code), `maxTerminalShareBps_` (immutable, ≤ 10000) and `terminalShareBps_` (≤ the ceiling). `deploy.mjs` now
+  code), `maxTerminalPriceBps_` (immutable, ≤ 10000; deployed at 100) and `terminalShareBps_` (≤ 10000). `deploy.mjs` now
   deploys `RareDoopieGate` (it deployed no gate before) between `RareDuel` and `RareMarket`, and writes
   `rareDoopieGate` to the config.
-- **Size.** 13,981 deployed bytes, up from 8,402. That is ECDSA, EIP-712 and the two new routes, against the
+- **Size.** 14,113 deployed bytes (13,981 at the first build), up from 8,402. That is ECDSA, EIP-712 and the two new routes, against the
   24,576 limit.
 
-### 65.4 The numbers, PROPOSED and not decided
+### 65.4 The numbers: one DECIDED, one PROPOSED
 
 | | Value | Where | Status |
 | --- | --- | --- | --- |
-| `terminalShareBps` | 3333 bps **of the fee**, a third: 0.49995% of a sale at the 1.5% fee | `deploy.mjs` `N.terminalShareBps` | **PROPOSED**, the economist's. A setter changes it |
-| `maxTerminalShareBps` | 5000 bps of the fee, at most half | `deploy.mjs` `N.maxTerminalShareBps` | **PROPOSED**, and **IMMUTABLE** once deployed |
+| `terminalShareBps` | 3333 bps **of the fee**, a third: 0.49995% of a sale at the 1.5% fee | `deploy.mjs` `N.terminalShareBps` | **PROPOSED**, the economist's. A setter changes it, up to 10,000 (the whole fee) |
+| `maxTerminalPriceBps` | 100 bps **of the price**: a terminal's owner never receives more than 1% of a sale | `deploy.mjs` `N.maxTerminalPriceBps` | **DECIDED** by the deployer, 2026-10-01, and **IMMUTABLE** once deployed. No setter reaches it |
 | `TERMINAL_AUTH_TTL` | 900 s | a constant in `RareMarket.sol` | Mirrors `CLAIM_TTL`. A safety window, not an economy number |
 
 `fixcheck` reads both bps figures out of `deploy.mjs`, so the test deploys what M20 would, and asserts the
-share's line is marked PROPOSED.
+share's line is marked PROPOSED, the ceiling's line DECIDED, and the ceiling is exactly 100.
 
-### 65.5 The proof - `test/fixcheck.js` part 20, 26 assertions, and each guard broken once
+**Where the 1% bites.** At the 1.5% fee a third of the fee is 0.5% of the price, so the cap does not bind. It
+binds once the fee passes 3% at the PROPOSED share (fee × ⅓ > 1%), and at any fee above 1% if the share is
+raised to the whole fee. At the fee's own 10% ceiling the share would give 3.33% and the cap pays 1%.
+`fixcheck` settles exactly that sale.
+
+### 65.5 The proof - `test/fixcheck.js` part 20, 29 assertions, and each guard broken once
 
 Against the real `ShadowFriends`, the real `RareDoopieGate` and the real `RareRoles`:
 
@@ -5270,8 +5291,16 @@ Against the real `ShadowFriends`, the real `RareDoopieGate` and the real `RareRo
 - a revoked 1/1 pays nobody and the sale settles; re-claimed by a new holder, it pays the new holder;
 - an ordinary `buy` moves exactly two `$RF` transfers (no partner on that market), pays the whole fee, and
   emits no `TerminalCut`. Part 9's partner sale, unchanged, still passes on the new bytecode;
-- both setters are guarded, the ceiling holds, deploy-time refusals hold, no setter names a payee, revoking
-  `SIGN_TERMINAL` kills what it signed, and the market's `$RF` balance stays zero.
+- **the hard ceiling, in a real sale:** with the fee raised to its 10% ceiling, a third of the fee would be 3.33%
+  of the price, and the 1/1's owner is paid exactly 1%; the rest of the fee is ours and the seller's line is
+  untouched;
+- **the hard ceiling, swept:** 180 cases (shares 0, 1, 3333, 5000, 10,000 of the fee; fees 0 to 10%; four
+  prices down to 1 wei). `terminalCutAmount` equals `min(fee × share, price × 1%, fee)` computed independently
+  in the test, and is never above 1% of the price nor above the fee;
+- **a 1/1 holder buying at their own terminal is paid the cut** (deployer ruling 2, allowed);
+- both setters are guarded, the share cannot pass the whole fee, the 1% ceiling has no setter, deploy-time
+  refusals hold, no setter names a payee, revoking `SIGN_TERMINAL` kills what it signed, and the market's `$RF`
+  balance stays zero.
 
 Part 19's demo-mode audit counts `buyVia` and `acceptOfferVia` as gated entry points (refused by the mode's name
 before the signature is read) and the two setters as open-to-the-mode, role-guarded. Its ABI sweep has nothing
@@ -5300,10 +5329,21 @@ restored the file:
 Every mutation turned at least one part-20 row red, and each of the six rows asked for went red under at least
 one mutation.
 
+**The 1% ceiling, broken once each** (2026-10-01, the same scratch runner):
+
+- **C1:** the price cap removed (`if (paid > cap) paid = cap;` deleted). Both hard-ceiling rows went red, the
+  real sale and the sweep. solc also warned that `cap` was unused.
+- **C2:** a `host == buyer || host == seller` exclusion added. The own-terminal row went red, so a later
+  "tidy-up" that adds the exclusion cannot pass unnoticed.
+- **C3:** the fee clamp removed (`if (paid > fee) paid = fee;` deleted). **Nothing went red, and nothing can.**
+  The share is bounded at 10,000 bps of the fee by both the constructor and the setter, so `fee × share / 10000`
+  is never more than the fee. The clamp is in the code because the ruling names it and because it costs one
+  comparison. It is not a guard any test can prove, and it is not claimed as one.
+
 ### 65.6 Gas, and what it is not
 
 Execution gas on the in-memory EVM, **Ethereum Cancun rules with the chain id swapped, floors, not prices**:
-`buy` 69,409, `buyVia` 89,012 (+19,603: one `ecrecover`, a `hasPower` walk, one SSTORE to spend the digest, two
+`buy` 69,409, `buyVia` 89,336 (+19,927, up from +19,603 before the 1% cap: one `ecrecover`, a `hasPower` walk, one SSTORE to spend the digest, two
 reads of the shadow, a fourth transfer). `gas.json` was re-measured (`npm run check`) and `gas:fresh` passes, but
 **`gas.json` carries no marketplace figure at all**: `paritycheck.js` does not deploy `RareMarket` (§50 item 7).
 **Nothing was measured on a real node.** That is still M20 item 8's other half.
@@ -5312,26 +5352,214 @@ reads of the shadow, a fourth transfer). `gas.json` was re-measured (`npm run ch
 
 - **That the cut comes out of the market fee.** It never comes out of the seller's proceeds or on top of the
   buyer's price. Changing that is a new market.
-- **`maxTerminalShareBps`**, the ceiling on the share (PROPOSED 5000 of the fee).
+- **`maxTerminalPriceBps`**, the hard ceiling: 100 bps of the price, 1%. DECIDED.
+- **That the cut is never more than the fee taken**, and that the share is bounded at the whole fee.
 - **`shadows`**, the `ShadowFriends` address whose `ownerOf` is paid.
 - **The signed form**: the `TerminalSale` type string, the EIP-712 domain `("RareMarket", "1")`,
   `TERMINAL_AUTH_TTL` of 900 s, and the name of the `SIGN_TERMINAL` power.
-- **That a 1/1's holder is paid on their own trades.** Nothing stops a 1/1 holder standing at their own terminal
-  from taking the cut on a sale they are party to. A check for `host == buyer || host == seller` would be cheap,
-  but a second wallet defeats it. It was **not** added, because the ruling does not address it, and because it
-  costs only our fee. **This is permanent if left out. It is a question for the deployer, not a decision made
-  here.**
+- **That a 1/1's holder is paid on their own trades. DECIDED by the deployer, 2026-10-01: allowed.** A 1/1
+  holder standing at their own terminal takes the cut on a sale they are party to. There is no
+  `host == buyer || host == seller` check (a second wallet would defeat one anyway), the cost is bounded by the
+  1% ceiling and comes only out of our fee, and `fixcheck` asserts the self-trade pays (mutation C2 above).
 
-**What stays changeable:** the share (under the ceiling), the gate, and who holds `SIGN_TERMINAL`.
+**What stays changeable:** the share (0 to the whole fee, always under the 1% ceiling), the gate, and who holds `SIGN_TERMINAL`.
 
 ### 65.8 What this leaves owed, outside this lane
 
 - **The server** must sign a `TerminalSale` only when the actor's Friend is at that terminal. The chain proves the
   server said so; it cannot prove the server was right. That is the same trust the fight log rests on (§52).
-- **The economist:** the share and the ceiling, both PROPOSED (§65.4).
-- **The deployer:** whether a 1/1 holder is paid on their own trades (§65.7).
+- **The economist:** the share, PROPOSED at a third of the fee (§65.4). The ceiling is no longer theirs: the
+  deployer fixed it at 1% of the price.
 - **The front end:** a page that offers *trade through this terminal* calls `buyVia` / `acceptOfferVia` with the
   server's authorization, and can show the split with `quote()` plus `terminalCut()`.
 - **`deploy/local-chain.sh`** is outside this lane. It runs `deploy.mjs`, which now deploys one more contract
   (`RareDoopieGate`) and passes `RareMarket` four more arguments. No change to the script is needed, but it has
   not been re-run against a fork here.
+
+## 66. `RareRules.Kind` gains `hands`, the labour ceiling (M8 item 3, 2026-10-01)
+
+**What was red.** `fixcheck` part 16 holds every chain-home field of `schema.json` `buildingType` against the
+compiled `setKind` tuple. M8 item 3 added `hands` to the schema and to `values.js`, and nothing added it to the
+struct, so the row read *"RareRules.Kind lacks [hands]"* on main. Until now, a row written on chain would have
+dropped the ceiling on Friends working one build without any error.
+
+**The shape is the schema's: `uint8 hands`, ONE per kind, not per level.** The brief asked for a per-level slot
+like `energy`, `supply`, `release` and `leak`. The agreed schema types it `uint8`, a scalar, and the game reads
+it as one: `values.js` writes `hands: 4` (a wall's 2) per kind, and `record.js` `ceiling(kind)` returns
+`kindRow(kind).hands`. A per-level array would put a rule on chain that the schema does not have: that the
+ceiling may differ by level. If the design later wants that, it changes `schema.json` first. On chain it would
+be a new rules id with a new struct, so it is not something to guess now. The four energy columns are per level
+because the schema types them `[]`.
+
+**Built.** `uint8 hands` sits in `Kind` after `footprint`. `setKind` stores it, `kindOf` returns it, and it
+freezes with the row. **No guard on its value was added.** A ceiling of 0 would describe a building nobody can
+work, and whether that is ever legal is a game rule, not the contract's to decide. `RareRules` is 9,788 bytes,
+up from 9,667.
+
+**The proof.** Part 16's slot row is green (15 of 15 fields). A new row writes all nine kinds from
+`values.js`'s own `hands` and reads each one back: keep, hut, silo, tower, cell, generator, depot and capacitor
+read 4, and the wall reads 2. **Broken once:** with `s.hands = k.hands;` deleted, that row went red with every
+kind reading 0, and the file was restored. `fixcheck` is 309 ok and 0 FAIL.
+
+## 67. `RareOrders` - an opening is keyed by (game, base, fight): the cross-base replay (2026-10-01, before M20)
+
+**The defect.** `reveal(gameId, baseId, fightId, orders, salt)` checked the preimage against **`baseId`'s**
+commitment, then wrote the opening into a slot keyed by **`(gameId, fightId)`**. It never checked that the fight
+was against that base. **A base's preimage is public from its first opening on**, because it sits in that
+`reveal`'s calldata. So anyone could open fight X under base B (B's real word, a valid hash) and take X's one
+slot. The defender's real orders for X were then refused `AlreadyOpened`, and the chain's record of X held
+B's orders. **While B's word stood, one public preimage was enough to take the opening of any fight in the game not yet opened.**
+
+**Why the fight's base is not checked instead.** The other fix would read the fight's base from
+`RareFightLog`, but `RareFightLog.Record` holds a hash and a block. The agreed schema (`fightHash`) has no base
+field, because `fight.defenderBase` lives on the server row, inside the hash. Checking it on chain means adding
+a field to a write-once, permanent record, which is a schema change and not this role's to make unilaterally.
+A fight-log existence check would also be wrong. The fight hash covers the result, the result needs the orders,
+so a reveal naturally comes **before** `commitFight`.
+
+**The fix: key the opening by `(gameId, baseId, fightId)`.** `_opened` gains the base, `AlreadyOpened` names it,
+and `openedOf(gameId, baseId, fightId)` takes it. A wrong-base replay is no longer able to reach the right base's
+slot. It lands under its own base, where it proves only *"B's word was opened naming fight X"*. A reader asks
+`openedOf` with the fight's own `defenderBase`, which the fight hash fixes. `RareOrders` is 2,925 bytes, up from
+2,892. Nothing called `openedOf` outside `fixcheck`.
+
+**The proof, `fixcheck` part 18.** Base 3's preimage is already public (opened for fights 11 and 12), and base 8
+seals its own word. A stranger opens fight 21 with base 3's preimage, and it lands under base 3. Base 3's
+preimage presented **as** base 8 is `BadOrderReveal`. Base 8's real opening of fight 21 then **moves**, not
+`AlreadyOpened`. `openedOf(game, 8, 21)` holds base 8's word, orders and opener, and the replay cannot be
+repeated. **Broken once:** with both slot reads pointed back at a base-blind key (`_opened[gameId][0][fightId]`),
+that row went red with base 8's real opening refused `AlreadyOpened`, which is the defect exactly. Two other
+part-18 rows went red with it, because they read by the real base. Restored. `fixcheck` is 310 ok and 0 FAIL.
+
+**What it does not close.** Someone holding a base's public preimage can still **pre-open** a future fight id
+under that base while the old word stands. If the defender then seals a new word before that fight, the fight's
+real opening under the same base is refused `AlreadyOpened`, and the slot holds the stale word. The chain cannot
+refuse this without knowing the fight's base and its line-up block. Both are inside the server's fight hash.
+**It is the same question as who opens the box, and when** (§13 item 6). Two answers close it: the opener is
+the server alone, writing as the fight settles, or a reveal must name the fight's line-up block and the word
+standing then. Each answer is a decision, so this records the gap and does not pick one.
+
+## 68. The bridge's attestor key is changed through RareRoles: `SET_ATTESTOR` (deployer ruling, 2026-10-01)
+
+**What it was.** `ShadowFriends.setAttestor` was guarded by `address public immutable team`, checked with
+`msg.sender != team` and refused `NotTeam()`. `ShadowFriends` has no upgrade path, so `team` was as permanent as
+the contract. A lost team key meant a stolen attestor key could never be rotated out. A stolen team key meant
+whoever held it could point the bridge at their own signer for as long as the contract lives.
+
+**The ruling.** The power moves to RareRoles, held by the deployer and the gamemaster, under the same
+`roleChangeDelay` every other grant waits out.
+
+**As built.**
+- `ShadowFriends` names `bytes32 public constant SET_ATTESTOR = keccak256("rarefriends.power.setAttestor")`.
+  `setAttestor` asks `roles.requirePower(msg.sender, SET_ATTESTOR)` first, then refuses the zero address
+  (`WrongSigner`) as before. A refusal is `PowerNotHeld(caller, power)`, declared on `ShadowFriends` too, so an
+  explorer decodes it against either ABI.
+- `team`, its constructor argument and `NotTeam()` are gone. The constructor is
+  `(address attestor_, IRareRoles roles_)`, and `roles` was already immutable for the launch whitelist.
+- `SET_ATTESTOR` is **grantable**, not root-only. Root holds it by being root. `grant.mjs` grants it to the
+  `GAMEMASTER` role, checks the spelling against the deployed contract's constant, and proves
+  `roleHasPower(SET_ATTESTOR, GAMEMASTER)`. It also refuses if the server key ends up holding the power.
+- `set-attestor.mjs` is the rotation, run from any key holding the power. It refuses before sending if the key
+  does not hold it, and reads `attestor()` back as proof.
+- `deploy.mjs` and `deploy/local-chain.sh` no longer take `TEAM_ADDRESS`. `localworld.mjs`, `paritycheck.js`
+  and `bridge-proof.mjs` deploy with the two-argument constructor.
+
+`ShadowFriends` is 16,390 bytes, up from 16,309. The claim measures 1,887,016 gas in memory, down from 1,887,038.
+
+**What a grant under a delay means here.** The deployer's grant to the gamemaster role counts from
+`now + roleChangeDelay` and is refused until then. Taking it back lands **at once**, as every revoke in RareRoles
+does. So a leaked gamemaster key is cut off in RareRoles, without touching `ShadowFriends`. That is the repair a
+lost team key never had.
+
+**The proof, `fixcheck` part 21.** It deploys a fresh registry and shadow, so the time travel touches nothing above it.
+- The constant and the two-argument constructor are read off the ABI, with no `team` and no `NotTeam`.
+- `SET_ATTESTOR` is not root-only.
+- **The deployer** sets the attestor: `AttestorChanged` is logged and `attestor()` reads the new key back.
+- **A stranger** is refused with `PowerNotHeld`.
+- **The old team address** is refused with `PowerNotHeld`.
+- A gamemaster with nothing granted is refused.
+- Granted under a 3,600 s delay, the gamemaster is still refused while the grant is pending.
+- After the delay, **the gamemaster** sets the attestor.
+- Revoked, the gamemaster is refused at once.
+- Root cannot set the zero attestor.
+- The parity fixture deploys with `(attestor, roles)`.
+
+**Broken once:** with the `requirePower` line removed, five rows went red: the stranger, the old team address,
+the ungranted gamemaster, the pending grant and the revoked grant. All five read `MOVED`. The file was then
+restored. `fixcheck` is 322 ok and 0 FAIL. `bridge-proof` is 24 of 24 and `recheckcheck` 23 of 23.
+
+**What this does not cover.** `recheck-anvil-proof.mjs` (`LOCAL_CHAIN=plain`) stops at its re-bridge step with
+`ClaimPredatesRevoke`. It does so identically at `de2b0af`, before this change, so it is not caused by this guard.
+It is reported here and not fixed.
+
+## 69. The local fake $RF, and a money flow that adds up (deployer, 2026-10-01: "we shouldn't omit that")
+
+**Why.** The local stage forked 4663 and moved the REAL $RF between anvil accounts. A fork dies at about 10
+minutes, and nothing checked that a game's money adds up. The fake world runs on a **plain, unforked anvil**. It
+still answers chain id 4663, so every page, every commitment and every roll reads the chain id it always does.
+
+**`test/FakeRF.sol`, two contracts, both LOCAL ONLY.**
+- **`FakeRF`.** Its interface is the real token's, read off that token's bytecode on 4663: OpenZeppelin ERC20,
+  ERC20Burnable (`burn`, `burnFrom`) and `INITIAL_SUPPLY()`. Its name, symbol, decimals and INITIAL_SUPPLY are
+  constructor arguments. `deploy.mjs --fake-rf` reads them from the real $RF by `eth_call` and passes them in
+  (`readRealRfShape`, cached for offline runs and saying so). The whole initial supply is minted to `faucet` at
+  birth. `faucetMint(amount)` mints only to the faucet and only when the faucet calls it. There is no
+  `mint(to, …)`. `IS_FAKE_RF()` is a marker.
+- **`LocalEntropy`.** Pyth's stand-in for the duel. It takes a 1-wei fee. Anyone may call
+  `deliver(seq, word)` or `deliverAuto(seq)`. There is no keeper.
+
+**Never on 4663: two locks on two keys.**
+1. **The constructors.** `LocalOnly` refuses any chain id but 4663 or 31337, and refuses any chain with code at
+   0x64. That address is ArbSys, which every Arbitrum chain has; Robinhood answers `0xfe` there, read 2026-10-01.
+   So real 4663 is refused, and so is a fork of it, which fetches that code.
+2. **`deploy.mjs --fake-rf`.** It refuses before any request when `EVM_RPC` is not loopback. Before sending, it
+   refuses unless the node answers `anvil_nodeInfo` with no fork and has no code at 0x64.
+
+A real deploy also refuses an `RF_TOKEN_ADDRESS` that answers `IS_FAKE_RF()`. That last path is **unexercised**:
+it needs a non-loopback RPC.
+
+**Wiring.**
+- `deploy/local-chain.sh fake` runs down, then up (plain anvil), then deploy, then fund. The deploy is
+  `deploy.mjs --fake-rf`, which deploys FakeRF, LocalEntropy and MockGenesis first and points RareDuel, RareMarket
+  and RareGame at them, then RareRules, then `--game --fake-rf`, `grant.mjs` and `whitelist.mjs` (anvil 1-9 and
+  the deployer).
+- `fund` in fake mode hands FUND_RF from the faucet (anvil 0) to the deployer address and anvil 1-9. It reads back
+  every balance and asserts `totalSupply` did not move.
+
+Three faults in that pipeline had never run before, and surfaced the first time it did:
+- RareRules came from a `solc` binary this machine does not have. It now comes from deploylib's `compileAll`.
+- The RareRules address went to `--game` un-checksummed, and `envAddress` refused it.
+- `grant.mjs` sent back to back and was refused "nonce too low". It, `whitelist.mjs` and `set-attestor.mjs` now
+  sign through ethers' `NonceManager`.
+
+`GAME_PLACES` no longer refuses when unset, because ruling 32 decided 3.
+
+**The proof, `moneycheck.mjs` (`npm run money`, on the running fake world).** It runs one duel, one sale of a
+MockGenesis base **through a planted 1/1 terminal**, and one three-player game from entry to payout.
+- After every step: `totalSupply` is unchanged, and every ledger address moved by exactly what the file computes
+  from the contracts' own parameters with its own arithmetic. Every other address did not move, and the deltas
+  sum to zero.
+- At the end: the duel, the market and the game hold nothing.
+- The duel: stake 100 each. Roll 3747 against odds 3000 means P2 takes 200. The fee is 0, because the decided
+  house fee is zero.
+- The sale: price 1000. The seller gets 985 and feeTo 10.0005. The host's cut is
+  min(15 × 3333 bps, 10, 15) = 4.9995.
+- The game: entry 50 × 3. The cut, 7.5, goes to feeTo at start. 142.5 is split 71.25 / 42.75 / 28.5.
+
+32 of 32 pass. **Broken once, twice over.** With `BREAK=leak`, the buyer sends one base unit outside the ledger
+mid-sale, and 2 rows go red: P2 is one base unit off and the ledger sum is non-zero. With `BREAK=mint`, the faucet
+mints one unit, and 7 rows go red: the supply moved in every step after it.
+
+`fixcheck` part 22 proves the token in memory:
+- every one of the real token's 12 functions is present;
+- the shape is passed through, with none of it written in the source;
+- the supply sits with the faucet at birth;
+- a stranger's mint is refused (`NotFaucet`), and the faucet mints only to itself;
+- `burn` works;
+- with ArbSys code planted at 0x64, FakeRF and LocalEntropy refuse to deploy (`NotALocalChain`).
+
+`fixcheck` is 332 ok and 0 FAIL.
+
+**What the fake world is not.** It is not gas or prices, since anvil is not Arbitrum. It is not Pyth, whose word
+here is not random. It is not the real Genesis or Friends collections: MockGenesis has an open mint. Pages that read
+those collections from chain find nothing on an unforked anvil.

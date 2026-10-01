@@ -51,6 +51,9 @@ export function duelTerms() {
 export function compileAll() {
   const files = {};
   readdirSync(HERE).filter(f => f.endsWith('.sol')).forEach(f => { files[f] = { content: readFileSync(path.join(HERE, f), 'utf8') }; });
+  // test/*.sol too, prefixed as paritycheck.js does: the LOCAL fake world (`--fake-rf`) deploys FakeRF, LocalEntropy
+  // and MockGenesis from there. Nothing under test/ is ever deployed to a real chain - deploy.mjs refuses it.
+  readdirSync(path.join(HERE, 'test')).filter(f => f.endsWith('.sol')).forEach(f => { files['test/' + f] = { content: readFileSync(path.join(HERE, 'test', f), 'utf8') }; });
   const find = (p) => {
     const f = p.startsWith('lib/openzeppelin-contracts/') ? path.join(HERE, 'node_modules/@openzeppelin/contracts', p.slice('lib/openzeppelin-contracts/contracts/'.length))
       : path.join(HERE, p);
@@ -66,7 +69,53 @@ export function compileAll() {
     RareRoles: pick('RareRoles.sol', 'RareRoles'), RareFightLog: pick('RareFightLog.sol', 'RareFightLog'), ShadowFriends: pick('ShadowFriends.sol', 'ShadowFriends'),
     RareDuel: pick('RareDuel.sol', 'RareDuel'), RareMarket: pick('RareMarket.sol', 'RareMarket'), RareCombatLab: pick('RareCombat.sol', 'RareCombatLab'),
     RareRules: pick('RareRules.sol', 'RareRules'), RareGame: pick('RareGame.sol', 'RareGame'),
-    RareOrders: pick('RareOrders.sol', 'RareOrders'), RareDoopieGate: pick('RareDoopieGate.sol', 'RareDoopieGate') };
+    RareOrders: pick('RareOrders.sol', 'RareOrders'), RareDoopieGate: pick('RareDoopieGate.sol', 'RareDoopieGate'),
+    // LOCAL ONLY (deploy.mjs --fake-rf): each refuses a real chain in its own constructor as well
+    FakeRF: pick('test/FakeRF.sol', 'FakeRF'), LocalEntropy: pick('test/FakeRF.sol', 'LocalEntropy'), MockGenesis: pick('test/Mocks.sol', 'MockGenesis') };
+}
+
+/** The fake world's gate, asked before a single fake contract is sent: the RPC is loopback, it is ANVIL (it
+ *  answers anvil_nodeInfo, which no real node does), it is NOT a fork (forkConfig.forkUrl is null), and it has no
+ *  ArbSys code at 0x64. A real 4663 fails the second and the fourth; a fork of it fails the third and the fourth.
+ *  FakeRF and LocalEntropy refuse the fourth again in their own constructors. Exits; never returns false. */
+export async function requireUnforkedAnvil(provider) {
+  const no = (why) => { console.error('--fake-rf: ' + why + '. The fake $RF goes only on an UNFORKED local anvil. Refusing.'); process.exit(2); };
+  if (!LOCAL) no('EVM_RPC is not a loopback address (' + (EVM_RPC || 'unset - that is chain 4663 itself') + ')');
+  let info; try { info = await provider.send('anvil_nodeInfo', []); } catch (e) { no('the node at ' + EVM_RPC + ' does not answer anvil_nodeInfo, so it is not anvil'); }
+  if (info && info.forkConfig && info.forkConfig.forkUrl) no('the anvil at ' + EVM_RPC + ' is a FORK of ' + info.forkConfig.forkUrl + ' - a fork already holds the real $RF');
+  if ((await provider.getCode('0x0000000000000000000000000000000000000064')) !== '0x') no('there is code at 0x64 (ArbSys): this is an Arbitrum chain');
+  return info;
+}
+
+/** The real $RF's shape - name, symbol, decimals, INITIAL_SUPPLY - read from chain 4663 by eth_call and nothing
+ *  else, for FakeRF's constructor. The RPC is chainlive.js's list (never EVM_RPC: that is the local chain), the
+ *  chain id is asserted 4663, and the token address is the archive's (collector.py TOKEN), so no value is typed.
+ *  The last good read is cached beside the local chain's other scratch; offline, the cache is used and SAID. */
+export async function readRealRfShape({ cacheFile } = {}) {
+  const { Interface } = await import('ethers');
+  const coll = readFileSync(path.join(ESTATE, '..', 'collector.py'), 'utf8');
+  const m = coll.match(/^TOKEN *= *"(0x[0-9a-fA-F]{40})"/m);
+  if (!m) throw new Error('could not read TOKEN (the real $RF) from collector.py');
+  const token = getAddress(m[1].toLowerCase());
+  const src = readFileSync(path.join(ESTATE, 'chainlive.js'), 'utf8');
+  const rpcs = [...(src.match(/const RPC = \[([^\]]+)\]/) || ['', ''])[1].matchAll(/'([^']+)'/g)].map(m => m[1]);
+  const iface = new Interface(['function name() view returns (string)', 'function symbol() view returns (string)',
+    'function decimals() view returns (uint8)', 'function INITIAL_SUPPLY() view returns (uint256)']);
+  const errs = [];
+  for (const rpc of rpcs) {
+    try {
+      const p = new JsonRpcProvider(rpc, 4663, { staticNetwork: true });
+      if (BigInt(await p.send('eth_chainId', [])) !== 4663n) { errs.push(rpc + ': not 4663'); continue; }
+      const call = async (fn) => iface.decodeFunctionResult(fn, await p.call({ to: token, data: iface.encodeFunctionData(fn) }))[0];
+      const shape = { token, rpc, readAt: new Date().toISOString(), name: await call('name'), symbol: await call('symbol'),
+        decimals: Number(await call('decimals')), initialSupply: (await call('INITIAL_SUPPLY')).toString() };
+      p.destroy();
+      if (cacheFile) { const { writeFileSync, mkdirSync } = await import('node:fs'); mkdirSync(path.dirname(cacheFile), { recursive: true }); writeFileSync(cacheFile, JSON.stringify(shape, null, 2) + '\n'); }
+      return { ...shape, from: 'live' };
+    } catch (e) { errs.push(rpc + ': ' + (e.shortMessage || e.message)); }
+  }
+  if (cacheFile && existsSync(cacheFile)) return { ...JSON.parse(readFileSync(cacheFile, 'utf8')), from: 'cache (4663 unreachable: ' + errs.join('; ') + ')' };
+  throw new Error('could not read the real $RF from chain 4663 and there is no cached read: ' + errs.join('; '));
 }
 
 /** The signing key comes from DEPLOYER_KEY and nowhere else. Never returned to a log, never written. */

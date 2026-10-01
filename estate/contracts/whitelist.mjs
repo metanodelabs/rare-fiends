@@ -6,7 +6,7 @@
 // Reads RareRoles from estate/bridge-config.json. Both setters are ROOT-ONLY (MANAGE_ROLES), so the key must be a
 // DEPLOYER. One typed "yes" per transaction. Proves the result with isAllowed before exiting.
 import path from 'node:path';
-import { Wallet, Contract, isAddress, getAddress } from 'ethers';
+import { Wallet, Contract, isAddress, getAddress, NonceManager } from 'ethers';
 import { HERE, chainlive, compileAll, readKey, envAddress, connect, confirm, eth, banner, cfgPath, readCfg } from './deploylib.mjs';
 
 const DRY = process.argv.includes('--dry-run');
@@ -23,7 +23,8 @@ if (new Set(ADDRS).size !== ADDRS.length) { console.error('WHITELIST_ADDRESSES h
 
 const provider = await connect(chainlive().rpcs);
 const wallet = new Wallet(KEY, provider);
-const roles = new Contract(cfg.rareRoles, compileAll().RareRoles.abi, wallet);
+const signer = new NonceManager(wallet);   // counts its own nonces: back-to-back sends on an instant-mining anvil were refused 'nonce too low' (2026-10-01)
+const roles = new Contract(cfg.rareRoles, compileAll().RareRoles.abi, signer);
 const gasPrice = (await provider.getFeeData()).gasPrice;
 console.log((DRY ? 'DRY RUN\n' : '') + banner() + 'RareRoles ' + cfg.rareRoles + '  from ' + wallet.address + '  whitelistOpen now ' + (await roles.whitelistOpen()));
 if (!(await roles.hasPower(wallet.address, await roles.MANAGE_ROLES()))) { console.error(wallet.address + ' does not hold MANAGE_ROLES (root). Refusing.'); process.exit(2); }

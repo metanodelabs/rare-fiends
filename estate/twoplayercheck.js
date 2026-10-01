@@ -19,8 +19,9 @@
 // What it does NOT cover: two machines on a network (one Chrome, two contexts, one localhost); what an
 // absent player's base does (M7 item 4); the chain's half (the hourly sync, rulings 16 and 18); a build,
 // raise or demolish seen across seats (the same showOther path, not driven here); the HUD's crystal figure
-// on an island (it shows whichever base's harvester banked last - index.html's drone loop); and tap() on
-// another player's Friend, which nothing stops yet.
+// on an island (it shows whichever base's harvester banked last - index.html's drone loop); tap() on
+// another player's Friend, which nothing stops yet; and what a page does while our server is DOWN - (4)
+// freezes every page across the restart, so a poll or write that meets a dead server is never driven.
 'use strict';
 const { spawn } = require('child_process'); const fs = require('fs'), os = require('os'), path = require('path');
 const R = require('./record.js'), V = require('./values.js');
@@ -64,8 +65,38 @@ async function pageSocket(targetId) {
     if (r.exceptionDetails) throw new Error('THREW: ' + (r.exceptionDetails.exception ? r.exceptionDetails.exception.description : r.exceptionDetails.text).split('\n')[0]); return r.result.value; };
   const until = async (expr, ms) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { try { if (await J(expr)) return Date.now() - t0; } catch (_) {} await sleep(100); } return -1; };
   const watch = await require('./pagewatch.js').attach(ws, send);
-  return { send, J, until, watch };
+  // which of this page's requests to OUR SERVER the server has not yet answered: (4) stops the server only
+  // once there are none, because a write cut off by the check's own restart is the check's doing and not
+  // the page's. ANSWERED is the response's headers reaching the browser (`responseReceivedExtraInfo`, sent
+  // by the network side) as well as `loadingFinished`: a FROZEN page is not handed its response until it is
+  // thawed, so `loadingFinished` cannot arrive while it is frozen - measured: the server had answered the
+  // write and the event came only after the thaw. serve.py runs apply() and stores the record BEFORE it
+  // answers, so headers back means the write is on disk.
+  const out = new Map(), prev = ws.onmessage, P = { out, last: 0, sent: 0 };
+  ws.onmessage = (e) => { prev(e); let o; try { o = JSON.parse(e.data); } catch (_) { return; } const p = o.params || {};
+    if (o.method === 'Network.requestWillBeSent' && String(p.request && p.request.url).startsWith(SITE + '/api/')) { out.set(p.requestId, p.request.url); P.last = Date.now(); P.sent++; }
+    else if (o.method === 'Network.responseReceivedExtraInfo' || o.method === 'Network.loadingFinished' || o.method === 'Network.loadingFailed') out.delete(p.requestId); };
+  return Object.assign(P, { send, J, until, watch });
 }
+// (4)'s restart, done honestly: every page is FROZEN (Page.setWebLifecycleState - its timers and its polls
+// stop, as a backgrounded tab's do; freezing also fires the page's own `hidden` write, which is the close
+// path working), and only when our server has answered every request any page made to it is the server
+// stopped. Before this, the pages kept polling every pollMs through the restart, and under
+// `-j 4` load the restart is slow enough that a poll's write landed in the gap: ERR_CONNECTION_REFUSED on
+// /api/record/<id>/commit, counted by pagewatch against a page that had done nothing wrong. The wait is
+// bounded and says so if it runs out.
+// QUIET, not merely empty: freezing fires the page's `hidden` write, and its requestWillBeSent can reach this
+// socket after the freeze has answered - so "nothing out" read at once was once true a moment before the write
+// went out, and the stop cut it off (ERR_EMPTY_RESPONSE on /commit, under -j 4). Nothing out AND nothing new
+// sent for QUIET_MS on every page.
+const QUIET_MS = 1000;
+async function quiesce(pages, ms) {
+  for (const p of pages) await p.send('Page.setWebLifecycleState', { state: 'frozen' });
+  const t0 = Date.now();
+  while (Date.now() - t0 < ms) { if (pages.every((p) => p.out.size === 0 && Date.now() - p.last >= QUIET_MS)) return Date.now() - t0; await sleep(50); }
+  return -1;
+}
+const thaw = async (pages) => { for (const p of pages) await p.send('Page.setWebLifecycleState', { state: 'active' }); };
 async function browserSocket() {
   const v = await (await fetch(`http://127.0.0.1:${PORT}/json/version`)).json();
   const ws = new WebSocket(v.webSocketDebuggerUrl); await new Promise((okk, no) => { ws.onopen = okk; ws.onerror = no; });
@@ -138,8 +169,13 @@ const SEES = (id, r) => `(function(){ const a = base.actors.find(a => a.kind ===
 
     // B walks a Friend; A sees it
     const fb = JSON.parse(await B.J(PICK));
-    const to = [fb.x + 3, fb.y + 1];
+    // the target is a spot nobody stands on in seat 0's view of seat 1: it was always fb + (3, 1), and about one
+    // run in a few dozen another of seat 1's Friends had been dropped there, so "before" failed on a collision
+    // the walk had nothing to do with. The first free one of a few nearby offsets; the assertion below still
+    // holds the chosen spot to being empty and the Friend to being elsewhere.
     const before = JSON.parse(await A.J(SEES(homeB, fb.r)));
+    const taken = (x, y) => (before.body && before.body[0] === x && before.body[1] === y) || before.defenders.some((d) => d[0] === x && d[1] === y);
+    const to = [[3, 1], [3, -1], [-3, 1], [1, 3], [-1, -3], [4, 2]].map(([dx, dy]) => [fb.x + dx, fb.y + dy]).find(([x, y]) => !taken(x, y)) || [fb.x + 3, fb.y + 1];
     ok(before.body && (before.body[0] !== to[0] || before.body[1] !== to[1]) && !before.defenders.some((d) => d[0] === to[0] && d[1] === to[1]),
       'before: seat 0 draws seat 1\'s Friend ' + fb.r + ' at ' + before.body + ', not at ' + to + ' (so what follows can only pass if the walk crossed)');
     const walked = JSON.parse(await B.J(WALK(fb.r, to[0], to[1])));
@@ -194,13 +230,17 @@ const SEES = (id, r) => `(function(){ const a = base.actors.find(a => a.kind ===
     ok(bRow.x === toB[0] && bRow.y === toB[1] && !(await B.J('base.record.lastResync')), 'and seat 1, whose write stood, lost nothing and was never told it lost');
 
     console.log('--- (4) the record survives a server restart ---');
-    // let every page's pending moves land first, then read the heads
+    // let every page's pending moves land first, then freeze every page and wait for its last write to
+    // come back; only then are the heads read, so no write can land between reading them and the stop
     await sleep(2 * pollMs);
+    const drained = await quiesce([A, B, C], 4 * pollMs);
+    ok(drained >= 0, 'every page frozen, its last request to our server answered and nothing new sent for ' + QUIET_MS + ' ms, before the stop (' + (drained >= 0 ? drained + ' ms' : 'STILL OUT: ' + [A, B, C].map((p) => [...p.out.values()].join(',')).join(' / ')) + ')');
     const wasHeads = JSON.stringify((await getJ('/api/record')).records.map((h) => [h.id, h.head, h.writes]).sort());
     const aWood = await A.J('base.record.ledger.base.wood');
     await stopServer();
     let down = false; try { await fetch(SITE + '/api/record'); } catch (_) { down = true; }
     await startServer();
+    await thaw([A, B, C]);
     const nowHeads = JSON.stringify((await getJ('/api/record')).records.map((h) => [h.id, h.head, h.writes]).sort());
     ok(down && nowHeads === wasHeads, 'the server was stopped (' + (down ? 'unreachable' : 'STILL ANSWERING') + ') and started again: every record is at the head and write count it had (' + JSON.parse(nowHeads).length + ' records)');
     await A.send('Page.reload'); await sleep(500);

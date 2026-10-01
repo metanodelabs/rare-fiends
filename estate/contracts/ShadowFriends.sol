@@ -74,9 +74,15 @@ contract ShadowFriends is ERC721, EIP712 {
     uint256 private constant MAX_PALETTE_WORDS = (MAX_COLORS * 3 + 31) / 32;
     uint256 private constant MAX_PIXEL_WORDS = (MAX_SPRITE * 5 + 255) / 256;
 
-    address public immutable team;      // may change the attestor, and nothing else
+    /// @notice the one power that may change the attestor, held in RareRoles (deployer ruling, 2026-10-01). It
+    /// was `immutable team`: ShadowFriends is permanent, so a lost or stolen team key would have been permanent
+    /// too. Root (the deployer) holds it by being root; the gamemaster holds it once `grantPower(SET_ATTESTOR,
+    /// GAMEMASTER, true)` lands, after the same `roleChangeDelay` every other grant waits out; and a leaked
+    /// holder is removed in RareRoles at once, without touching this contract.
+    bytes32 public constant SET_ATTESTOR = keccak256("rarefriends.power.setAttestor");
+
     address public attestor;            // the bridge's checker: signs claims, revokes when a re-check fails
-    IRareRoles public immutable roles;  // the launch whitelist: claim asks roles.requireAllowed FIRST (deployer, 2026-09-30)
+    IRareRoles public immutable roles;  // the launch whitelist (claim asks requireAllowed FIRST) and who holds SET_ATTESTOR
 
     /// @notice how long a signed claim lives: the attestor signs `deadline = now + CLAIM_TTL` (attestor.mjs
     /// `CLAIM_TTL`, held equal to this by the parity check). It is a constant HERE because `revoke` needs it:
@@ -97,7 +103,9 @@ contract ShadowFriends is ERC721, EIP712 {
     event Revoked(uint256 indexed tokenId, string reason);
     event AttestorChanged(address attestor);
 
-    error NotTeam();
+    /// @notice the caller does not hold SET_ATTESTOR. Raised by `RareRoles.requirePower`; declared here too so
+    /// an explorer decodes it against this contract's own ABI.
+    error PowerNotHeld(address caller, bytes32 power);
     error NotAttestor();
     error AlreadyShadowed();
     error ClaimExpired();
@@ -121,15 +129,16 @@ contract ShadowFriends is ERC721, EIP712 {
     /// The game is **Rare Fiends**; the collection is **Rare Friends**. A shadow is neither a Rare
     /// Friend nor tradeable - it is a soulbound permission to play somebody else's Solana NFT in this
     /// game - so it is named for the game.
-    constructor(address attestor_, address team_, IRareRoles roles_) ERC721("Rare Fiends Shadows", "RFSHADOW") EIP712("Rare Fiends Shadows", "1") {
-        if (attestor_ == address(0) || team_ == address(0) || address(roles_) == address(0)) revert WrongSigner();
+    constructor(address attestor_, IRareRoles roles_) ERC721("Rare Fiends Shadows", "RFSHADOW") EIP712("Rare Fiends Shadows", "1") {
+        if (attestor_ == address(0) || address(roles_) == address(0)) revert WrongSigner();
         attestor = attestor_;
-        team = team_;
         roles = roles_;
     }
 
+    /// @notice point the bridge at a new attestor key. Guarded ON CHAIN by SET_ATTESTOR in RareRoles - the
+    /// deployer (root), and the gamemaster role once granted; anyone else is refused with PowerNotHeld.
     function setAttestor(address attestor_) external {
-        if (msg.sender != team) revert NotTeam();
+        roles.requirePower(msg.sender, SET_ATTESTOR);
         if (attestor_ == address(0)) revert WrongSigner();
         attestor = attestor_;
         emit AttestorChanged(attestor_);

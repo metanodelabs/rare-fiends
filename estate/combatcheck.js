@@ -120,9 +120,15 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
     const box=[{x:39,y:39},{x:41,y:39},{x:39,y:41},{x:41,y:41},{x:39,y:40,vert:true},{x:41,y:40,vert:true}];
     const D={walls:box,defenders:[{gen:3,x:0,y:0,tower:false,order:0},{gen:2,x:1,y:0,tower:false,order:0}]};
     const c=Combat.captureFight(P.R,D,{gen:1,x:40,y:40},ctx), a=Combat.fight(P.R,Combat.captureSetup(D,{gen:1,x:40,y:40}),ctx);
-    return JSON.stringify({spared:{reason:c.reason,winner:c.winner,shots:c.shots},attack:{reason:a.reason,shots:a.shots}});})()`));
-  ok('the one stand-still: a spared intruder walled in and out of reach ends \'held\' with no shot fired; the same line-up as an attack breaks out and does not',
-    stall.spared.reason === 'held' && stall.spared.winner === 'defence' && stall.spared.shots === 0 && stall.attack.reason !== 'held' && stall.attack.shots > 0, JSON.stringify(stall));
+    const e=Combat.captureFight(P.R,{walls:box,defenders:[]},{gen:1,x:40,y:40},ctx);
+    return JSON.stringify({spared:{reason:c.reason,winner:c.winner,shots:c.shots,won:c.won,hp:c.intruderHp},attack:{reason:a.reason,shots:a.shots},
+      empty:{reason:e.reason,winner:e.winner,won:e.won,undefended:e.undefended,rolls:e.rolls,shots:e.shots,hp:e.intruderHp,full:P.R.hp[1],walls:e.walls}});})()`));
+  ok('the one stand-still (ruling of 2026-10-01): a spared intruder walled in and out of reach ends in a \'stalemate\' that the INTRUDER wins (winner attack, won), no shot fired; the same line-up as an attack breaks out and does not',
+    stall.spared.reason === 'stalemate' && stall.spared.winner === 'attack' && stall.spared.won === true && stall.spared.shots === 0 && stall.spared.hp > 0
+      && stall.attack.reason !== 'stalemate' && stall.attack.shots > 0, JSON.stringify(stall));
+  ok('nobody home: a capture fight with no defenders is the intruder\'s - winner attack, reason \'wiped\', undefended, no roll, full hp, every wall whole',
+    stall.empty.winner === 'attack' && stall.empty.reason === 'wiped' && stall.empty.won === true && stall.empty.undefended === true && stall.empty.rolls === 0
+      && stall.empty.shots === 0 && stall.empty.hp === stall.empty.full && stall.empty.walls.length === 6, JSON.stringify(stall));
   // ruling 45: cover is standing ON a standing wall section (÷ coverDiv), and standing BEHIND one is nothing
   const cover = JSON.parse(await ev(`(()=>{const P=combatPage,R=P.R,w="0x${'12'.repeat(32)}",ctx={word:w,contract:Chance.PREVIEW_CONTRACT,chainId:Chance.CHAIN_ID,fightId:1};
     const run=(opt)=>{const b=Combat.proving(3,opt); const f=Combat.fight(R,{attackers:[4,4],entry:Combat.entry(b,'N',6),defenders:b.defenders,walls:b.walls},ctx,{log:true});

@@ -118,10 +118,22 @@ const CHECKS = [
                         + 'watches, a request made and answered before the debugger attached that the page '
                         + 'logged nothing about, a warning rather than an error, and a 200 carrying the '
                         + 'wrong thing'],
-  ['challengecheck',    'a challenge played through: pot, stakes, payout, draw refund, records; and WATCHES '
-                        + 'THE PAGE (pagewatch.js): nothing 404s, nothing is logged as an error',
-                        'a real second player - the page plays both sides; and, of what it now watches, a '
-                        + 'warning rather than an error, and a 200 carrying the wrong thing'],
+  ['challengecheck',    'a challenge played through: pot, stakes, payout, draw refund, records; M17 item 2, HOLD\'EM '
+                        + 'FIXED-LIMIT in crystals - one unit on, $RF in the code and disabled, CHECK and BET 50 and no '
+                        + 'PLAY ON, every BET offered is HOLDEM.bets[street] x stake on all four streets (a check-down hand reaches '
+                        + 'the river every time), money conserved at every live step and zero-sum over a bet hand, a fold '
+                        + 'hand and a check-down hand, NET right for the winner or loser; M17 item 9, '
+                        + 'DEMO MODE - ?demo=1 forces stake 0 and shuts every stake button, and all four games with '
+                        + 'S.stake=50 forced leave both purses, NET, HIGH and LOW unchanged; base.html?demo=1 embeds it '
+                        + 'with DEMO.on; a THREW is a FAIL; and WATCHES THE PAGE (pagewatch.js): nothing 404s, nothing '
+                        + 'is logged as an error',
+                        'a real second player - the page plays both sides; hold\'em\'s RAISE path and the raise cap '
+                        + '(HOLDEM.raises) - the page decides when to bet into us, so a raise is not reliably reached; '
+                        + 'a split pot at showdown is only asserted if the hand happens to split; a bet WE make on the turn or '
+                        + 'river (the bet hand often ends before then because the page folds to our bet - the sizes there are read off the BET '
+                        + 'button the check-down hand is offered, not paid); demo mode read from the CHAIN (RareRoles.demoMode()) - no contract is deployed, '
+                        + 'only the ?demo=1 stand-in is driven; demo mode frozen per game; that a free game is counted '
+                        + 'in W/L; and, of what it watches, a warning rather than an error, and a 200 carrying the wrong thing'],
   ['challengebtncheck', 'the base CHALLENGE button opens over the live map and returns',
                         'the three games that are not built'],
   ['fitcheck',          'no scrolling at five laptop sizes; buttons in view on two phones',
@@ -140,9 +152,11 @@ const CHECKS = [
                         + 'building instead); that the face-tap test depends on WALLS at all (it stays green with '
                         + 'the WALLS dispatch removed - the tap scans buildings); only seeds 7 and 31'],
   ['combatcheck',       'the fight page matches combat.js: orders, generations, replay from a word; NO CLOCK (ruling 47) - '
-                        + 'a lone catapult out of reach wipes a HOLDing base and is repelled by ENGAGE, neither "held"; '
-                        + 'the one stand-still is a spared intruder walled in and out of reach ("held", no shot), which '
-                        + 'as an ordinary attack breaks out; COVER (ruling 45) is ON a standing wall at 1/coverDiv, '
+                        + 'a lone catapult out of reach wipes a HOLDing base and is repelled by ENGAGE; the one stand-still '
+                        + 'is a spared intruder walled in and out of reach - a "stalemate" the INTRUDER wins (ruling of '
+                        + '2026-10-01; it was "held", the defence\'s), no shot - which as an ordinary attack breaks out; a '
+                        + 'capture fight with nobody home is the intruder\'s ("wiped", undefended, no roll, full hp, walls '
+                        + 'whole); COVER (ruling 45) is ON a standing wall at 1/coverDiv, '
                         + 'and nothing behind one',
                         'an attack started from the map - the map cannot start one yet; cover once the wall FALLS (its crew '
                         + 'losing it mid-fight) is not driven; DEFEND and FALL BACK outcomes are not asserted'],
@@ -156,12 +170,17 @@ const CHECKS = [
                         + 'intruder repelled to hp 0 with every wall at full, abortMs -> fled, a closed window '
                         + "refuses a second fight, abort() closes it; the claim sits on the building while open, and beating the "
                         + "intruder returns it AT ONCE (b.claim cleared, claimOn null, w.returned, the window shut at the "
-                        + "beat, the owner's) while no other building changes; "
+                        + "beat, the owner's) while no other building changes; WHO KEEPS IT (ruling of 2026-10-01): "
+                        + 'nobody home ("wiped") and a walled-in intruder nobody can reach ("stalemate") are the '
+                        + "intruder's - the claim stands, w.won, not returned, the fight-back spent - killed is the only "
+                        + 'end that returns it, and running (abortMs, abort()) clears the claim and the owner keeps it; '
                         + 'WATCHES THE PAGE (pagewatch.js)',
                         'THAT `spare` IS WHAT KEEPS THE WALLS WHOLE - with it switched off the check stays green, '
                         + 'because no shot from an intruder standing inside ever lands on a wall; that the window '
-                        + 'closes at 300,000 ms (read from closes-opened, never waited out); the intruder winning; '
-                        + 'any UI - nothing on screen opens a capture yet; that abort() clears b.claim (not asserted); and '
+                        + 'closes at 300,000 ms (read from closes-opened, never waited out); that nobody home and the stalemate '
+                        + 'are driven on a SUBSTITUTED view (Combat.captureFight wrapped to rewrite the defenders and walls, '
+                        + 'then unwrapped) - the real base is never emptied or walled in; what a won claim does when its '
+                        + 'window closes; any UI - nothing on screen opens a capture yet; and '
                         + '"the owner\'s again" is weak - nothing hands the building to the taker during the window, so '
                         + 'that clause fails only if something moves it after (BREAK=own); the claim, w.returned and the '
                         + 'closing time are what carry the line'],
@@ -370,7 +389,7 @@ const CHECKS = [
                         + 'drives the draft path, not with a build in it); serve.py holding the record - the store is '
                         + 'the browser\'s localStorage; and the tap that opens the panel - the panel is opened by '
                         + 'base.openPanel, the function a tap calls, and only the button is pressed'],
-  ['twoplayercheck',    "M7, two players in one game: its own serve.py holds the record and takes a write by record.js's apply() (Replayed, StaleParent keeping the first, NoRecord, a batch on another base's route refused); seat 0 and seat 1 in isolated contexts each read the other's record, a walk on one is drawn on the other and read by its defense() within two polls, a chop on one raises the other's view of its wood; a third client on one seat has its stale write REFUSED (StaleParent), is told and put back on the record while the writer loses nothing; and every record survives a server restart", 'two machines on a network (one Chrome, two contexts, localhost); an absent player\'s base (M7 item 4); the chain\'s hourly sync; a build, raise or demolish seen across seats; the island HUD\'s crystal figure (it shows the last base to bank); tap() on another player\'s Friend'],
+  ['twoplayercheck',    "M7, two players in one game: its own serve.py holds the record and takes a write by record.js's apply() (Replayed, StaleParent keeping the first, NoRecord, a batch on another base's route refused); seat 0 and seat 1 in isolated contexts each read the other's record, a walk on one is drawn on the other and read by its defense() within two polls, a chop on one raises the other's view of its wood; a third client on one seat has its stale write REFUSED (StaleParent), is told and put back on the record while the writer loses nothing; and every record survives a server restart, taken only once every page is frozen and our server has answered its last request", 'two machines on a network (one Chrome, two contexts, localhost); an absent player\'s base (M7 item 4); the chain\'s hourly sync; a build, raise or demolish seen across seats; the island HUD\'s crystal figure (it shows the last base to bank); tap() on another player\'s Friend; what a page does while the server is down (the restart is done with every page frozen)'],
   ['walkcheck',         'M11 item 6, FRIENDS WALK WITH THE TOOLKIT on the real base page: base.nav.mode is toolkit (not '
                         + 'the tile fallback), FriendSDK.commit is the commit TOOLKIT.md pins, every tree is in the walking '
                         + 'world as the toolkit\'s tree prop, placeProp puts four toolkit props across a Friend\'s way, and '
@@ -582,7 +601,10 @@ const run = (name) => new Promise((done) => {
   sweepProfiles();
   const failed = results.filter((r) => r.code !== 0);
   for (const f of failed) {
-    console.log(`\n--- ${f.name} ---\n${f.out.trim().split('\n').slice(-14).join('\n')}`);
+    // The tail alone hid the line that failed whenever it came early in a long check (startcheck under
+    // -j 4 printed "1 step(s) failed" under fourteen `ok`s), so every FAIL line is printed first, then the tail.
+    const lines = f.out.trim().split('\n'), tail = lines.slice(-14), early = lines.slice(0, -14).filter((l) => /^\s*FAIL\b/.test(l));
+    console.log(`\n--- ${f.name} ---\n` + (early.length ? early.join('\n') + '\n  ...\n' : '') + tail.join('\n'));
   }
 
   const w = Math.max(...todo.map((c) => c[0].length));

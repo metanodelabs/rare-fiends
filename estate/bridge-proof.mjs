@@ -114,7 +114,7 @@ async function chain() {
 
   const roles = await net.deploy(TEAM, C.roles, [TEAM]);
   await roles.call('setWhitelisted', [[OWNER, BUYER], true], TEAM);   // the launch list, closed: STRANGER is not on it
-  const shadow = await net.deploy(TEAM, C.shadow, [attestor.address, TEAM, roles.address]);
+  const shadow = await net.deploy(TEAM, C.shadow, [attestor.address, roles.address]);   // no team: setAttestor is SET_ATTESTOR in RareRoles
   ok('ShadowFriends and RareRoles compile with solc ' + C.solc + ' and deploy on the in-process 4663 (' + C.shadow.size + ' bytes of shadow)',
     /^0x[0-9a-fA-F]{40}$/.test(shadow.address) && C.shadow.size < 24576, shadow.address);
   const why = (e) => { for (const i of [shadow.iface, roles.iface]) { try { const p = i.parseError(e.data); if (p) return p.name; } catch (_) {} } return (e.data || e.message).slice(0, 20); };

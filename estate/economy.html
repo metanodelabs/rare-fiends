@@ -196,9 +196,58 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
   function read() {
     try {
       const E = $('pEstate').contentWindow.base, C = $('pChallenge').contentWindow.challenge, S = $('pStart').contentWindow.era;
-      if (E && E.ECON && C && C.STAKES && S && S.JOIN_WINDOW && S.MIN_PLAYERS) return { E: E.ECON, C, S };
+      // the store's rule is read where the game runs it: the probed estate's own record.js and values.js
+      const W = $('pEstate').contentWindow;
+      if (E && E.ECON && C && C.STAKES && S && S.JOIN_WINDOW && S.MIN_PLAYERS) return { E: E.ECON, C, S, ST: storeRule(W.Record, W.VALUES) };
     } catch (e) { /* not same-origin (opened from a file): handled below */ }
     return null;
+  }
+  // HOW MUCH A BASE HOLDS (M8 item 6). The rule is record.js storeCap, and the page RUNS it - in the probed
+  // game, on bases built here out of record.js's own buildingRow - rather than describing it in a sentence
+  // that goes stale the next time the rule changes (it did: this page called the silo a cap and a base with
+  // no silo uncapped after both had stopped being true). Every figure is in hundredths, as storeCap returns.
+  // Nothing here is typed: the levels come from values.js, and so does whether each number is PROPOSED.
+  function storeRule(Rec, V) {
+    if (!Rec || typeof Rec.storeCap !== 'function' || typeof Rec.buildingRow !== 'function' || !V || !V.kinds) return null;
+    const dk = V.kinds.collectionDepot, sk = V.kinds.silo;
+    if (!dk || !sk) return null;
+    // startedAt null is a building that is up (record.js finished()), so it stands at the level given
+    const row = (id, kind, level) => Rec.buildingRow(id, kind, level, id, 0, false, null, 0);
+    const cap = (bs) => Rec.storeCap({ buildings: bs }, 0);
+    const D = (l) => row(1, 'collectionDepot', l);
+    const depot = dk.tiers.map((_, i) => cap([D(i + 1)]));
+    const silo = sk.tiers.map((_, i) => cap([row(2, 'silo', i + 1)]));                       // a silo with no depot
+    const adds = sk.tiers.map((_, i) => cap([D(1), row(2, 'silo', i + 1)]) - depot[0]);      // what a silo puts on top of depot I
+    const twoSilos = cap([D(1), row(2, 'silo', 1), row(3, 'silo', 1)]);
+    const top = dk.tiers.length, twoDepots = cap([D(1), row(4, 'collectionDepot', top)]);
+    const none = cap([]);
+    return { depot, silo, adds, twoSilos, twoDepots, none, top,
+      siloAdds: twoSilos === depot[0] + 2 * adds[0] && adds.every((a) => a > 0),
+      bestDepot: twoDepots === Math.max(depot[0], depot[top - 1]),
+      bareUncapped: none === Infinity,
+      depotProp: (dk.proposed && dk.proposed.capacity) || null, siloProp: (sk.proposed && sk.proposed.capacity) || null };
+  }
+  // The storage note: every sentence in it is the answer storeRule got back, and where the rule answered
+  // something other than "the best depot, plus every silo" the note says DISAGREES instead of the sentence.
+  function storeNote(ST, E, sc) {
+    const T_ = { game: '<span class="tag game">IN THE GAME</span>', prop: '<span class="tag prop">PROPOSED</span>' };
+    if (!ST) return '<div class="note warn" id="store"><b>STORAGE NOT READ.</b> The probed game did not expose <code>Record.storeCap</code> (record.js), so this page says nothing about how much a base holds rather than guess.</div>';
+    const L = (ok, yes, no) => '<li>' + (ok ? yes : '<b>DISAGREES - ' + no + '</b>') + '</li>';
+    return '<div class="note" id="store"><b>How much a base holds: the best standing depot, plus every standing silo.</b> ' +
+      'Read by running the game\'s own rule, <code>Record.storeCap</code> (record.js), on bases built here - so these lines are what the rule returns, not a description of it:' +
+      '<ul>' +
+        '<li>a depot I alone holds <b>' + sc(ST.depot[0]) + '</b>; at level ' + ST.top + ', <b>' + sc(ST.depot[ST.top - 1]) + '</b></li>' +
+        L(ST.siloAdds, 'a silo I beside depot I makes it <b>' + sc(ST.depot[0] + ST.adds[0]) + '</b>, and a second silo I <b>' + sc(ST.twoSilos) + '</b> - <b>each silo adds to the depot</b>; it is not a cap of its own',
+          'two silos I beside depot I hold ' + sc(ST.twoSilos) + ', not depot plus each silo (' + sc(ST.depot[0] + 2 * ST.adds[0]) + ')') +
+        L(ST.bestDepot, 'a depot I and a depot ' + ST.top + ' together hold <b>' + sc(ST.twoDepots) + '</b> - <b>the best depot counts</b>, not both',
+          'a depot I and a depot ' + ST.top + ' together hold ' + sc(ST.twoDepots) + ', not the better of the two') +
+        '<li>a silo I with no depot holds <b>' + sc(ST.silo[0]) + '</b></li>' +
+        '<li>a base with neither standing: <b>' + sc(ST.none) + '</b>' + (ST.bareUncapped ? ' - record.js\'s one stand-in, so a bare base is not frozen at nothing; no rule decides it' : '') + '</li>' +
+      '</ul>' +
+      (E.siloCaps === true ? '<code>base.bank()</code> clips every crystal entering a purse at this figure, so the game enforces it. ' : '<b>The game reports <code>base.ECON.siloCaps</code> is not true: nothing clips a purse at this figure.</b> ') + T_.game + ' ' +
+      (ST.depotProp ? '<br><b>The depot\'s capacity, ' + ST.depot.map(sc).join(' / ') + ', is PROPOSED, not decided</b> (values.js: ' + ST.depotProp.replace(/</g, '&lt;') + '). ' + T_.prop : '') +
+      (ST.siloProp ? '<br><b>What a silo adds, +' + ST.adds.map(sc).join(' / +') + ', is PROPOSED too</b> (values.js: ' + ST.siloProp.replace(/</g, '&lt;') + '). ' + T_.prop : '') +
+      '</div>';
   }
   let tries = 0;
   (function wait() {
@@ -219,8 +268,9 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
       siloCap: (E.siloCap || []).map(dv), woodCost: dm(E.woodCost),
       kinds: Object.fromEntries(Object.entries(E.kinds).map(([k, v]) => [k, Object.assign({}, v, { cost: (v.cost || []).map(dv) })])) });
   };
-  function render({ E: E0, C, S }) {
+  function render({ E: E0, C, S, ST }) {
     const E = scaleE(E0), U = E.crystalUnit;
+    const sc = (v) => v === Infinity ? 'no cap' : c2(v / U);   // a store figure: storeCap's hundredths, or its Infinity
     const kinds = Object.keys(E.kinds);
     const gens = [1, 2, 3, 4, 5, 6];
     const trees = E.groves * E.treesPerGrove, standingWood = trees * E.treeWood;
@@ -256,7 +306,9 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
         fact('BY HAND', E.handYield + '<small>crystal a harvest</small>', 'tap a ripe seam', T.game) +
         fact('HARVESTER HAUL', '1–3', 'crystals a trip: the depot\'s level', T.game) +
         fact('HARVESTER', c2(E.harvCost) + '<small>crystals</small>', 'to build one at the depot', T.game) +
-        fact('SILO CAP', E.siloCaps === true ? E.siloCap.map(c2).join(' / ') : 'none', E.siloCaps === true ? 'by silo level; no silo, no cap (see below)' : 'the silo caps nothing', T.game) +
+        (ST ? fact('THE DEPOT HOLDS', ST.depot.map(sc).join(' / '), 'by depot level - the best standing depot counts' + (ST.depotProp ? ' ' + T.prop : ''), T.game) +
+              fact('EACH SILO ADDS', ST.adds.map((a) => '+' + sc(a)).join(' / '), 'by silo level, on top of the depot' + (ST.siloProp ? ' ' + T.prop : ''), T.game)
+            : fact('STORAGE', 'not read', 'record.js storeCap did not answer', T.game)) +
       '</div>' +
       '<div class="formula">a seam is ripe after 0.75 × growth cycle = 0.75 × ' + secs(E.growMs) + ' = ' + secs(ripeMs) + '\n' +
         'harvesting resets it, so one seam gives at most  3,600 s ÷ ' + secs(ripeMs) + ' × ' + E.handYield + ' = ' + n0(seamHandHr) + ' crystals an hour by hand\n' +
@@ -267,10 +319,7 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
         'One of the four home seam spots (−0.5, 2.5) is now where the waterfall\'s stream and the water wheel are, so it needs a new place before seams come back.</div>' +
       '<div class="note" id="unit"><b>' + (U === 100 ? 'The game stores crystals in hundredths (unit 100)' : 'THE GAME AND THIS PAGE DISAGREE ON THE UNIT: the game reports unit ' + U + ', this page expects hundredths (unit 100)') + '.</b> ' +
         'Every crystal and wood figure on this page is the game\'s number divided by ' + U + ', read live from <code>base.ECON.crystalUnit</code>. ' + T.game + '</div>' +
-      (E.siloCaps === true
-        ? '<div class="note"><b>The silo caps the purse.</b> <code>base.bank()</code> clips every crystal entering a purse at <code>base.siloCap(baseId)</code>, and the cap is ' + E.siloCap.map(c2).join(' / ') + ' by silo level, read live from <code>base.ECON.siloCap</code> and shown again as the SILO CAP figure above. ' +
-          '<b>The exception:</b> a base with no standing silo is <b>uncapped</b> - <code>siloCap</code> returns Infinity there - until the depot has a number of its own, which nobody has decided. The enforcement is the game\'s; the cap\'s values at silo II and III are still PLACEHOLDER numbers (DESIGN: PROPOSED). ' + T.game + T.ph + '</div>'
-        : '<div class="note warn"><b>The silo doesn\'t cap anything.</b> The game reports <code>base.ECON.siloCaps</code> is not true: it shows ' + E.siloCap.map(c2).join(' / ') + ' by level ' + T.ph + ', but nothing stops crystals going past it.</div>')));
+      storeNote(ST, E, sc)));
 
     // 3 ---------- wood and trees
     out.push(sec('wood', '03', 'WOOD AND TREES', 'How much wood is there? How fast do trees grow back? How much wood does each building need?',
@@ -555,7 +604,10 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
         'Building hit points (proposed), and retiring the old tower and wall defence numbers.',
         'Crystals or $RF for challenge stakes; what is on chain.',
         'Where the seam at (−0.5, 2.5) moves to, and when seams come back.',
-        (E.siloCaps === true ? 'The depot\'s own crystal capacity, so a base with no silo stops being uncapped.' : 'Whether the silo\'s capacity should actually cap crystals.'),
+        (!ST ? 'What a depot holds and what a silo adds: this page could not read them.'
+          : (ST.depotProp ? 'The depot\'s capacity, ' + ST.depot.map(sc).join(' / ') + ' by level, is proposed and not decided.' : '') +
+            (ST.siloProp ? ' What a silo adds, +' + ST.adds.map(sc).join(' / +') + ', is proposed and not decided.' : '')) +
+          (ST && ST.bareUncapped ? ' And what a base with neither a depot nor a silo holds: the game leaves it uncapped, and no rule decides it.' : ''),
       ].map(x => '<li>' + x + '</li>').join('') + '</ul>'));
 
     $('out').innerHTML = out.join('');
@@ -565,7 +617,7 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
     $('status').textContent = 'READ FROM THE GAME · ' + new Date().toLocaleString();
     // the probes are done: stop them drawing in the background
     ['pEstate', 'pChallenge', 'pStart'].forEach(id => $(id).remove());
-    window.economy = { E, POWER, YEAR, gameYear, yearWrong, CELL_REACH, reachWrong, cellGateOn, stakes: C.STAKES, era: { join: S.JOIN_WINDOW, start: S.START_AFTER_LOCK, min: S.MIN_PLAYERS } };
+    window.economy = { E, ST, POWER, YEAR, gameYear, yearWrong, CELL_REACH, reachWrong, cellGateOn, stakes: C.STAKES, era: { join: S.JOIN_WINDOW, start: S.START_AFTER_LOCK, min: S.MIN_PLAYERS } };
   }
 })();
 </script>

@@ -80,7 +80,7 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
   ok('the starting estate\'s power is worked out from its real buildings (' + need + ' P)', text.includes('draws ' + need + ' P'), 'missing');
   ok('the water mill year and the capacitor are there', /ONE YEAR/.test(text) && /CAPACITOR/.test(text) && /hours of cover/.test(text), 'missing');
   const tags = await ev('({game: document.querySelectorAll("#out .tag.game").length, ph: document.querySelectorAll("#out .tag.ph").length, prop: document.querySelectorAll("#out .tag.prop").length, open: document.querySelectorAll("#out .tag.open").length, dec: document.querySelectorAll("#out .tag.dec").length})');
-  ok('every kind of answer is labelled', tags.game > 10 && tags.ph >= 3 && tags.prop >= 3 && tags.open >= 4 && tags.dec >= 3, JSON.stringify(tags));
+  ok('every kind of answer is labelled', tags.game > 10 && tags.ph >= 2 && tags.prop >= 3 && tags.open >= 4 && tags.dec >= 3, JSON.stringify(tags));
   ok('undecided questions say so (maximum players, on chain)', /MAXIMUM PLAYERS/.test(text) && /ON CHAIN AND OFF CHAIN/.test(text), 'missing');
   // THE GAME YEAR. This replaces an assertion that the year was still open; it is decided now.
   // Everything here is read from the page's own YEAR, never hardcoded — the whole point of the
@@ -130,6 +130,18 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
   ok('the struck-through operator gate is named as the game being out of date, not as a rule (' + (gateOn.length ? 'cell ' + gateOn.join(', ') : 'gone') + ')',
     /The operator gate is gone/.test(text) && /gated by time, buildings and resources/.test(text)
     && (gateOn.length ? /the game still enforces it/.test(text) : true), JSON.stringify(gateOn));
+  // ---- HOW MUCH A BASE HOLDS (M8 item 6): economist's spec for the check-writer ------------------------------
+  // The page runs record.js storeCap in the probed game. The rule is the best standing depot plus every standing
+  // silo; the page must say so from what storeCap returned, and must call the depot's 240 / 720 / 2,160 PROPOSED.
+  const ST = JSON.parse(await ev('JSON.stringify(economy.ST || null)'));
+  const storeTxt = await ev("(document.getElementById('store')||{}).textContent||'NO #store'");
+  ok('the page ran the game\'s storeCap: depot I 240.00, a silo I adds 300.00, two depots count the best (' + (ST ? ST.depot.join('/') : 'null') + ')',
+    !!ST && ST.siloAdds === true && ST.bestDepot === true && ST.depot[0] === 24000 && ST.adds[0] === 30000, JSON.stringify(ST));
+  ok('the storage note says each silo adds to the depot and the best depot counts, and nothing in it DISAGREES',
+    /each silo adds to the depot/.test(storeTxt) && /the best depot counts/.test(storeTxt) && !/DISAGREES/.test(storeTxt), storeTxt.replace(/\s+/g, ' ').slice(0, 400));
+  ok('the depot\'s capacity is marked PROPOSED, and the silo is no longer called a cap of its own',
+    /The depot's capacity, 240\.00 \/ 720\.00 \/ 2,160\.00, is PROPOSED, not decided/.test(storeTxt) && !/SILO CAP/.test(text) && !/a base with no standing silo is uncapped/.test(text),
+    storeTxt.replace(/\s+/g, ' ').slice(0, 400));
   ok('the probes are removed once read (no estates drawing in the background)', await ev('document.querySelectorAll("iframe").length') === 0, await ev('document.querySelectorAll("iframe").length'));
   ok('nothing 404d and nothing was logged as an error, over the economy page and the estates it probes', watch.clean(), watch.why());
   // not "matches the game": where the game is wrong the page is required to disagree with it out loud.

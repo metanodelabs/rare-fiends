@@ -60,6 +60,9 @@ main { width: 100%; max-width: 900px; margin: 0 auto; padding: 16px; display: gr
 .card .v.read { color: var(--signal); }
 .card .src { font-size: 13px; line-height: 1.35; color: var(--dim); overflow-wrap: anywhere; }
 .card .src b { font-weight: 500; color: var(--ink); }
+/* M11 item 9: each Friend's card picture - one frame of its own frames() art, as the base's tray shows it */
+.card .faces { display: flex; flex-wrap: wrap; gap: 4px; margin: 2px 0 4px; }
+.card .faces img { width: 32px; height: 32px; image-rendering: pixelated; border: 1px solid var(--faint); background: #000; }
 .foot { font-size: 15px; color: var(--dim); margin: 0; }
 .recnote { font-size: 14px; color: var(--dim); margin: 0; overflow-wrap: anywhere; }
 .recnote b { font-family: var(--display); font-weight: 400; font-size: 13px; letter-spacing: .1em; color: var(--signal); }
@@ -109,6 +112,7 @@ main { width: 100%; max-width: 900px; margin: 0 auto; padding: 16px; display: gr
 <script src="values.js"></script><!-- the crystal unit and the building names -->
 <script src="record.js"></script><!-- M6: the base's saved record, read here and never written -->
 <script src="sprites/friend-chain.js"></script><!-- M11: which Friends an address holds -->
+<script src="sprites/friend-card.js"></script><!-- M11 item 9: a Friend's card picture, one frame of its frames() art -->
 <script src="wallet.js"></script>
 <script>
 (function () {
@@ -174,8 +178,18 @@ main { width: 100%; max-width: 900px; margin: 0 auto; padding: 16px; display: gr
     } },
     { key: 'friends', label: 'FRIENDS', needsAddr: true, read: async (a) => {
       const D = await (await fetch('base-data.json', { cache: 'no-store' })).json();
-      const r = await FriendChain.connect(D.toolkit, ChainLive.RPC).owned(a);
-      return { v: String(r.friends.length), src: 'hardwired Friends this address holds, read from chain ' + D.toolkit.chainId + ' at block ' + r.blockNumber +
+      const fc = FriendChain.connect(D.toolkit, ChainLive.RPC), r = await fc.owned(a);
+      // each Friend's picture: its own frames() art read now (fc.sprites, familyOf / seedOf / frames), and of that
+      // the one frame FriendCard picks - the same frame the base's tray chip shows. The first FACES only: every
+      // picture is five chain reads, and a wallet can hold hundreds. A read that fails leaves its id and no picture.
+      const FACES = 12, shown = r.friends.slice(0, FACES);
+      const sets = await Promise.allSettled(shown.map((f) => fc.sprites(f.id)));
+      const faces = shown.map((f, i) => { const s = sets[i].status === 'fulfilled' ? sets[i].value : null, w = s && FriendCard.word(s);
+        return w ? '<img alt="Friend #' + f.id + '" title="#' + f.id + (s.familyName ? ' · ' + esc(s.familyName) : '') + '" src="' + FriendCard.url(w, 16) +
+          '" data-card="' + f.id + '" data-facing="' + FriendCard.facing(s) + '">' : ''; }).join('');
+      return { v: String(r.friends.length), src: (faces ? '<span class="faces">' + faces + '</span>' : '') +
+        (r.friends.length > FACES ? 'the first ' + FACES + ' pictured · ' : '') +
+        'hardwired Friends this address holds, read from chain ' + D.toolkit.chainId + ' at block ' + r.blockNumber +
         ' (FriendChain.owned)' + (r.hiddenCount ? ' · ' + r.hiddenCount + ' at generation 0 left out' : '') +
         (r.friends.length ? ' · <b>' + r.friends.map((f) => '#' + f.id).join(' ') + '</b>' : '') };
     } },

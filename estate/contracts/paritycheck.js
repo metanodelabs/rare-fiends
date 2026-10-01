@@ -348,8 +348,8 @@ async function chain() {
     const S = { attackers: [6], entry: { x: 0, y: 0, ax: 0, ay: 0 }, defenders: [{ gen: 6, x: 10, y: 0 }], walls };
     const ctx = { word: wordOf(4700, 0), contract: lab.address, chainId: CHAIN_ID, fightId: 1 };
     const stuck = Combat.fight(R, S, ctx, { spare: true }), open = Combat.fight(R, S, ctx);
-    ok('a spared capture fight that cannot move ends at once as a stalemate ("held", defence holds, at ' + stuck.t + ' ms, no shot) rather than looping; unspared, the same field is fought out ("' + open.reason + '")',
-      stuck.reason === 'held' && stuck.winner === 'defence' && stuck.shots === 0 && stuck.t <= R.stepMs && (open.reason === 'wiped' || open.reason === 'repelled'),
+    ok('a spared capture fight that cannot move ends at once as a stalemate ("stalemate", the ATTACK wins - ruling of 2026-10-01, at ' + stuck.t + ' ms, no shot) rather than looping; unspared, the same field is fought out ("' + open.reason + '")',
+      stuck.reason === 'stalemate' && stuck.winner === 'attack' && stuck.shots === 0 && stuck.t <= R.stepMs && (open.reason === 'wiped' || open.reason === 'repelled'),
       JSON.stringify({ stuck: [stuck.reason, stuck.t, stuck.shots], open: open.reason })); }
   console.log('        gas per fight: average ' + Math.round(gasSum / fights).toLocaleString('en-US') + ', most ' + gasMax.toLocaleString('en-US') + ' (' + JSON.stringify(worst) + ')');
   // The ceiling, read from the chain the contracts are for. The chain id is asserted with it: a ceiling
@@ -475,7 +475,7 @@ async function chain() {
 
   // ---------- 4. the bridge's shadow NFT ----------
   const attestor = ethers.Wallet.createRandom(), OWNER = P1;
-  const shadow = await net.deploy(TEAM, C.shadow, [attestor.address, TEAM, roles.address]);
+  const shadow = await net.deploy(TEAM, C.shadow, [attestor.address, roles.address]);   // no team: setAttestor is SET_ATTESTOR in RareRoles
   ok('the shadow contract is under the 24 KB size limit (' + C.shadow.size + ' bytes)', C.shadow.size < 24576, C.shadow.size);
   const b32 = (s2) => ethers.encodeBytes32String(s2);
   // The mint and the owner go on chain as the RAW 32-byte Solana keys (b58decode), encoded by the attestor's own

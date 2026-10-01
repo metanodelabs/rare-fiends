@@ -63,7 +63,15 @@ contract RareOrders {
     }
 
     mapping(uint256 => mapping(uint256 => Commitment)) private _commit;              // gameId -> baseId
-    mapping(uint256 => mapping(uint256 => Opening)) private _opened;                 // gameId -> fightId
+    /// @notice gameId -> baseId -> fightId. THE BASE IS PART OF THE KEY (2026-10-01, before M20 deploys). Keyed by
+    /// (gameId, fightId) alone, a reveal took `baseId` on trust: anyone holding ANOTHER base's preimage - and a
+    /// base's preimage is public in calldata from its first opening on - could open fight X under base B, take
+    /// fight X's one slot, and leave the defender's real orders refused `AlreadyOpened`. Nothing on chain records
+    /// which base a fight was against (`RareFightLog.Record` is a hash and a block, schema `fightHash`), so the
+    /// contract cannot refuse a wrong base; what it can do is make a wrong base land somewhere harmless. An
+    /// opening under (B, X) proves only that B's word was opened naming X; the base a fight was against is the
+    /// fight's own (`fight.defenderBase`, inside the fight hash), and a reader asks `openedOf` with THAT base.
+    mapping(uint256 => mapping(uint256 => mapping(uint256 => Opening))) private _opened;
 
     event OrdersCommitted(uint256 indexed gameId, uint256 indexed baseId, bytes32 hash, address indexed by);
     event OrdersOpened(uint256 indexed gameId, uint256 indexed baseId, uint256 indexed fightId, bytes32 hash, bytes orders, address by);
@@ -76,8 +84,8 @@ contract RareOrders {
     error BadOrderReveal();
     /// @notice an order above FALLBACK on reveal, refused rather than read as HOLD (BINDING §10.5.4)
     error OrderOutOfRange(uint8 order);
-    /// @notice a fight's orders are opened once; a second opening would be a second answer
-    error AlreadyOpened(uint256 gameId, uint256 fightId);
+    /// @notice a fight's orders are opened once per base; a second opening would be a second answer
+    error AlreadyOpened(uint256 gameId, uint256 baseId, uint256 fightId);
 
     constructor(address roles_) {
         if (roles_ == address(0)) revert ZeroAddress();
@@ -100,7 +108,8 @@ contract RareOrders {
     }
 
     /// @notice open the box for one fight. OPEN TO ANYONE WHO HOLDS THE PREIMAGE - who that is, is not decided
-    /// here. Checked against the base's standing commitment; every order bounded; once per fight. The commitment is
+    /// here. Checked against the base's standing commitment; every order bounded; once per (base, fight), so another
+    /// base's preimage can never take this base's slot for a fight (see `_opened`). The commitment is
     /// NOT consumed: the next fight against the same base opens the same word until the defender seals a new one,
     /// which is their business and the server's.
     /// @dev The orders are `bytes`, one byte a Friend, and not `uint8[]`: gencheck reads any `uint8[]` handed to a
@@ -109,10 +118,10 @@ contract RareOrders {
     function reveal(uint256 gameId, uint256 baseId, uint256 fightId, bytes calldata orders, bytes32 salt) external {
         Commitment storage c = _commit[gameId][baseId];
         if (c.hash == bytes32(0)) revert OrdersNotCommitted(gameId, baseId);
-        if (_opened[gameId][fightId].hash != bytes32(0)) revert AlreadyOpened(gameId, fightId);
+        if (_opened[gameId][baseId][fightId].hash != bytes32(0)) revert AlreadyOpened(gameId, baseId, fightId);
         if (commitment(gameId, baseId, orders, salt) != c.hash) revert BadOrderReveal();
         for (uint256 i = 0; i < orders.length; ++i) if (uint8(orders[i]) > MAX_ORDER) revert OrderOutOfRange(uint8(orders[i]));
-        Opening storage o = _opened[gameId][fightId];
+        Opening storage o = _opened[gameId][baseId][fightId];
         o.hash = c.hash;
         o.committedAt = c.committedAt;
         o.committedBlock = c.committedBlock;
@@ -127,8 +136,10 @@ contract RareOrders {
         return _commit[gameId][baseId];
     }
 
-    /// @notice a fight's opened orders; a zero hash means the box was never opened
-    function openedOf(uint256 gameId, uint256 fightId) external view returns (Opening memory) {
-        return _opened[gameId][fightId];
+    /// @notice a fight's opened orders under one base; a zero hash means that base's box was never opened for it.
+    /// Ask with the base the fight was against (the fight's `defenderBase`): an opening under another base is not
+    /// this fight's orders, whatever fight id it names.
+    function openedOf(uint256 gameId, uint256 baseId, uint256 fightId) external view returns (Opening memory) {
+        return _opened[gameId][baseId][fightId];
     }
 }

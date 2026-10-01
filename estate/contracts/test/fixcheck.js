@@ -108,7 +108,9 @@ function compile() {
     // M21 item 5 (part 17): the on-chain consumer of traitOf - soft for the same reason again
     gate: soft('RareDoopieGate.sol', 'RareDoopieGate'),
     // M20 item 10 (part 18): the sealed orders' commit and reveal - soft for the same reason again
-    orders: soft('RareOrders.sol', 'RareOrders') };
+    orders: soft('RareOrders.sol', 'RareOrders'),
+    // part 22: the LOCAL fake $RF and its Pyth stand-in - soft for the same reason again
+    fakeRF: soft('test/FakeRF.sol', 'FakeRF'), localEntropy: soft('test/FakeRF.sol', 'LocalEntropy') };
 }
 
 // ---------- a tiny chain ----------
@@ -159,7 +161,9 @@ async function chain() {
       // the events a constructor emitted, so a deployment's opening state is readable too
       events: parse(r.logs) };
   }
-  return { acct, deploy, travel: (s) => { now += BigInt(s); number++; }, at: () => now };
+  // setCode: part 22 plants ArbSys's code (0xfe) at 0x64, the way every Arbitrum chain has it, to prove FakeRF refuses one
+  return { acct, deploy, travel: (s) => { now += BigInt(s); number++; }, at: () => now,
+    setCode: async (a, hex) => evm.stateManager.putCode(createAddressFromString(a), hexToBytes(hex)) };
 }
 
 // a revert's error name, from the four-byte selector, so a probe can say WHY it was refused
@@ -411,7 +415,7 @@ const errorNames = (abi) => Object.fromEntries(abi.filter((e) => e.type === 'err
   // =============================================================================================
   console.log('\n  2. reading one trait without dragging the whole sprite through memory');
   const attestor = ethers.Wallet.createRandom(), OWNER = P1;
-  const shadow = await net.deploy(TEAM, C.shadow, [attestor.address, TEAM, ROLES ? ROLES.address : ethers.ZeroAddress]);
+  const shadow = await net.deploy(TEAM, C.shadow, [attestor.address, ROLES ? ROLES.address : ethers.ZeroAddress]);   // no team: part 21
   await net.acct(attestor.address);
   note('ShadowFriends deployed size ' + C.shadow.size.toLocaleString('en-US') + ' bytes (limit 24,576)');
   ok('the shadow contract is still under the 24 KB limit', C.shadow.size < 24576, String(C.shadow.size));
@@ -527,7 +531,7 @@ const errorNames = (abi) => Object.fromEntries(abi.filter((e) => e.type === 'err
   console.log('\n  5. the name: Rare Fiends is the game, and the ERC721 name and the EIP-712 domain now agree');
   const NAME = 'Rare Fiends Shadows';
   // roles_ is the launch whitelist's registry (deployer, 2026-09-30); the two names are still one string
-  const CTOR = 'constructor(address attestor_, address team_, IRareRoles roles_) ERC721("' + NAME + '", "RFSHADOW") EIP712("' + NAME + '", "1") {';
+  const CTOR = 'constructor(address attestor_, IRareRoles roles_) ERC721("' + NAME + '", "RFSHADOW") EIP712("' + NAME + '", "1") {';
   ok('one spelling on the constructor line, not two: the ERC721 name and the EIP-712 domain are the same string',
     src.split('\n').some((l) => l.trim() === CTOR), 'the constructor line reads: ' + (src.split('\n').find((l) => /ERC721\(/.test(l)) || '').trim());
   const friendLines = src.split('\n').filter((l) => /Rare ?Friends/.test(l) && !/^\s*(\/\/|\/\*|\*)/.test(l));
@@ -950,10 +954,10 @@ const errorNames = (abi) => Object.fromEntries(abi.filter((e) => e.type === 'err
   const mktArity = C.market ? C.market.abi.find((f) => f.type === 'constructor').inputs.length : 0;
   const deploySrc = fs.readFileSync(path.join(ROOT, 'deploy.mjs'), 'utf8');
   const nOf = (k) => { const m = deploySrc.match(new RegExp('\\b' + k + ':\\s*\\[(\\d+),')); return m ? +m[1] : null; };
-  const TERM = { max: nOf('maxTerminalShareBps'), share: nOf('terminalShareBps') };
+  const TERM = { cap: nOf('maxTerminalPriceBps'), share: nOf('terminalShareBps') };
   const gate9 = C.gate && mktArity >= 10 ? await net.deploy(TEAM, C.gate, [shadow.address]) : null;
-  const mktArgs = (six) => (mktArity >= 10 ? six.concat([shadow.address, gate9.address, TERM.max, TERM.share]) : six);
-  const mkt = C.market && gen && part && ROLES ? await net.deploy(TEAM, C.market, mktArgs([rf.address, ROLES.address, part.address, WHOLE, MKT_FEE, FEES])) : null;
+  const mktArgs = (six) => (mktArity >= 10 ? six.concat([shadow.address, gate9.address, TERM.cap, TERM.share]) : six);
+  const mkt = C.market && gen && part && ROLES ? await net.deploy(TEAM, C.market, mktArgs([rf.address, ROLES.address, part.address, WHOLE, MKT_FEE, FEES])).catch(() => null) : null;   // soft: a constructor that refuses these arguments is reported below, not a crash
   const MKTA = mkt ? mkt.address : ethers.ZeroAddress;
   const MERR = C.market ? Object.assign({}, errorNames(C.market.abi), RERR) : {};
   const mTry = async (fn, args, from, value) => (mkt ? await tryCall(mkt, MERR, fn, args, from, value) : 'NO MARKET');
@@ -965,7 +969,7 @@ const errorNames = (abi) => Object.fromEntries(abi.filter((e) => e.type === 'err
     !!POW.FEE && !!POW.TRADE && POW.FEE !== POW.TRADE, 'powers: ' + POW.FEE + ' / ' + POW.TRADE);
   ok('the fee is 1.5% - DESIGN\'s decided starting figure - and it is a CONSTRUCTOR ARGUMENT, not a number in the bytecode',
     Number(await mRead('feeBps')) === MKT_FEE, String(await mRead('feeBps')));
-  const mkt2 = C.market && ROLES ? await net.deploy(TEAM, C.market, mktArgs([rf.address, ROLES.address, ethers.ZeroAddress, MKT_FEE, MKT_FEE, FEES])) : null;
+  const mkt2 = C.market && ROLES ? await net.deploy(TEAM, C.market, mktArgs([rf.address, ROLES.address, ethers.ZeroAddress, MKT_FEE, MKT_FEE, FEES])).catch(() => null) : null;
   ok('proved by a second deployment reading back a different ceiling from the same bytecode - and one deployed with NO partnership layer, which is where M16 stands',
     !!mkt2 && Number((await mkt2.call('maxFeeBps')).out[0]) === MKT_FEE && (await mkt2.call('partners')).out[0] === ethers.ZeroAddress,
     mkt2 ? 'ceiling ' + (await mkt2.call('maxFeeBps')).out[0] : 'no second market');
@@ -1773,7 +1777,7 @@ const errorNames = (abi) => Object.fromEntries(abi.filter((e) => e.type === 'err
   net.travel(60);
   const oOpen = ORD ? await ORD.call('reveal', [OG, OB, 11n, ORDERS, OS], STRANGER).catch(() => null) : null;
   const oOEv = oOpen && oOpen.events.find((e) => e.name === 'OrdersOpened');
-  const oRow = ORD ? await oRead('openedOf', [OG, 11n]) : null;
+  const oRow = ORD ? await oRead('openedOf', [OG, OB, 11n]) : null;
   ok('ANYONE holding the preimage opens the box for fight 11 - a stranger on no list did: OrdersOpened(game, base, fight, hash, orders, by), openedOf carries the orders, the word it opened and that word\'s time, which is BEFORE the opening',
     !!oOEv && BigInt(oOEv.args.fightId) === 11n && oOEv.args.hash === oHash && oOEv.args.orders === ORDERS && oOEv.args.by.toLowerCase() === STRANGER
     && !!oRow && oRow.hash === oHash && oRow.orders === ORDERS && BigInt(oRow.committedAt) < BigInt(oRow.openedAt) && oRow.openedBy.toLowerCase() === STRANGER,
@@ -1781,7 +1785,23 @@ const errorNames = (abi) => Object.fromEntries(abi.filter((e) => e.type === 'err
   const oTwice = await oTry('reveal', [OG, OB, 11n, ORDERS, OS], KEEPER);
   const oNext = await oTry('reveal', [OG, OB, 12n, ORDERS, OS], KEEPER);
   ok('a fight opens ONCE (AlreadyOpened); the word is not consumed - the next fight against the same base opens the same word until a new one is sealed',
-    oTwice === 'AlreadyOpened' && oNext === 'MOVED' && !!ORD && (await oRead('openedOf', [OG, 12n])).hash === oHash, oTwice + ' / ' + oNext);
+    oTwice === 'AlreadyOpened' && oNext === 'MOVED' && !!ORD && (await oRead('openedOf', [OG, OB, 12n])).hash === oHash, oTwice + ' / ' + oNext);
+  // THE CROSS-BASE REPLAY (defect found 2026-10-01, fixed before M20 deploys). Base 3's preimage is public from its
+  // first opening on - it is in the calldata above. Fight 21 is against base 8. Keyed by (game, fight) alone, a
+  // stranger opening fight 21 under base 3 took the fight's one slot, and base 8's real orders were then refused
+  // AlreadyOpened. The chain cannot know which base a fight was against (RareFightLog holds a hash), so the fix
+  // keys the opening by (game, base, fight): the replay lands under base 3 and can never reach base 8's slot.
+  const OB8 = 8n, OS8 = ethers.id('base 8 salt'), ORD8 = '0x0202';
+  const h8 = ORD ? await oRead('commitment', [OG, OB8, ORD8, OS8]) : ethers.ZeroHash;
+  await oTry('commit', [OG, OB8, h8], KEEPER);
+  const xReplay = await oTry('reveal', [OG, OB, 21n, ORDERS, OS], STRANGER);             // base 3's public preimage, naming fight 21
+  const xForge = await oTry('reveal', [OG, OB8, 21n, ORDERS, OS], STRANGER);             // base 3's preimage presented AS base 8
+  const xReal = await oTry('reveal', [OG, OB8, 21n, ORD8, OS8], KEEPER);                 // base 8's real opening of its own fight
+  const x8 = ORD ? await oRead('openedOf', [OG, OB8, 21n]) : null;
+  const xAgain = await oTry('reveal', [OG, OB, 21n, ORDERS, OS], STRANGER);
+  ok('NEGATIVE, THE CROSS-BASE REPLAY: a stranger opening fight 21 with ANOTHER base\'s public preimage cannot take the fight - base 8\'s real orders still open (not AlreadyOpened), base 3\'s preimage presented as base 8 is BadOrderReveal, openedOf(game, 8, 21) holds base 8\'s own word and orders, and the replay cannot be repeated (AlreadyOpened)',
+    xReplay === 'MOVED' && xReal === 'MOVED' && xForge === 'BadOrderReveal' && !!x8 && x8.hash === h8 && x8.orders === ORD8 && x8.openedBy.toLowerCase() === KEEPER && xAgain === 'AlreadyOpened',
+    JSON.stringify([xReplay, xReal, xForge, xAgain, x8 && x8.orders]));
   await tryCall(ROLES, RERR, 'setDemoMode', [true], TEAM);
   const oDemoCommit = await oTry('commit', [OG, 4n, oHash], KEEPER), oDemoOpen = await oTry('reveal', [OG, OB, 13n, ORDERS, OS], GD);
   await tryCall(ROLES, RERR, 'setDemoMode', [false], TEAM);
@@ -1811,7 +1831,7 @@ const errorNames = (abi) => Object.fromEntries(abi.filter((e) => e.type === 'err
   const ALL = Object.assign({}, RERR, GERR, MERR, DERR, OERR, PERR, UERR, C.fightLog ? errorNames(C.fightLog.abi) : {});
   const ask = async (c, fn, args, from) => (c ? await tryCall(c, ALL, fn, args, from) : 'NO CONTRACT');
   const P0K = { needsKeep: true, isKeep: false, cappedByKeepLevel: true, onWater: false, onBaseEdge: false, onClaimedGround: false, maxPerBase: 0, needsKind: 0, nextToKind: 0, scienceGen: [0] };
-  const K1 = { codeName: ethers.id('x'), levelName: [ethers.id('x')], buildMs: [1], strength: [0], energy: [0], supply: [0], release: [0], leak: [0], capacity: [0], reach: [0], footprint: [0, 0], placement: P0K, abilityId: 0, addedInGame: 1 };
+  const K1 = { codeName: ethers.id('x'), levelName: [ethers.id('x')], buildMs: [1], strength: [0], energy: [0], supply: [0], release: [0], leak: [0], capacity: [0], reach: [0], footprint: [0, 0], hands: 1, placement: P0K, abilityId: 0, addedInGame: 1 };
   const GATE_SITES = [
     ['RareGame.create', () => ask(RG, 'create', [0n], GD), 'NotAllowedInDemoMode'],
     ['RareGame.join', () => ask(RG, 'join', [dgid], GD), 'NotAllowedInDemoMode'],
@@ -1908,13 +1928,12 @@ const errorNames = (abi) => Object.fromEntries(abi.filter((e) => e.type === 'err
   const P0 = { needsKeep: true, isKeep: false, cappedByKeepLevel: true, onWater: false, onBaseEdge: false, onClaimedGround: false, maxPerBase: 0, needsKind: 0, scienceGen: [] };
   const row = (k, over, pl) => {
     const n = TIERS[k].length, z = Array(n).fill(0);
-    // energy/supply/release/leak and nextToKind are values.js's own (M8, M10). RareRules.Kind has no slot for
-    // them yet - asserted above - and ethers ignores a key the struct does not have, so they ride along now
-    // and are written the day the struct gains them, without this line changing.
+    // energy/supply/release/leak, nextToKind and hands are values.js's own (M8, M10), and RareRules.Kind has a
+    // slot for each - asserted above, read off the ABI.
     const r = VK[k] || {}, col = (c) => (Array.isArray(r[c]) && r[c].length === n ? r[c].slice() : z);
     const nt = r.placement && r.placement.nextToKind ? kid(r.placement.nextToKind) : 0;
     return Object.assign({ codeName: b32s(k), levelName: TIERS[k].map(b32s), buildMs: Array(n).fill(BUILD_MS), strength: z, capacity: z, reach: z, footprint: [0, 0],
-      energy: col('energy'), supply: col('supply'), release: col('release'), leak: col('leak'),
+      energy: col('energy'), supply: col('supply'), release: col('release'), leak: col('leak'), hands: Number.isInteger(r.hands) ? r.hands : 0,
       placement: Object.assign({}, P0, { scienceGen: z, nextToKind: nt }, pl || {}), abilityId: 0, addedInGame: 1 }, over || {});
   };
   const kid = (k) => KINDS.indexOf(k) + 1, KEEP = kid('keep');
@@ -1951,6 +1970,12 @@ const errorNames = (abi) => Object.fromEntries(abi.filter((e) => e.type === 'err
     && gen.placement.onWater === true && wall.placement.onBaseEdge === true && cell.placement.onClaimedGround === true && Array.from(silo.buildMs).every((b) => Number(b) === BUILD_MS)
     && Array.from(cell.levelName).map((b) => ethers.decodeBytes32String(b)).join() === TIERS.cell.join(),
     JSON.stringify({ allRows, rows, silo: silo && Array.from(silo.capacity).map(String), cell: cell && Array.from(cell.reach).map(String) }));
+  // the labour ceiling (M8 item 3): schema.json types it uint8, ONE per kind, and record.js `ceiling` reads it.
+  // Every kind's row reads back values.js's own number - not a fixture's - so a values.js change shows here.
+  const handsBack = {}; for (const k of KINDS) { const r = RU ? await kRead(RID3, kid(k)) : null; handsBack[k] = r ? Number(r.hands) : null; }
+  ok('every kind\'s labour ceiling (hands, M8 item 3) is written and reads back as values.js\'s own: ' + KINDS.map((k) => k + ' ' + handsBack[k]).join(', ') + ' - one uint8 per kind, as schema.json types it',
+    KINDS.every((k) => Number.isInteger(VK[k].hands) && VK[k].hands > 0 && handsBack[k] === VK[k].hands) && handsBack.wall !== handsBack.keep,
+    JSON.stringify({ chain: handsBack, values: Object.fromEntries(KINDS.map((k) => [k, VK[k].hands])) }));
   const ladderLate = await uTry('setLadder', [RID3, kid('cell'), [1n, 2n], [0n, 0n]], TEAM);
   ok('NEGATIVE: once the row is set, a ladder with a different number of rungs is refused too (LevelsDisagree) - the two halves of one row cannot drift', ladderLate === 'LevelsDisagree', ladderLate);
   const frz = await uTry('freeze', [RID3], TEAM), late = await uTry('setKind', [RID3, KEEP, ROWS.keep], TEAM);
@@ -2043,14 +2068,15 @@ const errorNames = (abi) => Object.fromEntries(abi.filter((e) => e.type === 'err
   const SERVER = ethers.Wallet.createRandom(), FORGER = ethers.Wallet.createRandom();
   const G20 = has20 ? await net.deploy(TEAM, C.gate, [shadow.address]) : null;
   const TFEE = 150, TPRICE = 1000n * 10n ** 18n;
-  const tm = has20 ? await net.deploy(TEAM, C.market, [rf.address, ROLES.address, ethers.ZeroAddress, 1000, TFEE, TFEES, shadow.address, G20.address, TERM.max, TERM.share]) : null;
+  const tm = has20 ? await net.deploy(TEAM, C.market, [rf.address, ROLES.address, ethers.ZeroAddress, 1000, TFEE, TFEES, shadow.address, G20.address, TERM.cap, TERM.share]).catch(() => null) : null;
   const TERR = C.market ? Object.assign({}, errorNames(C.market.abi), RERR) : {};
   const tTry = async (fn, args, from) => (tm ? await tryCall(tm, TERR, fn, args, from) : 'NO buyVia');
   const tRead = async (fn, args) => { const v = tm ? await soft(tm, fn, args) : null; return v ? v.out[0] : null; };
-  ok('RareMarket deploys with the terminal cut: shadow token and gate wired, share ' + TERM.share + ' bps of the fee under an immutable ceiling of ' + TERM.max + ' - both read out of deploy.mjs, where they are marked PROPOSED',
-    !!tm && TERM.share !== null && TERM.max !== null && Number(await tRead('terminalShareBps')) === TERM.share && Number(await tRead('maxTerminalShareBps')) === TERM.max
-    && String(await tRead('shadows')).toLowerCase() === shadow.address.toLowerCase() && /PROPOSED/.test(deploySrc.match(/terminalShareBps:\s*\[[^\]]*\]/)?.[0] || ''),
-    tm ? String(await tRead('terminalShareBps')) + ' / ' + String(await tRead('maxTerminalShareBps')) : 'RareMarket has no buyVia');
+  ok('RareMarket deploys with the terminal cut: shadow token and gate wired, share ' + TERM.share + ' bps of the fee (PROPOSED) under an IMMUTABLE hard ceiling of ' + TERM.cap + ' bps of the PRICE (1%, DECIDED) - both read out of deploy.mjs',
+    !!tm && TERM.share !== null && TERM.cap === 100 && Number(await tRead('terminalShareBps')) === TERM.share && Number(await tRead('maxTerminalPriceBps')) === TERM.cap
+    && String(await tRead('shadows')).toLowerCase() === shadow.address.toLowerCase() && /PROPOSED/.test(deploySrc.match(/terminalShareBps:\s*\[[^\]]*\]/)?.[0] || '')
+    && /DECIDED/.test(deploySrc.match(/maxTerminalPriceBps:\s*\[[^\]]*\]/)?.[0] || ''),
+    tm ? String(await tRead('terminalShareBps')) + ' / ' + String(await tRead('maxTerminalPriceBps')) + ' / deploy.mjs cap ' + TERM.cap : 'RareMarket has no buyVia');
   // the server key holds SIGN_TERMINAL through a role, the way grant.mjs gives it to the server role
   const SIGN_T = tm ? await tRead('SIGN_TERMINAL') : ethers.ZeroHash, GMR = (await ROLES.call('GAMEMASTER')).out[0];
   if (tm) { await tryCall(ROLES, RERR, 'grantPower', [SIGN_T, GMR, true], TEAM); await tryCall(ROLES, RERR, 'setRoleMember', [GMR, SERVER.address, true], TEAM); }
@@ -2088,7 +2114,10 @@ const errorNames = (abi) => Object.fromEntries(abi.filter((e) => e.type === 'err
   const bal20 = async (a) => BigInt((await rf.call('balanceOf', [a])).out[0]);
   const snap = async () => ({ s: await bal20(TS), b: await bal20(TB), b2: await bal20(TB2), h: await bal20(HOST), n: await bal20(NEWHOST), f: await bal20(TFEES) });
   const delta = (a, b) => Object.fromEntries(Object.keys(a).map((k) => [k, b[k] - a[k]]));
-  const FEE20 = (TPRICE * BigInt(TFEE)) / 10_000n, CUT20 = (FEE20 * BigInt(TERM.share || 0)) / 10_000n;
+  // the cut, as the deployer ruled it: min(fee x share, price x 1%, fee) - computed here independently of the contract
+  const bmin = (...xs) => xs.reduce((a, b) => (b < a ? b : a));
+  const cutOf = (price, fee, share) => bmin((fee * BigInt(share)) / 10_000n, (price * BigInt(TERM.cap || 0)) / 10_000n, fee);
+  const FEE20 = (TPRICE * BigInt(TFEE)) / 10_000n, CUT20 = cutOf(TPRICE, FEE20, TERM.share || 0);
   const RFX = ethers.id('Transfer(address,address,uint256)');
   const cutEv = (r) => (r && r.events ? r.events.find((e) => e.name === 'TerminalCut') : null);
   const buyVia = async (from, tokenId, a) => (tm ? await tm.call('buyVia', [GEN20, tokenId, a.t, a.sig], from).catch((e) => ({ err: TERR[(e.data || '').slice(0, 10)] || 'revert' })) : { err: 'NO buyVia' });
@@ -2208,13 +2237,54 @@ const errorNames = (abi) => Object.fromEntries(abi.filter((e) => e.type === 'err
     rReclaim === 'MOVED' && errOf(viaNew) === 'MOVED' && dNew.n === CUT20 && dNew.h === 0n && !!evNew && evNew.args[3].toLowerCase() === NEWHOST,
     rReclaim + ' / ' + errOf(viaNew) + ' new +' + dNew.n + ' old +' + dNew.h);
 
-  // --- the setters: guarded, ceilinged, and unable to name a payee ---
+  // --- THE HARD CEILING (deployer ruling 2026-10-01): never more than 1% of the price, never more than the fee ---
+  // A real sale at the fee's own 10% ceiling: a third of a 10% fee is 3.33% of the price, so the 1% cap must bite.
+  const FEE10 = 1000;
+  await tTry('setFeeBps', [FEE10], TEAM);
+  await tTry('list', [GEN20, 109n, TPRICE], TS);           // the listing pins the 10% fee it was made at
+  const x0 = await snap();
+  const via10 = await buyVia(TB, 109n, await auth(SERVER, { shadowId: T11, actor: TB, collection: GEN20, tokenId: 109n, counterparty: TS, price: TPRICE }));
+  const d10 = delta(x0, await snap()), fee10 = (TPRICE * BigInt(FEE10)) / 10_000n, onePct = TPRICE / 100n;
+  ok('THE HARD CEILING, in a real sale at the fee\'s 10% ceiling: a third of the ' + ethers.formatEther(fee10) + ' $RF fee would be ' + ethers.formatEther((fee10 * BigInt(TERM.share || 0)) / 10_000n)
+    + ', and the 1/1\'s owner is paid exactly ' + ethers.formatEther(onePct) + ' - 1% of the price - with the rest of the fee ours and the seller untouched',
+    errOf(via10) === 'MOVED' && d10.n === onePct && d10.f === fee10 - onePct && d10.s === TPRICE - fee10 && d10.b === -TPRICE && (cutEv(via10) || { args: [] }).args[4] === onePct,
+    errOf(via10) + ' host +' + d10.n + ' fee +' + d10.f);
+  await tTry('setFeeBps', [TFEE], TEAM);
+  // and as a sweep: every fee from zero to the 10% ceiling against every share from zero to the whole fee
+  const SHARES = [0, 1, TERM.share || 0, 5000, 10_000], FEES_BPS = [0, 1, 33, 50, 100, 150, 300, 667, 1000];
+  const PRICES = [TPRICE, 1n, 99n, 12_345n * 10n ** 15n];
+  const sweep = [];
+  for (const sh of (tm ? SHARES : [])) {
+    if (Number(await tRead('terminalShareBps')) !== sh) await tTry('setTerminalShareBps', [sh], TEAM);
+    for (const p of PRICES) for (const fb of FEES_BPS) {
+      const fee = (p * BigInt(fb)) / 10_000n;
+      const got = BigInt((await tm.call('terminalCutAmount', [p, fee])).out[0]);
+      const want = cutOf(p, fee, sh);
+      if (got !== want || got * 10_000n > p * 100n || got > fee) sweep.push([sh, String(p), fb, String(got), String(want)]);
+    }
+  }
+  await tTry('setTerminalShareBps', [TERM.share], TEAM);
+  ok('THE HARD CEILING, swept: over ' + (SHARES.length * PRICES.length * FEES_BPS.length) + ' cases - shares 0..10,000 of the fee, fees 0..10% (the fee\'s own ceiling), four prices down to 1 wei - the cut is EXACTLY min(fee x share, price x 1%, fee), NEVER above 1% of the price and NEVER above the fee taken',
+    !!tm && sweep.length === 0, JSON.stringify(sweep.slice(0, 5)));
+  // the deployer's second ruling: a 1/1 holder trading at their OWN terminal is paid the cut - decided, not an oversight
+  if (tm) { await rf.call("mint", [NEWHOST, 10n ** 24n]); await rf.call("approve", [tm.address, ethers.MaxUint256], NEWHOST); }
+  await tTry('list', [GEN20, 110n, TPRICE], TS);
+  const y0 = await snap();
+  const viaSelf = tm ? await tm.call('buyVia', [GEN20, 110n, ...Object.values(await auth(SERVER, { shadowId: T11, actor: NEWHOST, collection: GEN20, tokenId: 110n, counterparty: TS, price: TPRICE }))], NEWHOST)
+    .catch((e) => ({ err: TERR[(e.data || '').slice(0, 10)] || 'revert' })) : { err: 'NO' };
+  const dSelf = delta(y0, await snap());
+  ok('a 1/1 holder BUYING AT THEIR OWN TERMINAL is paid the cut (deployer ruling 2026-10-01: allowed, and decided) - they pay the price and get ' + ethers.formatEther(CUT20) + ' back out of our fee',
+    errOf(viaSelf) === 'MOVED' && dSelf.n === -TPRICE + CUT20 && dSelf.f === FEE20 - CUT20 && dSelf.s === TPRICE - FEE20 && String((cutEv(viaSelf) || { args: [] }).args[3]).toLowerCase() === NEWHOST,
+    errOf(viaSelf) + ' self ' + dSelf.n);
+
+  // --- the setters: guarded, bounded, and unable to name a payee or move the 1% ceiling ---
   const sThief = await tTry('setTerminalShareBps', [1], TB);
-  const sOver = await tTry('setTerminalShareBps', [(TERM.max || 0) + 1], TEAM);
+  const sOver = await tTry('setTerminalShareBps', [10_001], TEAM);
   const sSame = await tTry('setTerminalShareBps', [TERM.share], TEAM);
-  const sOk = await tTry('setTerminalShareBps', [TERM.max], TEAM);
-  ok('NEGATIVE, the share\'s setter: a stranger is refused (PowerNotHeld), above the IMMUTABLE ceiling is refused (FeeAboveCeiling), a no-op is refused (TerminalShareUnchanged), and root may move it up to the ceiling',
-    sThief === 'PowerNotHeld' && sOver === 'FeeAboveCeiling' && sSame === 'TerminalShareUnchanged' && sOk === 'MOVED' && Number(await tRead('terminalShareBps')) === TERM.max,
+  const sOk = await tTry('setTerminalShareBps', [10_000], TEAM);
+  ok('NEGATIVE, the share\'s setter: a stranger is refused (PowerNotHeld), more than the whole fee is refused (FeeAboveCeiling), a no-op is refused (TerminalShareUnchanged), and root may set up to the whole fee - which the 1% ceiling still caps',
+    sThief === 'PowerNotHeld' && sOver === 'FeeAboveCeiling' && sSame === 'TerminalShareUnchanged' && sOk === 'MOVED' && Number(await tRead('terminalShareBps')) === 10_000
+    && Number(await tRead('maxTerminalPriceBps')) === 100 && !C.market.abi.some((f) => f.type === 'function' && /maxTerminal|PriceBps/i.test(f.name) && f.stateMutability !== 'view'),
     [sThief, sOver, sSame, sOk].join(' / '));
   await tTry('setTerminalShareBps', [TERM.share], TEAM);
   const gThief = await tTry('setGate', [G20.address], TB), gEmpty = await tTry('setGate', [TB], TEAM), gSame = await tTry('setGate', [G20.address], TEAM);
@@ -2224,9 +2294,9 @@ const errorNames = (abi) => Object.fromEntries(abi.filter((e) => e.type === 'err
     gThief === 'PowerNotHeld' && gEmpty === 'NotAContract' && gSame === 'GateUnchanged' && gOk === 'MOVED', [gThief, gEmpty, gSame, gOk].join(' / '));
   const ctor = async (args) => { try { await net.deploy(TEAM, C.market, args); return 'MOVED'; } catch (e) { return TERR[(e.data || '').slice(0, 10)] || 'revert'; } };
   const cOverCeil = has20 ? await ctor([rf.address, ROLES.address, ethers.ZeroAddress, 1000, TFEE, TFEES, shadow.address, G20.address, 10_001, 0]) : 'NO';
-  const cShareOver = has20 ? await ctor([rf.address, ROLES.address, ethers.ZeroAddress, 1000, TFEE, TFEES, shadow.address, G20.address, 100, 101]) : 'NO';
+  const cShareOver = has20 ? await ctor([rf.address, ROLES.address, ethers.ZeroAddress, 1000, TFEE, TFEES, shadow.address, G20.address, 100, 10_001]) : 'NO';
   const cNoShadow = has20 ? await ctor([rf.address, ROLES.address, ethers.ZeroAddress, 1000, TFEE, TFEES, TB, G20.address, 100, 50]) : 'NO';
-  ok('NEGATIVE at deploy: a ceiling above the whole fee (CeilingAboveWhole), a starting share above its ceiling (FeeAboveCeiling) and a shadow token with no code (NotAContract) are all refused',
+  ok('NEGATIVE at deploy: a price ceiling above the whole price (CeilingAboveWhole), a starting share above the whole fee (FeeAboveCeiling) and a shadow token with no code (NotAContract) are all refused',
     cOverCeil === 'CeilingAboveWhole' && cShareOver === 'FeeAboveCeiling' && cNoShadow === 'NotAContract', [cOverCeil, cShareOver, cNoShadow].join(' / '));
   ok('and no setter anywhere names a payee or the shadow token: the payee is ownerOf on an IMMUTABLE ShadowFriends, so no power in RareRoles can redirect a terminal\'s cut',
     !!C.market && !C.market.abi.some((f) => f.type === 'function' && /^set(Shadow|Host|Payee|Terminal(To|Host|Payee))/i.test(f.name))
@@ -2239,6 +2309,122 @@ const errorNames = (abi) => Object.fromEntries(abi.filter((e) => e.type === 'err
   ok('NEGATIVE: SIGN_TERMINAL taken back from the server\'s role kills every authorization it had outstanding (TerminalSignerUnauthorized) - the power is read live, at settlement',
     rRevoked === 'TerminalSignerUnauthorized', rRevoked);
   ok('and the market escrowed nothing through any of it: its $RF balance is zero', tm ? (await bal20(tm.address)) === 0n : false, tm ? String(await bal20(tm.address)) : 'no market');
+  }
+
+  // ---------- 21. The bridge's attestor key moves to RareRoles: SET_ATTESTOR (deployer ruling 2026-10-01) ----------
+  // ShadowFriends.setAttestor was guarded by `immutable team`. ShadowFriends is permanent, so a lost or stolen
+  // team key was permanent too. Now it is SET_ATTESTOR in RareRoles, held by the deployer (root) and the
+  // gamemaster role, under the same roleChangeDelay as every other grant. A FRESH registry and shadow, so the
+  // time travel the delay needs touches nothing above. Each assertion goes red against the `team` contract:
+  // there is no SET_ATTESTOR to read, the constructor takes three arguments, and only `team` could set.
+  console.log('\n  21. the attestor key is changed through RareRoles (SET_ATTESTOR), not an immutable team address');
+  {
+    const DEP21 = '0xd000000000000000000000000000000000000021', GM21 = '0xd100000000000000000000000000000000000021';
+    const STRANGER21 = '0xd200000000000000000000000000000000000021';
+    // the address the old fixture and deploy/local-chain.sh passed as `team_` (anvil account 2 there; any
+    // address that is neither root nor a gamemaster here) - the key that WAS the only way to rotate
+    const OLD_TEAM = '0xd300000000000000000000000000000000000021';
+    const A1 = ethers.Wallet.createRandom().address, A2 = ethers.Wallet.createRandom().address, A3 = ethers.Wallet.createRandom().address;
+    for (const a of [DEP21, GM21, STRANGER21, OLD_TEAM]) await net.acct(a);
+    const R21 = await net.deploy(DEP21, C.roles, [DEP21]);
+    const R21ERR = errorNames(C.roles.abi);
+    const ctor21 = C.shadow.abi.find((f) => f.type === 'constructor').inputs.map((i) => i.name + ':' + i.type).join(',');
+    let S21 = null;
+    try { S21 = await net.deploy(DEP21, C.shadow, [A1, R21.address]); } catch (e) { note('ShadowFriends would not deploy with (attestor_, roles_): ' + e.message.slice(0, 80)); }
+    const S21ERR = Object.assign({}, R21ERR, errorNames(C.shadow.abi));
+    const sTry = async (fn, args, from) => (S21 ? await tryCall(S21, S21ERR, fn, args, from) : 'NO SHADOW');
+    const att = async () => (S21 ? String((await S21.call('attestor')).out[0]).toLowerCase() : null);
+    const POW = S21 ? await soft(S21, 'SET_ATTESTOR') : null;
+    const SET_ATTESTOR = POW ? POW.out[0] : null;
+    ok('ShadowFriends names the power SET_ATTESTOR = keccak256("rarefriends.power.setAttestor"), and its constructor is (attestor_, roles_) with no team',
+      SET_ATTESTOR === ethers.id('rarefriends.power.setAttestor') && ctor21 === 'attestor_:address,roles_:address', 'SET_ATTESTOR ' + SET_ATTESTOR + ', constructor (' + ctor21 + ')');
+    ok('there is no `team` getter and no NotTeam error left in the ABI - no address is special to the bridge any more',
+      !C.shadow.abi.some((f) => f.name === 'team' || f.name === 'NotTeam'), C.shadow.abi.filter((f) => /team/i.test(f.name || '')).map((f) => f.name).join(','));
+    ok('SET_ATTESTOR is grantable, not root-only - the ruling gives it to the gamemaster too',
+      SET_ATTESTOR ? (await R21.call('rootOnly', [SET_ATTESTOR])).out[0] === false : false, 'rootOnly');
+    // THE DEPLOYER: root holds every power, this one included, from the first block
+    const dep = S21 ? await S21.call('setAttestor', [A2], DEP21).catch((e) => ({ err: S21ERR[(e.data || '').slice(0, 10)] || 'revert' })) : { err: 'NO SHADOW' };
+    const evDep = dep.events ? dep.events.find((e) => e.name === 'AttestorChanged') : null;
+    ok('the DEPLOYER (root) can set the attestor: AttestorChanged is logged and attestor() reads the new key back',
+      !dep.err && !!evDep && evDep.args[0].toLowerCase() === A2.toLowerCase() && (await att()) === A2.toLowerCase(), (dep.err || 'no event') + ', attestor ' + (await att()));
+    // A STRANGER
+    const rStr = await sTry('setAttestor', [STRANGER21], STRANGER21);
+    ok('NEGATIVE: a stranger is refused (PowerNotHeld) and the attestor does not move', rStr === 'PowerNotHeld' && (await att()) === A2.toLowerCase(), rStr);
+    // THE OLD TEAM ADDRESS: the one key that used to be able to do this
+    const rOld = await sTry('setAttestor', [OLD_TEAM], OLD_TEAM);
+    ok('NEGATIVE: the old team address no longer works (PowerNotHeld) - it holds nothing in RareRoles, and nothing else is asked',
+      rOld === 'PowerNotHeld' && (await att()) === A2.toLowerCase(), rOld);
+    // THE GAMEMASTER: in the role, but holding nothing until SET_ATTESTOR is granted to it
+    await tryCall(R21, R21ERR, 'setRoleMember', [ethers.id('rarefriends.role.gamemaster'), GM21, true], DEP21);
+    const GMR21 = (await R21.call('GAMEMASTER')).out[0];
+    const rGm0 = await sTry('setAttestor', [A3], GM21);
+    ok('NEGATIVE: a gamemaster with SET_ATTESTOR not granted is refused (PowerNotHeld) - there is no general "gamemaster may"', rGm0 === 'PowerNotHeld', rGm0);
+    // ... granted under a non-zero roleChangeDelay: PENDING, still refused, until the delay is waited out
+    const DELAY = 3600;
+    await tryCall(R21, R21ERR, 'setRoleChangeDelay', [DELAY], DEP21);
+    const rGrant = await tryCall(R21, R21ERR, 'grantPower', [SET_ATTESTOR || ethers.ZeroHash, GMR21, true], DEP21);
+    const from21 = BigInt((await R21.call('grantFrom', [SET_ATTESTOR || ethers.ZeroHash, GMR21])).out[0]);
+    const rGmPending = await sTry('setAttestor', [A3], GM21);
+    ok('the grant to the gamemaster role waits the same roleChangeDelay as every other grant: pending for ' + DELAY + ' s, and refused (PowerNotHeld) meanwhile',
+      rGrant === 'MOVED' && from21 === net.at() + BigInt(DELAY) && rGmPending === 'PowerNotHeld' && (await att()) === A2.toLowerCase(), [rGrant, String(from21 - net.at()), rGmPending].join(' / '));
+    net.travel(DELAY);
+    const rGm = await sTry('setAttestor', [A3], GM21);
+    ok('the GAMEMASTER can set the attestor once the grant lands, and attestor() reads the new key back',
+      rGm === 'MOVED' && (await att()) === A3.toLowerCase(), rGm + ', attestor ' + (await att()));
+    // and a revoke lands AT ONCE (RareRoles' rule): a leaked gamemaster key is cut off without touching ShadowFriends
+    await tryCall(R21, R21ERR, 'grantPower', [SET_ATTESTOR || ethers.ZeroHash, GMR21, false], DEP21);
+    const rGmGone = await sTry('setAttestor', [A1], GM21);
+    ok('and taking SET_ATTESTOR back from the gamemaster role refuses it at once (PowerNotHeld) - the repair a lost team key never had',
+      rGmGone === 'PowerNotHeld' && (await att()) === A3.toLowerCase(), rGmGone);
+    const rZero = await sTry('setAttestor', [ethers.ZeroAddress], DEP21);
+    ok('NEGATIVE: even root cannot set the zero attestor (WrongSigner)', rZero === 'WrongSigner', rZero);
+    const fixP = fs.readFileSync(path.join(ROOT, 'paritycheck.js'), 'utf8');
+    ok('the parity fixture deploys ShadowFriends with (attestor, roles) and no team', /net\.deploy\(TEAM, C\.shadow, \[attestor\.address, roles\.address\]\)/.test(fixP), 'paritycheck.js still passes a team');
+  }
+
+  // ---------- 22. The LOCAL fake $RF: the real token's interface, supply only through a faucet, and never on Arbitrum ----------
+  // The deployer, 2026-10-01: "create a duplicate of the RF token so we can make sure the numbers add up on the
+  // localhost testing". The money flow itself is estate/contracts/moneycheck.mjs, on a real anvil; this part proves the
+  // token's own three promises in memory. The shape below is a FIXTURE (this file reaches no chain); deploy.mjs
+  // --fake-rf passes the values it reads from the real $RF on 4663.
+  console.log('\n  22. the local fake $RF: the same interface, supply through one faucet, refused on an Arbitrum chain');
+  {
+    const FAUCET = '0xf000000000000000000000000000000000000022', STRANGER22 = '0xf100000000000000000000000000000000000022', P22 = '0xf200000000000000000000000000000000000022';
+    for (const a of [FAUCET, STRANGER22, P22]) await net.acct(a);
+    const SHAPE = ['Fixture Token', 'FIXTURE', 18, 1000n * 10n ** 18n];
+    const FERR22 = C.fakeRF ? errorNames(C.fakeRF.abi) : {};
+    let F = null; try { F = C.fakeRF ? await net.deploy(FAUCET, C.fakeRF, [...SHAPE, FAUCET]) : null; } catch (e) { note('FakeRF would not deploy on the in-memory 4663: ' + e.message.slice(0, 80)); }
+    const fRead = async (fn, args) => (F ? (await F.call(fn, args || [])).out[0] : null);
+    // the real $RF's functions, read off its bytecode on 4663 (2026-10-01): OZ ERC20 + ERC20Burnable + INITIAL_SUPPLY()
+    const REAL = ['name()', 'symbol()', 'decimals()', 'totalSupply()', 'balanceOf(address)', 'transfer(address,uint256)', 'transferFrom(address,address,uint256)',
+      'approve(address,uint256)', 'allowance(address,address)', 'burn(uint256)', 'burnFrom(address,uint256)', 'INITIAL_SUPPLY()'];
+    const sigs = C.fakeRF ? C.fakeRF.abi.filter((f) => f.type === 'function').map((f) => f.name + '(' + f.inputs.map((i) => i.type).join(',') + ')') : [];
+    ok('FakeRF has every function the real $RF has (' + REAL.length + ': ERC20, burn, burnFrom, INITIAL_SUPPLY)', REAL.every((s) => sigs.includes(s)), 'missing: ' + REAL.filter((s) => !sigs.includes(s)).join(', '));
+    ok('the name, symbol, decimals and INITIAL_SUPPLY are what the constructor was handed - nothing of the real token is written in the source',
+      !!F && (await fRead('name')) === SHAPE[0] && (await fRead('symbol')) === SHAPE[1] && Number(await fRead('decimals')) === SHAPE[2] && (await fRead('INITIAL_SUPPLY')) === SHAPE[3]
+      && !/RareFriends"|RAREFRIENDS"|1024000000/.test(fs.readFileSync(path.join(ROOT, 'test/FakeRF.sol'), 'utf8')), 'shape not passed through');
+    ok('the whole INITIAL_SUPPLY sits with the faucet at birth, and that is the total supply', !!F && (await fRead('balanceOf', [FAUCET])) === SHAPE[3] && (await fRead('totalSupply')) === SHAPE[3], 'supply elsewhere');
+    const rMintS = F ? await tryCall(F, FERR22, 'faucetMint', [1n], STRANGER22) : 'NO TOKEN';
+    ok('NEGATIVE: a stranger cannot mint (NotFaucet), and the supply does not move', rMintS === 'NotFaucet' && (await fRead('totalSupply')) === SHAPE[3], rMintS);
+    const rMintF = F ? await tryCall(F, FERR22, 'faucetMint', [5n], FAUCET) : 'NO TOKEN';
+    ok('the faucet can mint, and only to itself: +5 to the faucet, +5 to the supply, nothing to anyone else',
+      rMintF === 'MOVED' && (await fRead('balanceOf', [FAUCET])) === SHAPE[3] + 5n && (await fRead('totalSupply')) === SHAPE[3] + 5n && (await fRead('balanceOf', [STRANGER22])) === 0n, rMintF);
+    ok('there is no mint(to, amount) at all - no function anywhere names a recipient for new supply', !sigs.some((s) => /^mint\(/.test(s)), sigs.filter((s) => /mint/i.test(s)).join(','));
+    if (F) { await F.call('transfer', [P22, 7n], FAUCET); await F.call('burn', [2n], P22); }
+    ok('burn works as the real token\'s does: 7 sent, 2 burned, 5 left and the supply 2 lower',
+      !!F && (await fRead('balanceOf', [P22])) === 5n && (await fRead('totalSupply')) === SHAPE[3] + 3n, F ? String(await fRead('totalSupply')) : 'no token');
+    ok('it says what it is: IS_FAKE_RF() is true, which a real deploy asks and refuses', !!F && (await fRead('IS_FAKE_RF')) === true, 'no marker');
+    // and on an Arbitrum chain - ArbSys's 0xfe at 0x64, as Robinhood (4663) has it - it refuses to exist, as does LocalEntropy
+    await net.setCode('0x0000000000000000000000000000000000000064', '0xfe');
+    const ctorErr = async (c, args) => { try { await net.deploy(FAUCET, c, args); return 'MOVED'; } catch (e) { return errorNames(c.abi)[(e.data || '').slice(0, 10)] || 'revert'; } };
+    const rArb = C.fakeRF ? await ctorErr(C.fakeRF, [...SHAPE, FAUCET]) : 'NO TOKEN';
+    const rArbE = C.localEntropy ? await ctorErr(C.localEntropy, []) : 'NO ENTROPY';
+    await net.setCode('0x0000000000000000000000000000000000000064', '0x');
+    ok('NEGATIVE: with ArbSys at 0x64 (every Arbitrum chain, Robinhood included) FakeRF and LocalEntropy refuse to deploy (NotALocalChain)',
+      rArb === 'NotALocalChain' && rArbE === 'NotALocalChain', rArb + ' / ' + rArbE);
+    const dl = fs.readFileSync(path.join(ROOT, 'deploy.mjs'), 'utf8');
+    ok('and deploy.mjs --fake-rf refuses before sending unless EVM_RPC is a loopback, unforked anvil; a real deploy refuses a token answering IS_FAKE_RF',
+      /if \(FAKE && !LOCAL\)/.test(dl) && /requireUnforkedAnvil\(provider\)/.test(dl) && /IS_FAKE_RF\(\)/.test(dl), 'a guard is missing from deploy.mjs');
   }
 
   console.log(fails ? '\n' + fails + ' check(s) failed' : '\nall nine items hold, and the fight log, and the whitelist, and the duel\'s numbers are state a running game freezes, and a building is a row');

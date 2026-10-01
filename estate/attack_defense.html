@@ -34,6 +34,7 @@ h1 { font-family: var(--display); font-weight: 400; font-size: clamp(35px, 5vw, 
 .tag.game { background: var(--signal); color: #000; }
 .tag.ph { border: 1px dashed rgba(255,255,255,.7); color: #fff; }
 .tag.prop { border: 1px solid rgba(255,255,255,.7); color: #fff; }
+.tag.dec { border: 1px solid var(--signal); background: rgba(204,255,0,.14); color: var(--signal); }
 .tag.open { border: 1px dashed var(--faint); color: var(--dim); }
 .tag.try { border: 1px solid var(--signal); color: var(--signal); }
 section { border-top: 1px solid var(--faint); padding: 26px 0 6px; scroll-margin-top: 60px; }
@@ -135,6 +136,7 @@ canvas.base { width: 100%; display: block; background: #000; border: 1px solid v
   <div class="legend">
     <span><span class="tag game">IN THE GAME</span> read live from the base's code</span>
     <span><span class="tag ph">PLACEHOLDER</span> in the code, a starting plan, not balanced</span>
+    <span><span class="tag dec">DECIDED</span> settled by a ruling; the deployer can still tune it</span>
     <span><span class="tag prop">PROPOSED</span> needed by the algorithm, not decided</span>
     <span><span class="tag try">TRYING</span> changed on this page only</span>
   </div>
@@ -151,13 +153,15 @@ canvas.base { width: 100%; display: block; background: #000; border: 1px solid v
   'use strict';
   const $ = (id) => document.getElementById(id);
   const T = { game: '<span class="tag game">IN THE GAME</span>', ph: '<span class="tag ph">PLACEHOLDER</span>',
-              prop: '<span class="tag prop">PROPOSED</span>', try: '<span class="tag try">TRYING</span>', open: '<span class="tag open">NOT DECIDED</span>' };
+              prop: '<span class="tag prop">PROPOSED</span>', dec: '<span class="tag dec">DECIDED</span>', try: '<span class="tag try">TRYING</span>', open: '<span class="tag open">NOT DECIDED</span>' };
   const GENS = [1, 2, 3, 4, 5, 6];
   const QUAD = (sx, sy) => ((sy % 2 + 2) % 2 ? 'S' : 'N') + ((sx % 2 + 2) % 2 ? 'E' : 'W');
   const pct = (v) => Math.round(v * 100) + '%';
   const secs = (ms) => (ms / 1000).toLocaleString('en-US', { maximumFractionDigits: 1 }) + ' s';
   const sec = (id, n, title, q, body) => '<section id="' + id + '"><h2><span class="n">' + n + '</span>' + title + '</h2><p class="q">' + q + '</p>' + body + '</section>';
-  const PROPOSED = { speed: 1, maxMs: 120000, coverDiv: 2, defendTiles: 5 };
+  // the fight's settings: speed (ruling 44), coverDiv (ruling 45) and defendTiles (ruling 46) are decided and the
+  // deployer's to tune; there is no clock to set (ruling 47). Combat.rulesFrom takes exactly these three.
+  const PROPOSED = { speed: 1, coverDiv: 2, defendTiles: 5 };
   const ORDER_LABEL = ['HOLD', 'ENGAGE', 'ENGAGE + DEFEND', 'FALL BACK'];
   const PROPOSED0 = JSON.stringify(PROPOSED);
   const SIG = '#CCFF00';
@@ -206,13 +210,13 @@ canvas.base { width: 100%; display: block; background: #000; border: 1px solid v
 
     out.push(sec('numbers', '02', 'THE NUMBERS', 'What each generation fights with. Read from the base (the armoury uses the same numbers). Change any to try it: the fights, the tables and the checks below all rerun; the game itself doesn\'t change.',
       '<div id="numtab"></div>' +
-      '<h3>WHAT THE ALGORITHM NEEDS THAT ISN\'T DECIDED ' + T.prop + '</h3>' +
+      '<h3>THE FIGHT\'S SETTINGS</h3>' +
       '<div class="tw"><table><thead><tr><th>Number</th><th>Using</th><th style="text-align:left">Why it matters</th></tr></thead><tbody>' +
-      '<tr><td>Walking pace in a fight</td><td><input id="pspeed" type="number" step="0.1" min="0.1" value="' + PROPOSED.speed + '"> tiles/s</td><td style="text-align:left;white-space:normal">Friends on the base ease toward each step; there is no set speed. It decides how many free shots a longer weapon gets while the other closes in.</td></tr>' +
-      '<tr><td>The fight\'s clock</td><td><input id="pmax" type="number" step="10" min="10" value="' + PROPOSED.maxMs / 1000 + '"> s</td><td style="text-align:left;white-space:normal">If the attack hasn\'t won by then, the defense holds. It also caps the gas.</td></tr>' +
-      '<tr><td>Cover behind a wall</td><td>÷ <input id="pcover" type="number" step="1" min="1" value="' + PROPOSED.coverDiv + '"></td><td style="text-align:left;white-space:normal">A Friend right behind a standing wall is harder to hit from the far side: its chance of being hit is divided by this.</td></tr>' +
-      '<tr><td>How far ENGAGE + DEFEND strays</td><td><input id="pengage" type="number" step="0.5" min="0.5" value="' + PROPOSED.defendTiles + '"> tiles</td><td style="text-align:left;white-space:normal">A Friend on ENGAGE + DEFEND never goes further than this from its post; on ENGAGE there is no limit. FALL BACK starts at half HP.</td></tr>' +
-      '<tr><td>Splash falls off</td><td>½ a spot</td><td style="text-align:left;white-space:normal">Full on the spot the stone lands, halved for every spot away. Why spreading out matters.</td></tr>' +
+      '<tr><td>Walking pace in a fight ' + T.dec + '</td><td><input id="pspeed" type="number" step="0.1" min="0.1" value="' + PROPOSED.speed + '"> tiles/s</td><td style="text-align:left;white-space:normal">Every Friend moves at the same pace (ruling 44). It decides how many free shots a longer weapon gets while the other closes in.</td></tr>' +
+      '<tr><td>Cover on a wall ' + T.dec + '</td><td>÷ <input id="pcover" type="number" step="1" min="1" value="' + PROPOSED.coverDiv + '"></td><td style="text-align:left;white-space:normal">A Friend standing <b>on</b> a standing wall, as its crew, is hit half as often: the chance of a shot landing on it is divided by this. Standing <b>behind</b> a wall gives no cover at all, and the crew lose it the moment their wall falls (ruling 45).</td></tr>' +
+      '<tr><td>How far ENGAGE + DEFEND strays ' + T.dec + '</td><td><input id="pengage" type="number" step="0.5" min="0.5" value="' + PROPOSED.defendTiles + '"> tiles</td><td style="text-align:left;white-space:normal">A Friend on ENGAGE + DEFEND never goes further than this from its post; on ENGAGE there is no limit. FALL BACK starts at half HP (ruling 46).</td></tr>' +
+      '<tr><td>Splash falls off ' + T.prop + '</td><td>½ a spot</td><td style="text-align:left;white-space:normal">Full on the spot the stone lands, halved for every spot away. Why spreading out matters.</td></tr>' +
+      '<tr><td>The fight\'s clock</td><td>none</td><td style="text-align:left;white-space:normal">There is no time limit: a fight runs until one side wins (ruling 47).</td></tr>' +
       '</tbody></table></div>' +
       '<div class="row"><button class="btn" type="button" id="reset" disabled>BACK TO THE GAME\'S NUMBERS</button><span class="src" id="trynote"></span></div>'));
 
@@ -225,7 +229,8 @@ canvas.base { width: 100%; display: block; background: #000; border: 1px solid v
       '  attacker   aims at the nearest defender. In reach: shoots. Out of reach: steps one spot toward it\n' +
       '             (of the 8 around it, the nearest; ties to the straighter line, then N NE E SE S SW W NW).\n' +
       '             If that spot is a standing wall, it breaks the wall, and keeps at it until it falls.\n' +
-      '  defender   follows its STANDING ORDER, set beforehand (its player needn\'t be online):\n' +
+      '  defender   follows its STANDING ORDER, set beforehand (its player needn\'t be online). An order is a\n' +
+      '             response: it fights by it whether or not its player answers the attack.\n' +
       '               HOLD       stays on its spot: shoots the nearest attacker in reach, or waits\n' +
       '               ENGAGE     goes after the nearest attacker wherever it is, however far off: nothing can\n' +
       '                          shell the base from beyond everyone\'s reach unanswered\n' +
@@ -239,14 +244,16 @@ canvas.base { width: 100%; display: block; background: #000; border: 1px solid v
       '               roll = keccak256(abi.encode(word, contract, chain id, fight id, shot number)) % 10000\n' +
       '             it lands if roll &lt; chance, in basis points:\n' +
       '               at a Friend   attacker HP × 10000 ÷ (attacker HP + defender HP)\n' +
-      '                             ÷ cover, if a standing wall spot right next to it is between it and the shooter\n' +
+      '                             ÷ cover, if it stands ON a standing wall, as its crew.\n' +
+      '                             Behind a wall is no cover at all.\n' +
       '               at a wall     ' + GAME.combat.landVsBuildingBps + ' (it doesn\'t dodge)\n' +
       'DAMAGE       the weapon\'s (× its building bonus at a wall). A crossbow bolt carries on into the enemy right\n' +
       '             behind the target. A catapult stone that lands on a Friend: full damage on that spot, half one\n' +
       '             spot away, a quarter two away. One that hits a wall stops there.\n' +
       'REACH        the weapon\'s range × 2 spots. Up a watchtower: +' + Combat.spots(GAME.combat.towerRange) + ' spots, except melee, which only reaches\n' +
       '             the foot of the tower (' + Combat.spots(GAME.combat.dropRange) + ' spot). A catapult can\'t go up a tower.\n' +
-      'THE END      every defender down: the attack wins. Every attacker down, or the clock out: the defense holds.\n' +
+      'THE END      every defender down: the attack wins. Every attacker down: the defense holds.\n' +
+      '             There is no clock: a fight runs until one side wins.\n' +
       '             The Genesis never fights.</div>'));
 
     out.push(sec('fight', '04', 'YOUR BASE, ATTACKED', 'Your base as the game has it, from above, north up. Pick an attack and fight. Then move your Friends and fight again with the same word: see what moving them does.',
@@ -269,7 +276,7 @@ canvas.base { width: 100%; display: block; background: #000; border: 1px solid v
       '<h3>WHAT "PANS OUT" SHOULD MEAN ' + T.prop + '</h3><p class="src">My reading of the aim. Tell me which of these are right, and what else a generation should be able to do.</p>' +
       '<ul class="checks" id="checks"></ul>' +
       '<div class="mats" id="mats"></div>' +
-      '<h3>HOW MANY IT TAKES</h3><p class="src">The fewest of a generation (up to 6) that beat one of another behind a log wall at least half the time. — means 6 aren\'t enough.</p>' +
+      '<h3>HOW MANY IT TAKES</h3><p class="src">The fewest of a generation (up to 6) that beat one of another standing on a log wall at least half the time. — means 6 aren\'t enough.</p>' +
       '<div id="takes"></div>'));
 
     out.push(sec('chain', '06', 'ON CHAIN', 'Can this go straight into a contract on Robinhood Chain?',
@@ -419,11 +426,10 @@ canvas.base { width: 100%; display: block; background: #000; border: 1px solid v
     $('fightBtn').onclick = () => fight();
     $('homeBtn').onclick = () => { BASE = JSON.parse(JSON.stringify(HOME)); SET.pick = -1; setup(); fight(); };
     $('pspeed').onchange = () => { const v = parseFloat($('pspeed').value); if (v > 0) PROPOSED.speed = v; after(); };
-    $('pmax').onchange = () => { const v = parseFloat($('pmax').value); if (v >= 10) PROPOSED.maxMs = Math.round(v) * 1000; after(); };
     $('pengage').onchange = () => { const v = parseFloat($('pengage').value); if (v > 0) PROPOSED.defendTiles = v; after(); };
     $('pcover').onchange = () => { const v = parseInt($('pcover').value, 10); if (v >= 1) PROPOSED.coverDiv = v; after(); };
     $('reset').onclick = () => { E = JSON.parse(JSON.stringify(GAME)); Object.assign(PROPOSED, JSON.parse(PROPOSED0));
-      $('pspeed').value = PROPOSED.speed; $('pmax').value = PROPOSED.maxMs / 1000; $('pcover').value = PROPOSED.coverDiv; $('pengage').value = PROPOSED.defendTiles; after(); };
+      $('pspeed').value = PROPOSED.speed; $('pcover').value = PROPOSED.coverDiv; $('pengage').value = PROPOSED.defendTiles; after(); };
     // tap a defender to pick it up, then a spot on the estate to put it down
     $('baseCv').addEventListener('click', (e) => {
       const g = GEO; if (!g) return;
@@ -445,7 +451,7 @@ canvas.base { width: 100%; display: block; background: #000; border: 1px solid v
     LAST = res;
     const down = res.defenders.filter(h => h === 0).length;
     $('verdict').innerHTML = (res.winner === 'attack' ? '<b>THE ATTACK WINS</b>' : '<b>THE DEFENSE HOLDS</b>') + ' · ' +
-      { wiped: 'every defender down', repelled: 'every attacker down', held: 'the clock ran out' }[res.reason] + ' · ' + secs(res.t) + ' · ' + down + ' of ' + res.defenders.length + ' defenders down · ' + res.shots + ' shots';
+      { wiped: 'every defender down', repelled: 'every attacker down', held: 'nobody could move or shoot', fled: 'the attack ran' }[res.reason] + ' · ' + secs(res.t) + ' · ' + down + ' of ' + res.defenders.length + ' defenders down · ' + res.shots + ' shots';
     $('log').innerHTML = '<table><thead><tr><th>Time</th><th>Who</th><th>At</th><th>Roll</th><th>Needs under</th><th>Result</th></tr></thead><tbody>' +
       res.log.map(s => '<tr class="' + (s.landed ? 'hit' : 'miss') + '"><td>' + secs(s.t) + '</td><td>' + who(s.who) + '</td><td>' + who(s.at) + (s.cover ? ' · IN COVER' : '') + '</td><td>' +
         String(s.roll).padStart(4, '0') + '</td><td>' + s.bps + '</td><td' + (s.killed.length ? ' class="k"' : '') + '>' + (s.landed ? '−' + s.dmg + (s.also.length ? ' · splash ' + s.also.map(([k, n]) => who(k) + ' −' + n).join(', ') : '') +
@@ -590,7 +596,7 @@ canvas.base { width: 100%; display: block; background: #000; border: 1px solid v
 
   // ---------- 05: generation 1 to 6 ----------
   const N = 120;
-  const SCEN = [['open', 'ON OPEN GROUND', {}], ['wall', 'DEFENDER RIGHT BEHIND A LOG WALL', { wall: true }], ['tower', 'DEFENDER UP A TOWER, BEHIND A WALL', { wall: true, tower: true }]];
+  const SCEN = [['open', 'ON OPEN GROUND', {}], ['wall', 'DEFENDER ON A LOG WALL, ITS CREW', { onWall: true }], ['tower', 'DEFENDER UP A TOWER, A WALL IN FRONT (NO COVER)', { wall: true, tower: true }]];
   const onGround = (atts, gen, opt) => { const b = Combat.proving(gen, opt); return { attackers: atts, entry: Combat.entry(b, 'N', 6), defenders: b.defenders, walls: b.walls }; };
   let run = 0;
   function runGens() {
@@ -598,7 +604,7 @@ canvas.base { width: 100%; display: block; background: #000; border: 1px solid v
     SCEN.forEach(([k, , opt]) => { M[k] = {}; GENS.forEach(a => GENS.forEach(d => jobs.push(() => {
       M[k][a + ',' + d] = Combat.sample(R, onGround([a], d, opt), N, 1000 + a * 10 + d).attackWins; }))); });
     GENS.forEach(a => GENS.forEach(d => jobs.push(() => {
-      let n = 0; for (let k = 1; k <= 6; k++) { if (Combat.sample(R, onGround(Array(k).fill(a), d, { wall: true }), 60, 7000 + a * 10 + d).attackWins >= 0.5) { n = k; break; } }
+      let n = 0; for (let k = 1; k <= 6; k++) { if (Combat.sample(R, onGround(Array(k).fill(a), d, { onWall: true }), 60, 7000 + a * 10 + d).attackWins >= 0.5) { n = k; break; } }
       TK[a + ',' + d] = n; })));
     const total = jobs.length; let done = 0;
     $('checks').innerHTML = CHECKS.map(ch => '<li><span class="res wait">RUNNING</span><span>' + ch.name + '</span></li>').join('');
@@ -631,15 +637,15 @@ canvas.base { width: 100%; display: block; background: #000; border: 1px solid v
       const r = GENS.slice(1).map(g => [g, M.open[g + ',' + (g - 1)]]), low = r.filter(([, v]) => v < 0.1);
       return { ok: !low.length, why: r.map(([g, v]) => 'Gen ' + g + ' beats Gen ' + (g - 1) + ' ' + pct(v)).join(' · ') +
         (low.length ? '. Each fight is many shots, so the luck averages out and the stronger side nearly always wins.' : '') }; } },
-    { name: 'A wall helps the defender.', test: (M) => {
+    { name: 'Standing on a wall helps the defender.', test: (M) => {
       const bad = []; GENS.forEach(a => GENS.forEach(d => { if (M.wall[a + ',' + d] > M.open[a + ',' + d] + 0.05) bad.push('Gen ' + a + ' on Gen ' + d); }));
       const even = GENS.map(g => M.open[g + ',' + g] - M.wall[g + ',' + g]).reduce((s, v) => s + v, 0) / 6;
-      return { ok: !bad.length, why: bad.length ? 'the attack does better against a wall in ' + bad.join(', ') : 'between equals, a wall cuts the attack\'s wins by ' + Math.round(even * 100) + ' points on average' }; } },
-    { name: 'A watchtower helps the defender more.', test: (M) => {
+      return { ok: !bad.length, why: bad.length ? 'the attack does better against a Friend on a wall in ' + bad.join(', ') : 'between equals, standing on a wall cuts the attack\'s wins by ' + Math.round(even * 100) + ' points on average' }; } },
+    { name: 'A watchtower helps the defender more than standing on a wall.', test: (M) => {
       const bad = []; GENS.forEach(a => GENS.forEach(d => { if (M.tower[a + ',' + d] > M.wall[a + ',' + d] + 0.05) bad.push('Gen ' + a + ' on Gen ' + d); }));
       const gain = GENS.map(a => GENS.map(d => M.wall[a + ',' + d] - M.tower[a + ',' + d])).flat(), best = Math.max(...gain);
       return { ok: !bad.length && best > 0.05, why: bad.length ? 'the attack does better against a tower in ' + bad.slice(0, 4).join(', ') + ': melee up a tower only reaches its foot' : best > 0.05 ? 'up to ' + Math.round(best * 100) + ' points fewer wins for the attack' : 'a tower makes no difference with these numbers' }; } },
-    { name: 'Numbers count: enough of a generation can beat one of the next generation up, behind a wall.', test: (M, TK) => {
+    { name: 'Numbers count: enough of a generation can beat one of the next generation up, standing on a wall.', test: (M, TK) => {
       const r = GENS.slice(1).map(g => [g, TK[g + ',' + (g - 1)]]), none = r.filter(([, n]) => !n);
       return { ok: !none.length, why: r.map(([g, n]) => (n ? n + '× Gen ' + g : 'no number of Gen ' + g) + ' beat one Gen ' + (g - 1)).join(' · ') }; } },
   ];

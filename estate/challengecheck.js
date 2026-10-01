@@ -1,12 +1,14 @@
 const { spawn } = require('child_process'); const fs=require('fs'),os=require('os'),path=require('path');
 const CHROME='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'; const PORT=9489;
+// CH_ORIGIN serves another tree (a worktree's site on its own port) for proving this check before a merge
+const ORIGIN = process.env.CH_ORIGIN || 'http://localhost:8765';
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 (async()=>{
   require("./pagewatch.js").claimPort(PORT);   // never attach to a browser this check did not start
   const prof=fs.mkdtempSync(path.join(os.tmpdir(),'ch-'));
   require("./pagewatch.js").guard(prof);            // close it even if this check throws, or is killed
   const ch=spawn(CHROME,['--headless=new','--enable-unsafe-swiftshader','--hide-scrollbars','--remote-debugging-port='+PORT,
-    '--user-data-dir='+prof,'--window-size=1200,900','http://localhost:8765/challenge.html'],{stdio:'ignore'});
+    '--user-data-dir='+prof,'--window-size=1200,900',ORIGIN+'/challenge.html'],{stdio:'ignore'});
   let send, sock;
   for(let i=0;i<160&&!send;i++){await sleep(250);try{
     const t=(await(await fetch(`http://127.0.0.1:${PORT}/json`)).json()).find(x=>x.type==='page');
@@ -28,7 +30,9 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
   // This was a bare `await send('Runtime.enable')` whose events went nowhere: the socket handler above
   // forwards only messages carrying an `id`, and an event has none. Same enable, now read.
   const watch = await require('./pagewatch.js').attach(sock, send);
-  let bad=0; const ok=(n,c,v)=>{console.log((c?'  ok  ':'FAIL  ')+n+(c?'':'   -> '+v)); if(!c) bad++;};
+  // A THREW is a non-empty string and so truthy: without the first clause an ok(name, await ev(...)) whose
+// expression threw would PASS. It is a FAIL, carrying the error.
+let bad=0; const ok=(n,c,v)=>{ if (typeof c === 'string' && c.startsWith('THREW')) { v = c; c = false; } console.log((c?'  ok  ':'FAIL  ')+n+(c?'':'   -> '+v)); if(!c) bad++;};
   await sleep(1500);
   const click = (sel) => ev(`(()=>{const b=document.querySelector(${JSON.stringify(sel)}); if(!b||b.disabled) return false; b.click(); return true;})()`);
   const txt = (sel) => ev(`(document.querySelector(${JSON.stringify(sel)})||{}).innerText||''`);
@@ -114,6 +118,98 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
   await click('#nagain'); await sleep(200);
   ok('CHALLENGE AGAIN goes back to the terms', /SET THE TERMS/.test(await txt('#phase')) && !(await ev('document.getElementById("main").hidden')), await txt('#phase'));
   await click('[data-answer="accept"]');
+  // ================= M17 item 2: hold'em, fixed-limit, bets in crystals; $RF in the code and OFF =================
+  // From the M17 agent's probe (scratchpad m17/m17probe.js). Every wait is on the page's own state - the
+  // phase, or an action button the page has left enabled - never a fixed sleep standing in for its turn.
+  const navigate = async (u) => { await send('Page.navigate', { url: ORIGIN + '/' + u });
+    for (let i = 0; i < 60 && (await ev('!!(window.challenge && challenge.S)')) !== true; i++) await sleep(150); await sleep(400); };
+  const state = () => ev('JSON.stringify({p1:challenge.P.p1.purse,p2:challenge.P.p2.purse,r1:challenge.P.p1.rf,r2:challenge.P.p2.rf,pot:challenge.S.pot,potRF:challenge.S.potRF,paid:challenge.S.paid,phase:challenge.S.phase,winner:challenge.S.winner})').then((r) => { try { return JSON.parse(r); } catch (_) { return { threw: r }; } });
+  // the hand is waiting on US (an enabled action button) or it is over; anything else is the page's turn
+  const ready = async () => { for (let i = 0; i < 80; i++) { if (await ev('challenge.S.phase === "done" || [...document.querySelectorAll("#arena .acts2 .go")].some(b => !b.disabled) || (challenge.S.phase === "play" && !!document.querySelector("#arena [data-pick]"))') === true) return true; await sleep(100); } return false; };
+  const waitPhase = async (p) => { for (let i = 0; i < 80; i++) { if (await ev('challenge.S.phase') === p) return true; await sleep(100); } return false; };
+  const conserved = (s, a, b) => !!s.paid && !!s.paid.crystals && s.p1 === a - s.paid.crystals.p1 && s.p2 === b - s.paid.crystals.p2 && s.pot === s.paid.crystals.p1 + s.paid.crystals.p2;
+  const STREET = `(()=>{const c=document.querySelector('#arena .street .cap'); return c ? ['THE TABLE · FACE DOWN','THE FLOP','THE TURN','THE RIVER'].indexOf(c.innerText.trim()) : -1;})()`;
+  await navigate('challenge.html?game=holdem&stake=50');
+  ok('hold\'em: ?game=holdem&stake=50 opens hold\'em at 50, demo off', await ev('challenge.S.game === "holdem" && challenge.S.stake === 50 && challenge.DEMO.on === false'),
+    await ev('JSON.stringify([challenge.S.game, challenge.S.stake, challenge.DEMO.on])'));
+  ok('hold\'em: exactly one betting unit is on and it is crystals; $RF is in the code and off (ruling 7)',
+    await ev('(()=>{const U=challenge.BET_UNITS; return U.filter(u=>u.on).length===1 && challenge.betUnit().id==="crystals" && U.some(u=>u.id==="rf" && u.on===false);})()'), await ev('JSON.stringify(challenge.BET_UNITS)'));
+  const ladder = await ev('JSON.stringify(challenge.HOLDEM.bets)').then((r) => { try { return JSON.parse(r); } catch (_) { return null; } });
+  // three hands: one that BETS whenever it may (and calls a raise), one that FOLDS at once, and one that
+  // CHECKS DOWN (checks, and calls whatever the page bets). The page folds only when facing a bet and we act
+  // first on every street, so the check-down hand always reaches the river showdown: it is the hand that
+  // sees the BET button on all four streets, where a bet hand usually ends at the flop because the page folds.
+  const allOffered = [];
+  for (const kind of ['bet', 'fold', 'checkdown']) {
+    // the check-down hand needs purses that can cover a bet on the river after calling the page's bets on
+    // the flop and turn - 240 cannot, and the river's BET button would rightly not be offered
+    const a = kind === 'checkdown' ? 1000 : 240, b = kind === 'checkdown' ? 1000 : 610;
+    await ev('challenge.P.p1.purse = ' + a + '; challenge.P.p2.purse = ' + b + '; challenge.restart()'); await sleep(150);
+    const net0 = await ev('challenge.P.p1.rec.net');
+    await click('#send'); await waitPhase('play'); await ready();
+    let s = await state();
+    if (kind === 'bet') {
+      ok('hold\'em: the ante is 50 each, the pot 100, and both purses paid it', s.pot === 100 && conserved(s, a, b), JSON.stringify(s));
+      ok('hold\'em: the unit row has CRYSTALS pressed and $RF disabled with its reason', await ev(`(()=>{const c=document.querySelector('#arena [data-unit=crystals]'), r=document.querySelector('#arena [data-unit=rf]');
+        return !!c && !!r && c.getAttribute('aria-pressed')==='true' && !c.disabled && r.disabled && /OFF IN V1/.test(r.innerText);})()`), await txt('#arena .unit'));
+      ok('hold\'em: a betting round at the hole cards - CHECK and BET 50 are offered, and no PLAY ON',
+        await ev('!!document.getElementById("hcheck") && !document.getElementById("hon")') === true && (await txt('#hbet')) === 'BET 50', await txt('#arena .acts2'));
+    }
+    // every state read while the hand is live is held to it, the first (just after the ante) included; the
+    // count is printed because a hand the page ends at once is observed only that once
+    let steps = 0, consMid = conserved(s, a, b), seen = 1; const offered = [];
+    while (s.phase !== 'done' && steps++ < 40) {
+      const betTxt = await txt('#hbet');
+      if (betTxt) offered.push([await ev(STREET), +betTxt.replace(/\D/g, '')]);
+      if (kind === 'fold') { await click('#hfold'); }
+      else if (kind === 'checkdown') { if (!(await click('#hcheck')) && !(await click('#hcall'))) await sleep(150); }
+      else if (!(betTxt && await click('#hbet')) && !(await click('#hcall')) && !(await click('#hcheck'))) { await sleep(150); }
+      await sleep(150); await ready(); s = await state();
+      if (s.phase !== 'done') { seen++; if (!conserved(s, a, b)) consMid = false; }
+    }
+    s = await state();
+    const paid1 = s.paid && s.paid.crystals ? s.paid.crystals.p1 : NaN, net = (await ev('challenge.P.p1.rec.net')) - net0;
+    ok('hold\'em ' + kind + ' hand: it finished (waited on S.phase)', s.phase === 'done', s.phase);
+    ok('hold\'em ' + kind + ' hand: money conserved at every live step (' + seen + ' observed) - each purse is its start less what it paid, the pot is what both paid', consMid, 'a step broke it');
+    ok('hold\'em ' + kind + ' hand: crystals are zero-sum across the two purses (' + (s.p1 + s.p2) + ' = ' + (a + b) + ')', s.p1 + s.p2 === a + b, JSON.stringify(s));
+    ok('hold\'em ' + kind + ' hand: no $RF moved (purses, $RF pot and $RF paid all 0)', !!s.paid && s.r1 === 0 && s.r2 === 0 && s.potRF === 0 && s.paid.rf.p1 === 0 && s.paid.rf.p2 === 0, JSON.stringify(s));
+    if (s.winner === 'p1') ok('hold\'em ' + kind + ' hand: the winner takes the whole pot and NET is the pot less what they paid', s.p1 === a - paid1 + s.pot && net === s.pot - paid1, JSON.stringify({ s, net }));
+    else if (s.winner === 'p2') ok('hold\'em ' + kind + ' hand: the loser is out exactly what they paid, and NET says so', s.p1 === a - paid1 && net === -paid1, JSON.stringify({ s, net }));
+    else ok('hold\'em ' + kind + ' hand: a split pot hands each side its own money back', s.p1 === a && s.p2 === b && net === 0, JSON.stringify(s));
+    allOffered.push(...offered);
+    if (kind === 'bet') ok('hold\'em: we bet, so the pot went past the 100 ante', s.pot > 100 && paid1 > 50, JSON.stringify(s));
+    else if (kind === 'checkdown') ok('hold\'em: checking down reaches the showdown at the river (' + seen + ' live steps)', offered.some(([st]) => st === 3) && (await ev('challenge.S.last.acts.every((x) => x[2] !== "fold")')) === true, JSON.stringify(offered) + ' ' + (await ev('JSON.stringify(challenge.S.last.acts)')));
+    else ok('hold\'em: folding at the hole cards hands the 100 ante across and costs exactly 50', s.winner === 'p2' && s.pot === 100 && paid1 === 50, JSON.stringify(s));
+  }
+  // bet sizes over all three hands: every BET offered matched the ladder, and all four streets were seen
+  ok('hold\'em: every BET offered is HOLDEM.bets[street] x stake, on all four streets (' + JSON.stringify(ladder) + ' x 50; offered ' + JSON.stringify(allOffered) + ')',
+    Array.isArray(ladder) && [0, 1, 2, 3].every((st) => allOffered.some(([x]) => x === st)) && allOffered.every(([st, n]) => st >= 0 && n === ladder[st] * 50), JSON.stringify(allOffered));
+
+  // ================= M17 item 9: demo mode makes all four games free =================
+  await navigate('challenge.html?demo=1&stake=50');
+  ok('demo: ?demo=1 forces the stake to 0 although ?stake=50 asked for 50', await ev('challenge.DEMO.on === true && challenge.S.stake === 0'), await ev('JSON.stringify([challenge.DEMO.on, challenge.S.stake])'));
+  ok('demo: every stake button is disabled', await ev('(()=>{const b=[...document.querySelectorAll("[data-stake]")]; return b.length > 0 && b.every(x => x.disabled);})()'), await txt('.stake'));
+  for (const g of ['rps', 'blackjack', 'holdem', 'fof']) {
+    await ev('challenge.S.game=' + JSON.stringify(g) + '; challenge.restart()'); await sleep(150);
+    const a = await ev('challenge.P.p1.purse'), b = await ev('challenge.P.p2.purse'), r0 = await ev('JSON.stringify(challenge.P.p1.rec)').then((r) => { try { return JSON.parse(r); } catch (_) { return null; } });
+    await ev('challenge.S.stake = 50');                      // a stale stake reaching the money path: it must still cost nothing
+    await click('#send');
+    if (g === 'fof') { await sleep(300); await click('#paccept'); }
+    await waitPhase('play'); await ready();
+    if (g === 'holdem') { let n = 0; while ((await ev('challenge.S.phase')) !== 'done' && n++ < 20) { if (!(await click('#hcheck'))) await click('#hcall'); await sleep(150); await ready(); } }
+    else if (g === 'rps') { await click('[data-pick="rock"]'); await waitPhase('done'); }
+    else { await ev('challenge.settle("p1")'); await waitPhase('done'); }
+    const s = await state(), r1 = await ev('JSON.stringify(challenge.P.p1.rec)').then((r) => { try { return JSON.parse(r); } catch (_) { return null; } });
+    ok('demo ' + g + ' (S.stake=50 forced): it ended, both purses unchanged and nothing in the pot', s.phase === 'done' && s.p1 === a && s.p2 === b && s.pot === 0, JSON.stringify(s));
+    ok('demo ' + g + ': NET, HIGH and LOW unchanged', !!r0 && !!r1 && r1.net === r0.net && r1.highest === r0.highest && r1.lowest === r0.lowest, JSON.stringify([r0, r1]));
+  }
+  await navigate('base.html?demo=1'); await sleep(1000);
+  await click('#challengeBtn');
+  let emb = 'no frame';
+  for (let i = 0; i < 40; i++) { emb = await ev(`(()=>{const f=document.querySelector('iframe[src*="challenge.html"]'); if(!f||!f.contentWindow||!f.contentWindow.challenge) return 'no frame'; const c=f.contentWindow.challenge; return JSON.stringify([c.DEMO.on, c.S.stake]);})()`); if (emb !== 'no frame') break; await sleep(150); }
+  ok('demo: base.html?demo=1 opens the challenge in a frame with DEMO.on (and a stake of 0)', emb === JSON.stringify([true, 0]), emb);
+  await navigate('challenge.html');
+
   // phone width
   await send('Emulation.setDeviceMetricsOverride', { width: 400, height: 860, deviceScaleFactor: 2, mobile: true }); await sleep(400);
   ok('no sideways scroll at phone width', await ev('document.documentElement.scrollWidth <= 400'), await ev('document.documentElement.scrollWidth'));

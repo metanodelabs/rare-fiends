@@ -13,9 +13,9 @@
   "reveal": 4363,
   "requestRandomness": 101999,
   "settle": 34953,
-  "shadowClaim": 1887038,
-  "measuredAt": "2026-10-01T05:01:25.313Z",
+  "shadowClaim": 1887016,
+  "measuredAt": "2026-10-01T06:21:11.836Z",
   "solc": "0.8.36",
   "note": "execution gas, measured by estate/contracts/paritycheck.js",
-  "sourcesHash": "sha256:2348fec1e42e4610e4a03f30d6e7bbbdc68f0ac1ea63843d9011dff8372d9764"
+  "sourcesHash": "sha256:36163b6bc043d825375c32698a2fd299d91144606e201d7fa5009ac2579d5c89"
 }

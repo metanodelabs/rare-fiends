@@ -120,13 +120,13 @@ export function compileShadow() {
  * `eth_sendTransaction` - so no private key exists in this process. `attestor` is an ADDRESS (the proof's
  * ephemeral signer, or the local serve.py key's address read off its env file), funded here for its revokes.
  */
-export async function deployShadow({ rpc, attestor, team, whitelist = [] }) {
+export async function deployShadow({ rpc, attestor, whitelist = [] }) {   // no team: setAttestor is SET_ATTESTOR in RareRoles, held by the deployer here
   const provider = new ethers.JsonRpcProvider(rpc, CHAIN_ID, { staticNetwork: true, pollingInterval: 150 });
   const deployer = await provider.getSigner(0);
   const C = compileShadow();
   const roles = await new ethers.ContractFactory(C.roles.abi, C.roles.bin, deployer).deploy(deployer.address);
   await roles.waitForDeployment();
-  const shadow = await new ethers.ContractFactory(C.shadow.abi, C.shadow.bin, deployer).deploy(attestor, team || deployer.address, await roles.getAddress());
+  const shadow = await new ethers.ContractFactory(C.shadow.abi, C.shadow.bin, deployer).deploy(attestor, await roles.getAddress());
   await shadow.waitForDeployment();
   // THE DEPLOY BLOCK, and it is not a nicety. `chainFromRpc` scans `Claimed` from `fromBlock`, default 0,
   // and the public Robinhood RPC refuses an eth_getLogs over more than 10,000,000 blocks - the chain is past

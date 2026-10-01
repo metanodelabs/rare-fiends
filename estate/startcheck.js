@@ -34,20 +34,29 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
   // buttons wear rarefriends.com's brackets ([ CONNECT ]); the checks are about the label inside them
   const label = async (id) => (await txt(id)).replace(/[\[\]]/g, '').trim();
   // ---------- the hero reel ----------
+  // the hero is an iframe of the estate; it is read only once its game is up (capped at 30 s of wall), not a
+  // fixed 2.5 s after the reload, which under load was "THREW: ReferenceError: base is not defined"
+  for (let i = 0; i < 120 && (await hero('!!(window.base && base.simT > 0)')) !== true; i++) await sleep(250);
   ok('the header says CONNECT', /^CONNECT$/.test(await label('wallet')), await txt('wallet'));
   ok('the hero is the estate, starting from bare land', await hero('base.buildings.length') <= 1, await hero('base.buildings.length'));
   ok('the estate\'s own buttons and HUD are hidden behind the overlay', await hero('getComputedStyle(document.querySelector(".hud")).display') === 'none' && await hero('getComputedStyle(document.getElementById("challengeBtn")).display') === 'none', 'visible');
+  // The reel runs on the HERO's game clock (index.html heroTick: a building every HERO_GAP = 3600 ms of simT, each
+  // raised over V.buildMs x 2.5), so every wait below is on that clock, not the wall's (woodcheck's lesson). Under
+  // -j 4 the game clock runs slower than the wall, and 4 s of wall was "only the keep": [["keep",true]].
+  const heroWait = async (ms) => { const t0 = await hero('base.simT'), w0 = Date.now();
+    while ((await hero('base.simT')) - t0 < ms && Date.now() - w0 < 60000) await sleep(100);
+    if (Date.now() - w0 >= 60000) console.log('      (this machine is starved: ' + ms + ' ms of the hero\'s clock took over 60 s of wall)'); };
   const b0 = await hero('base.buildings.length');
-  await sleep(4000);
+  await heroWait(4000);
   const first = await hero('JSON.stringify(base.buildings.map(b=>[b.type, !!b.build]))');
   ok('buildings are added one at a time', await hero('base.buildings.length') > b0 && await hero('base.buildings.length') <= b0 + 2, first);
   ok('the first one is the keep', JSON.parse(first)[0][0] === 'keep', first);
   // a building started now should still be going up 6 s later (the game takes 2.8 s)
   await hero('window.__t = base.buildings[base.buildings.length - 1]');
-  const t0 = Date.now(); let doneAt = null;
-  for (let i = 0; i < 40; i++) { await sleep(250); if (!(await hero('!!window.__t.build'))) { doneAt = Date.now() - t0; break; } }
-  ok('each one rises slower than the game (~7 s, not 2.8 s)', doneAt === null || doneAt > 3000, doneAt + ' ms after it was already part-built');
-  await sleep(4000);
+  const t0 = await hero('base.simT'); let doneAt = null;
+  while ((await hero('base.simT')) - t0 < 10000) { await sleep(100); if (!(await hero('!!window.__t.build'))) { doneAt = (await hero('base.simT')) - t0; break; } }
+  ok('each one rises slower than the game (~7 s, not 2.8 s)', doneAt === null || doneAt > 3000, Math.round(doneAt) + ' ms of the hero\'s clock after it was already part-built');
+  await heroWait(4000);
   ok('more keep coming', await hero('base.buildings.length') >= b0 + 2, await hero('base.buildings.length'));
   // ---------- before anyone starts ----------
   ok('with nothing running, the overlay says GET READY and the button swears at you',

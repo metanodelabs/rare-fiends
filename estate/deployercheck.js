@@ -160,9 +160,14 @@ let PROF = null, CH = null;
         let body = {}; try { body = JSON.parse((i && i.body) || '{}'); } catch (e) {}
         window.__rpc.push(body);                          // every call, so "none was made" is checkable
         const MA = Object.assign({}, ${JSON.stringify(MARKET_ANSWERS)}, window.__answers || {}), cd = String(((body.params || [])[0] || {}).data || '').slice(0, 10).toLowerCase();
-        if (body.method === 'eth_call' && cd === '${SEL_RUNNING}') return Promise.resolve({ ok: true, json: () => Promise.resolve(window.__running == null
+        // runningGames() lives on TWO contracts - RareGame's counter (the page lock) and RareRoles' (the freeze, M4
+        // item 17) - and they can differ. window.__runningAt answers BY TARGET ADDRESS (lower case); an address it
+        // does not name falls back to window.__running, which answers both alike.
+        const to = String(((body.params || [])[0] || {}).to || '').toLowerCase();
+        const RN = window.__runningAt && window.__runningAt[to] !== undefined ? window.__runningAt[to] : window.__running;
+        if (body.method === 'eth_call' && cd === '${SEL_RUNNING}') return Promise.resolve({ ok: true, json: () => Promise.resolve(RN == null
           ? { jsonrpc: '2.0', id: 1, error: { code: -32000, message: 'the stub answers runningGames() only when window.__running is set' } }
-          : { jsonrpc: '2.0', id: 1, result: '0x' + Number(window.__running).toString(16).padStart(64, '0') }) });
+          : { jsonrpc: '2.0', id: 1, result: '0x' + Number(RN).toString(16).padStart(64, '0') }) });
         if (body.method === 'eth_call' && MA[cd] !== undefined)           // RareMarket's two getters, RareGame's eight
           return Promise.resolve({ ok: true, json: () => Promise.resolve({ jsonrpc: '2.0', id: 1,
             result: '0x' + MA[cd].toString(16).padStart(64, '0') }) });
@@ -372,6 +377,20 @@ let PROF = null, CH = null;
     /NO CONTRACT YET.*NO CONTRACT DEPLOYED.*NOT READ THERE EITHER/.test(rbs) && /hiding which of the three is true/.test(rbs), rbs.slice(-500));
   ok('with no contract address on record the page asks the chain NOTHING — it does not call an RPC to find out there is nobody home',
     (await ev('(window.__rpc||[]).length')) === 0, await ev('JSON.stringify(window.__rpc||[])'));
+
+  // ---- M4 item 17 (economist's spec, line 1): the freeze with no RareRoles on record -------------------------
+  // The three switches RareRoles guards (ruling 74), each card's freeze line and its control, read in one go.
+  const FZ3 = ['demo', 'whitelistOpen', 'freezeGame'];
+  const FZFN = { demo: 'setDemoMode(bool)', whitelistOpen: 'setWhitelistOpen(bool)', freezeGame: 'setGame(address)' };
+  const fzRead = async () => JSON.parse(await ev(`JSON.stringify(${JSON.stringify(FZ3)}.map((id)=>{
+    const f=document.querySelector('[data-freeze="'+id+'"]'), c=document.querySelector('[data-sw="'+id+'"],[data-in="'+id+'"]');
+    return { id, t: f ? f.textContent : null, why: f && f.nextElementSibling ? f.nextElementSibling.textContent : '',
+      dis: c ? c.disabled : null, title: c ? (c.getAttribute('title') || '') : null };}))`));
+  const fz1 = await fzRead();
+  ok('M4 item 17, no rareRoles address: the freeze is nodeploy, every guarded card reads FROZEN WHILE A GAME RUNS — NO CONTRACT TO ASK, and the chain is not asked',
+    (await ev('deployerPage.freeze.state')) === 'nodeploy' && fz1.every((x) => x.t === 'FROZEN WHILE A GAME RUNS — NO CONTRACT TO ASK') &&
+    (await ev('(window.__rpc||[]).length')) === 0,
+    JSON.stringify({ state: await ev('deployerPage.freeze.state'), lines: fz1.map((x) => x.id + ': ' + x.t), rpc: await ev('(window.__rpc||[]).length') }));
 
   // ---- the confirm step, with nothing deployed: it must refuse to look like a transaction -------
   // The lock is a separate question and it is still shut, so it has to be answered before any field
@@ -1069,6 +1088,81 @@ let PROF = null, CH = null;
   ok('a game that starts after the confirm screen is drawn is caught AT THE SIGNATURE: nothing is sent, and the record says why',
     (await ev('(window.__sent||[]).length')) === sentBefore && await ev('deployerPage.log.some(e=>/REFUSED — RareGame\\.runningGames\\(\\) at 0x0+af, which reads 1: a game is running/.test(e.to))'),
     await ev('JSON.stringify(deployerPage.log.slice(0,2))'));
+
+  // ---- M4 item 17 (economist's spec, lines 2 to 6): the freeze, asked of RareRoles.runningGames() ------------
+  const sameIds = (a) => JSON.stringify([...(a || [])].sort()) === JSON.stringify([...FZ3].sort());
+  const rr = async () => { await ev('deployerPage.readRunning()'); await ev('deployerPage.readChain()'); await sleep(1300); };
+  // (2) the registry answers 0: nothing frozen, and the three controls are live
+  await ev('window.__runningAt = null; window.__running = 0'); await rr();
+  let fz = await fzRead();
+  ok('M4 item 17, runningGames() reads 0: nothing is frozen, all three guarded cards read NOT FROZEN — NO GAME IS RUNNING, and their controls are enabled',
+    JSON.stringify(await ev('JSON.stringify(deployerPage.freeze.frozen)')) === JSON.stringify('[]') &&
+    fz.every((x) => x.t === 'NOT FROZEN — NO GAME IS RUNNING' && x.dis === false),
+    JSON.stringify({ frozen: await ev('JSON.stringify(deployerPage.freeze.frozen)'), fz }));
+  // (3) it answers 2: all three frozen. The contract's demo flag is set OPPOSITE to the page's field first, so the
+  // button showing the contract's value is not the page's own value passing for it.
+  const demoWas = await ev('window.__demo');
+  await ev('window.__demo = !deployerPage.val.demo; window.__running = 2'); await rr();
+  fz = await fzRead();
+  const fzIds = JSON.parse(await ev('JSON.stringify(deployerPage.freeze.frozen)'));
+  const db = JSON.parse(await ev(`JSON.stringify((()=>{const b=document.querySelector('[data-sw="demo"]'); return { t: b.textContent,
+    u: b.nextElementSibling ? b.nextElementSibling.textContent : null, chain: window.__demo, field: !!deployerPage.val.demo };})())`));
+  ok('M4 item 17, runningGames() reads 2: all three are frozen, each card reads FROZEN — 2 GAMES ARE RUNNING and names GameRunning(2), each control is off with its setter named',
+    sameIds(fzIds) && fz.every((x) => x.t === 'FROZEN — 2 GAMES ARE RUNNING' && /GameRunning\(2\)/.test(x.why) && x.dis === true && x.title.includes(FZFN[x.id])),
+    JSON.stringify({ frozen: fzIds, fz: fz.map((x) => ({ id: x.id, t: x.t, dis: x.dis, title: x.title, g2: /GameRunning\(2\)/.test(x.why) })) }));
+  ok('and the frozen demo switch shows what the CONTRACT holds, not the page\'s field: ' + (db.chain ? 'ON' : 'OFF') + ', as the contract holds it',
+    db.chain !== db.field && db.t === (db.chain ? 'ON' : 'OFF') && db.u === 'as the contract holds it', JSON.stringify(db));
+  await ev('window.__demo = ' + JSON.stringify(demoWas));
+  // (4) THE FREEZE ON ITS OWN: RareRoles reads 1 while RareGame reads 0. The lock is open; the three stay shut, and a
+  // demo flip staged and confirmed while nothing ran is refused at the signature, with nothing sent.
+  const RG = { [REGISTRY.toLowerCase()]: 0, [GAME.toLowerCase()]: 0 };
+  await ev('window.__running = null; window.__runningAt = ' + JSON.stringify(RG)); await rr();
+  if (!(await ev('deployerPage.pending.some((x)=>x.r.id==="demo")'))) { await click('[data-sw="demo"]'); await sleep(200); }
+  await click('#applysw'); await sleep(300);
+  const staged4 = await ev('!!deployerPage.confirm && deployerPage.confirm.list.some((x)=>x.r.id==="demo")');
+  await ev('window.__runningAt = ' + JSON.stringify(Object.assign({}, RG, { [REGISTRY.toLowerCase()]: 1 })));
+  const sent4 = await ev('(window.__sent||[]).length');
+  await ev('deployerPage.signSend()'); await sleep(500); await rr();
+  fz = await fzRead();
+  const lk4 = await ev('document.getElementById("lock").textContent');
+  ok('M4 item 17, the freeze on its own: RareRoles reads 1, RareGame 0 - the page lock is OPEN, yet all three guarded controls stay disabled',
+    (await ev('deployerPage.locked')) === false && /OPEN — THE CHAIN READS NO GAME RUNNING/.test(lk4) && (await ev('deployerPage.freeze.n')) === 1 &&
+    sameIds(JSON.parse(await ev('JSON.stringify(deployerPage.freeze.frozen)'))) && fz.every((x) => x.dis === true),
+    JSON.stringify({ locked: await ev('deployerPage.locked'), lock: lk4.slice(0, 120), frozen: await ev('JSON.stringify(deployerPage.freeze.frozen)'), dis: fz.map((x) => x.dis) }));
+  ok('and a demo flip confirmed before the freeze is refused AT THE SIGNATURE: nothing sent, and the record says RareRoles.runningGames() reads 1, so setDemoMode(bool) would answer GameRunning',
+    staged4 === true && (await ev('(window.__sent||[]).length')) === sent4 &&
+    await ev('deployerPage.log.some(e=>/REFUSED, FROZEN: RareRoles\\.runningGames\\(\\) reads 1, so setDemoMode\\(bool\\) would answer GameRunning/.test(e.to))'),
+    JSON.stringify({ staged4, sent: [sent4, await ev('(window.__sent||[]).length')], log: await ev('JSON.stringify(deployerPage.log.slice(0,2))') }));
+  // (5) the trading switches: not frozen by the contracts, and the page says the question is open rather than deciding it
+  const tr = JSON.parse(await ev(`JSON.stringify(deployerPage.rows.filter((r)=>r.trade).map((r)=>{const f=document.querySelector('[data-freeze="'+r.id+'"]'); return [r.id, f ? f.textContent : null];}))`));
+  const trRow = await ev(`(()=>{const t=document.getElementById('freeze'); const r=t&&[...t.querySelectorAll('tr')].find((e)=>/RareMarket\\.setTradeable/.test(e.textContent)); return r ? r.textContent : 'no RareMarket.setTradeable row';})()`);
+  ok('M4 item 17, the ' + tr.length + ' trading cards each read NOT FROZEN BY THE CONTRACTS — THE QUESTION IS OPEN, and THE FREEZE lists RareMarket.setTradeable as NO — STILL OPEN',
+    tr.length > 0 && tr.every(([, t]) => t === 'NOT FROZEN BY THE CONTRACTS — THE QUESTION IS OPEN') && /NO — STILL OPEN/.test(trRow), JSON.stringify({ tr, trRow }));
+  // (6) the setGame card: a malformed address is refused and not staged; a good one is a setGame(address) transaction
+  await ev('window.__runningAt = ' + JSON.stringify(RG)); await rr();
+  if (await ev('deployerPage.pending.some((x)=>x.r.id==="demo")')) { await click('[data-sw="demo"]'); await sleep(200); }   // un-stage the refused flip
+  const typeG = (a) => ev(`(()=>{const i=document.querySelector('[data-in="freezeGame"]'); if(!i) return 'no setGame input'; if(i.disabled) return 'disabled';
+    i.value=${JSON.stringify(a)}; i.dispatchEvent(new Event('change')); return 'ok';})()`);
+  const gl = await ev(`(()=>{const p=document.querySelector('[data-in="freezeGame"]').closest('.p'), e=p&&p.querySelector('.rb:not([data-freeze])'); return e ? e.textContent : 'no read-back';})()`);
+  ok('M4 item 17, the setGame card\'s chain line is RareRoles.game() read back: THE CONTRACT READS ' + GAME,
+    gl === 'THE CONTRACT READS ' + GAME, gl);
+  const tb = await typeG('0x1234'); await sleep(200);
+  ok('a malformed address in the setGame card is REFUSED and nothing is staged',
+    tb === 'ok' && (await ev('deployerPage.pending.some((x)=>x.r.id==="freezeGame")')) === false &&
+    await ev('deployerPage.log.some(e=>/^0x1234 — REFUSED, not one 0x address/.test(e.to))'), JSON.stringify({ tb, log: await ev('JSON.stringify(deployerPage.log.slice(0,1))') }));
+  const NEWG = '0x00000000000000000000000000000000000000b2';
+  const tg = await typeG(NEWG); await sleep(200);
+  const pk = await ev('(deployerPage.pending.find((x)=>x.r.id==="freezeGame")||{kind:{}}).kind.k');
+  await click('#applysw'); await sleep(300);
+  const sentG0 = await ev('(window.__sent||[]).length'), demoG = await ev('window.__demo');
+  await ev('deployerPage.signSend()'); await sleep(500);
+  const sg = JSON.parse(await ev(`JSON.stringify((window.__sent||[]).slice(${sentG0}))`));
+  await ev('window.__demo = ' + JSON.stringify(demoG));                 // the stub wallet flips its demo flag on any send
+  const wantG = SEL_('setGame(address)') + '0'.repeat(24) + NEWG.slice(2);
+  ok('a well-formed address is staged as a contract transaction and sent as setGame(address) to RareRoles - the selector, then the address in one 32-byte word',
+    tg === 'ok' && pk === 'tx' && sg.length === 1 && String(sg[0].to).toLowerCase() === REGISTRY.toLowerCase() && String(sg[0].data).toLowerCase() === wantG,
+    JSON.stringify({ tg, pk, sent: sg, want: wantG }));
+  await ev('window.__runningAt = null');
   await ev('window.__running = null'); await ev('deployerPage.readRunning()'); await sleep(300);
 
   ok('nothing 404d and nothing was logged as an error, over the page and the three it probes', watch.clean(), watch.why());

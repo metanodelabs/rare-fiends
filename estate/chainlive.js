@@ -87,7 +87,9 @@
     return { pool, cut, played: n, perFight: way(n), batched: way(Math.ceil(a.days * 24 * 60 / a.every)), ask, record };
   }
 
-  root.ChainLive = { read, era, RPC, DICE, PROVIDER, CALLBACK_GAS, TX_BASE, CUT, LOCAL, BRIDGE_CONFIG };
+  // `rpc` is exported so a page that reads a contract back (the bridge, after a mint) asks the same RPC list
+  // the same way, rather than carrying a second loop that could point somewhere else.
+  root.ChainLive = { read, era, rpc, RPC, DICE, PROVIDER, CALLBACK_GAS, TX_BASE, CUT, LOCAL, BRIDGE_CONFIG };
   // Every page that loads this file says so on screen when it is on the fork, in the bridge's style. A page that
   // already carries its own badge (#localfork) keeps it; any other gets one pinned to the top-left corner.
   if (LOCAL && typeof document !== 'undefined') {

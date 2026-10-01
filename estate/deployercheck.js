@@ -74,7 +74,11 @@ const MARKET = '0x00000000000000000000000000000000000000ae';     // where the st
 // RareMarket's two getters, answered by SELECTOR - derived from the signature, not typed - with the
 // decided values in basis points: the fee 1.5% (150) and its ceiling 10% (1000, ruling 1).
 const SEL_ = (sig) => CH_.hex(CH_.keccak256(new TextEncoder().encode(sig))).slice(0, 10);
-const MARKET_ANSWERS = { [SEL_('feeBps()')]: 150, [SEL_('maxFeeBps()')]: 1000 };
+const MARKET_ANSWERS = { [SEL_('feeBps()')]: 150, [SEL_('maxFeeBps()')]: 1000,
+  // RareGame's getters, the decided values: 168 h, 24 h, 1 h in seconds; 2 players; 5% / 5% / 10% in bps; 3 places
+  [SEL_('defaultLength()')]: 604800, [SEL_('joinWindow()')]: 86400, [SEL_('startDelay()')]: 3600, [SEL_('minPlayers()')]: 2,
+  [SEL_('defaultCutBps()')]: 500, [SEL_('MIN_CUT_BPS()')]: 500, [SEL_('MAX_CUT_BPS()')]: 1000, [SEL_('defaultPlaces()')]: 3 };
+const GAME = '0x00000000000000000000000000000000000000af';       // where the stub RareGame answers
 // Hoisted so the crash path below can clean up too: it used to exit(1) without touching the profile,
 // which is the one path that leaks even when the happy path is perfect.
 let PROF = null, CH = null;
@@ -92,7 +96,7 @@ let PROF = null, CH = null;
   const done = async (code) => { const r = await require('./pagewatch.js').shutdown(ch, prof);
     console.log('      profile ' + (r.removed ? 'removed' : 'NOT REMOVED') + ': ' + prof); process.exit(code); };
   let send, sock;
-  for (let i = 0; i < 40 && !send; i++) { await sleep(250); try {
+  for (let i = 0; i < 160 && !send; i++) { await sleep(250); try {
     const t = (await (await fetch(`http://127.0.0.1:${PORT}/json`)).json()).find((x) => x.type === 'page');
     const ws = new WebSocket(t.webSocketDebuggerUrl); await new Promise((ok, no) => { ws.onopen = ok; ws.onerror = no; });
     let id = 0; const m = new Map(); ws.onmessage = (e) => { const o = JSON.parse(e.data); if (o.id && m.has(o.id)) { m.get(o.id)(o); m.delete(o.id); } };
@@ -130,7 +134,7 @@ let PROF = null, CH = null;
     if (!window.__realFetch) window.__realFetch = window.fetch.bind(window);
     // the stub chain's one piece of state, so a transaction has a visible effect to read back
     if (window.__demo === undefined) window.__demo = ${o.demoOn ? 'true' : 'false'};
-    const cfg = ${JSON.stringify(o.registry ? { chainId: 4663, shadowFriends: null, attestor: null, rareRoles: o.registry, rareMarket: MARKET }
+    const cfg = ${JSON.stringify(o.registry ? { chainId: 4663, shadowFriends: null, attestor: null, rareRoles: o.registry, rareMarket: MARKET, rareGame: GAME }
                                             : { chainId: 4663, shadowFriends: null, attestor: null })};
     // THE CHAIN, ANSWERED HERE. The page reads contract state with a JSON-RPC eth_call over
     // ChainLive.RPC - not through the wallet - so this is where a chain has to be stood in for.
@@ -144,7 +148,7 @@ let PROF = null, CH = null;
         let body = {}; try { body = JSON.parse((i && i.body) || '{}'); } catch (e) {}
         window.__rpc.push(body);                          // every call, so "none was made" is checkable
         const MA = ${JSON.stringify(MARKET_ANSWERS)}, cd = String(((body.params || [])[0] || {}).data || '').slice(0, 10).toLowerCase();
-        if (body.method === 'eth_call' && MA[cd] !== undefined)           // RareMarket.feeBps() / maxFeeBps()
+        if (body.method === 'eth_call' && MA[cd] !== undefined)           // RareMarket's two getters, RareGame's eight
           return Promise.resolve({ ok: true, json: () => Promise.resolve({ jsonrpc: '2.0', id: 1,
             result: '0x' + MA[cd].toString(16).padStart(64, '0') }) });
         return Promise.resolve({ ok: true, json: () => Promise.resolve({ jsonrpc: '2.0', id: 1,
@@ -328,11 +332,22 @@ let PROF = null, CH = null;
   let c1 = await card('Demo mode');
   ok('the one number a contract holds says NO CONTRACT DEPLOYED, and names the call and the missing address',
     /THE CHAIN: NO CONTRACT DEPLOYED/.test(c1) && /RareRoles\.demoMode\(\)/.test(c1) && /bridge-config\.json records no rareRoles address/.test(c1), c1.slice(0, 320));
-  let c2 = await card('The cut');
+  // the example is READ off the census - the first chain-home row no contract has a getter for - not typed
+  const NCY = CEN.chainHome.find((k) => !CEN.read.includes(k));
+  let c2 = NCY ? await card(JSON.parse(await ev('JSON.stringify(deployerPage.rows.find(r=>r.id===' + JSON.stringify(NCY) + ').k)')))
+    : 'no chain-home row lacks a getter, so there is no NO CONTRACT YET card to read';
   ok('a chain-home number that no contract holds says NO CONTRACT YET, which is a different sentence',
     /THE CHAIN: NO CONTRACT YET/.test(c2) && /nothing in estate\/contracts holds it/.test(c2), c2.slice(0, 320));
-  ok("and where the game does hold a copy, the card calls it the game's own copy AND SAYS IT IS NOT THE CHAIN",
-    /THE GAME'S OWN COPY, WHICH IS NOT THE CHAIN/.test(await card('Crystals a player starts with')), (await card('Crystals a player starts with')).slice(0, 220));
+  // Which row is the example is READ, not typed. It was 'Crystals a player starts with' until M3 moved
+  // base.* to the server home (schema.json at f3e2706), and the typed name then asserted a chain line on
+  // a row whose home is no longer the chain. Every chain-home row the game also holds is held to it.
+  const ownCopy = JSON.parse(await ev(`JSON.stringify(deployerPage.rows.filter(r=>deployerPage.home(r).h==='chain'
+    && deployerPage.readback(r).got!==null && deployerPage.readback(r).got!==undefined).map(r=>r.k))`));
+  const ownCards = []; for (const k of ownCopy) ownCards.push([k, await card(k)]);
+  ok("and where the game does hold a copy of a chain-home number, the card calls it the game's own copy AND SAYS IT IS NOT THE CHAIN (" + ownCopy.length + ' such cards)',
+    ownCopy.length > 0 && ownCards.every(([, c]) => /THE GAME'S OWN COPY, WHICH IS NOT THE CHAIN/.test(c)),
+    ownCopy.length ? JSON.stringify(ownCards.filter(([, c]) => !/THE GAME'S OWN COPY, WHICH IS NOT THE CHAIN/.test(c)).map(([k, c]) => k + ': ' + c.slice(0, 160)))
+      : 'no chain-home row has a game copy that reads - the assertion would be over an empty set');
   const rbs = await ev("document.getElementById('readback').textContent.replace(/\\s+/g,' ')");
   ok('the page states the number itself: 0 of ' + NROWS + ' verified against a contract, and 0 that can be signed',
     new RegExp('(^|[^0-9])0 of ' + NROWS + '([^0-9]|$)').test(rbs) && /VERIFIED AGAINST A CONTRACT/.test(rbs) && /CAN BE SIGNED TODAY/.test(rbs) &&
@@ -572,8 +587,19 @@ let PROF = null, CH = null;
 
   // ---- every number carries its home, and the homes come from the schema ---
   const homes = JSON.parse(await ev('JSON.stringify(deployerPage.rows.map(r=>deployerPage.home(r).h))'));
-  ok('every number on the page carries a home or says it has none (' + homes.length + ' numbers)',
-    homes.length > 50 && homes.every((h) => h === 'chain' || h === 'map' || h === 'client' || h === null), JSON.stringify(homes.slice(0, 10)));
+  // The list of homes is schema.json's own, not typed here: M3 item 5 added `server` as a fourth and a
+  // typed chain/map/client list went red on a schema that was right.
+  const SCHEMA_HOMES = Object.keys(JSON.parse(fs.readFileSync(path.join(__dirname, 'schema.json'), 'utf8')).homes);
+  ok('every number on the page carries one of the schema\'s homes (' + SCHEMA_HOMES.join(', ') + ') or says it has none (' + homes.length + ' numbers)',
+    homes.length > 50 && homes.every((h) => SCHEMA_HOMES.includes(h) || h === null),
+    JSON.stringify(homes.filter((h) => !SCHEMA_HOMES.includes(h) && h !== null)));
+  // AND THE CARD SAYS THE HOME IT HAS. A row whose schema home is real must not be tagged NO HOME, whose
+  // legend on this page reads "not in schema.json at all" - that would be the page lying about the schema.
+  const tagLies = JSON.parse(await ev(`JSON.stringify(deployerPage.rows.filter(r=>deployerPage.home(r).h).map(r=>{
+    const p=[...document.querySelectorAll('#out .p')].find(e=>e.querySelector('.k')&&e.querySelector('.k').textContent===r.k);
+    return p && p.querySelector('.tag.nohome') ? r.k+' (schema home: '+deployerPage.home(r).h+')' : null;}).filter(Boolean))`));
+  ok('and no card whose number HAS a home in the schema is tagged NO HOME ("not in schema.json at all")',
+    tagLies.length === 0, JSON.stringify(tagLies));
   ok('the homes are read out of schema.json and not typed into the page',
     (await ev('deployerPage.home({e:"game",f:"cutBps"}).h')) === 'chain' && (await ev('deployerPage.home({e:"map",f:"groves"}).h')) === 'map',
     JSON.stringify([await ev('deployerPage.home({e:"game",f:"cutBps"}).h'), await ev('deployerPage.home({e:"map",f:"groves"}).h')]));
@@ -628,6 +654,25 @@ let PROF = null, CH = null;
   ok('with a registry on record, every one of the ' + HELD.length + ' numbers a contract holds (' + HELD.join(', ') + ') is now verified against it, and the page counts ' + HELD.length + ' of ' + NROWS,
     HELD.length > 0 && sp.contract === HELD.length && sp.nodeploy === 0 &&
     new RegExp('(^|[^0-9])' + HELD.length + ' of ' + NROWS + '([^0-9]|$)').test(await ev("document.getElementById('readback').textContent")), JSON.stringify(sp));
+
+  // ---- M4: the rows M4 moved read their values back ----
+  // RareGame's eight getters, answered by the stub with the decided values, come back AGREEING with the page's
+  // decision (places has none, so it is held to the contract's 3 alone).
+  const GV = JSON.parse(await ev(`JSON.stringify(['length','joinWindow','startAfter','minPlayers','cut','cutFloor','cutCeiling','places'].map(id=>{
+    const r=deployerPage.rows.find(x=>x.id===id); return [id, deployerPage.chainback(r).t];}))`));
+  const GWANT = { length: 168, joinWindow: 24, startAfter: 1, minPlayers: 2, cut: 5, cutFloor: 5, cutCeiling: 10, places: 3 };
+  ok('every RareGame number reads back off the contract at its decided value, in the page\'s units (h, %, players)',
+    GV.every(([id, t]) => new RegExp('THE CONTRACT READS ' + GWANT[id] + '$').test(t) && (id === 'places' || /^THE CONTRACT READS/.test(t))), JSON.stringify(GV));
+  // amounts are hundredths in the game and whole on the page: the divisor is the game's crystalUnit
+  const EV = JSON.parse(await ev(`JSON.stringify(Object.fromEntries(['startPurse','treeWood','harvCost','siloCap','footprint','cellNeeds'].map(id=>[id, deployerPage.readback(deployerPage.rows.find(x=>x.id===id)).got])))`));
+  ok('the economy reads in whole units, not hundredths: 240 crystals, 3 logs a tree, a harvester 20, silos 300 / 900 / 3000',
+    EV.startPurse === 240 && EV.treeWood === 3 && EV.harvCost === 20 && EV.siloCap === '300, 900, 3000', JSON.stringify(EV));
+  ok('footprint and the cell\'s operator table are read, not blank', /keep 1/.test(EV.footprint) && EV.cellNeeds === 'none at any level', JSON.stringify(EV));
+  const SW = JSON.parse(await ev(`JSON.stringify(['tradeCrystals','tradeItems','tradeBuildings','tradeBase','multiPartner','whitelistOpen'].map(id=>[id, !!deployerPage.val[id]]))`));
+  ok('ruling 29: the four trade switches start ON; multiple partnerships and the open whitelist start OFF',
+    JSON.stringify(SW) === JSON.stringify([['tradeCrystals',true],['tradeItems',true],['tradeBuildings',true],['tradeBase',true],['multiPartner',false],['whitelistOpen',false]]), JSON.stringify(SW));
+  const PROP = JSON.parse(await ev(`JSON.stringify([...document.querySelectorAll('#out [data-sweep]')].map(e=>e.textContent))`));
+  ok('every sweep proposal on the page says PROPOSED, NOT DECIDED (' + PROP.length + ' of them)', PROP.length >= 15 && PROP.every((t) => /^PROPOSED, NOT DECIDED \(SWEEP ROW \d+\)/.test(t)), JSON.stringify(PROP.slice(0, 3)));
 
   // A READ IS NOT A VALUE. The census above counts a row as verified once its eth_call came back,
   // so a getter answered with the wrong word still counts. The two RareMarket getters are held to
@@ -695,6 +740,90 @@ let PROF = null, CH = null;
   }
   await send('Emulation.clearDeviceMetricsOverride'); await sleep(300);
   await click('#nocfm'); await sleep(200);
+
+  // =============================================================================================
+  // M4 ITEMS 3, 7 AND 9: the map's numbers are READ out of the generator the game loaded, the
+  // switches are read by one rule, and the generator's version is ENFORCED against what it draws.
+  // Each assertion here is judged on its own line, so the pagewatch line below - red on main for a
+  // known reason of its own - does not decide any of them.
+  // =============================================================================================
+  // The page paints on events, not on a clock, so after the probe is reloaded the cards are stale
+  // until something repaints them. LOCK IT AGAIN and the confirmation are two presses a deployer
+  // makes, and each one repaints the whole sheet.
+  const repaint = async () => { await click('#relock'); await sleep(200); await click('#attest'); await sleep(300); };
+  const mapCard = async (k) => JSON.parse(await ev(`JSON.stringify((()=>{const p=[...document.querySelectorAll('#out .p')].find(e=>e.querySelector('.k')&&e.querySelector('.k').textContent===${JSON.stringify(k)});
+    if(!p) return null; const rb=[...p.querySelectorAll('.rb')];
+    return {game:rb.filter(e=>!e.dataset.sweep&&!e.dataset.verify&&!e.dataset.pv).map(e=>e.textContent),
+      sweep:rb.filter(e=>e.dataset.sweep).map(e=>e.textContent), verify:(p.querySelector('[data-verify]')||{}).textContent||null,
+      all:p.textContent.replace(/\\s+/g,' ')};})())`));
+  const probeWin = 'document.getElementById("pBase").contentWindow';
+  // reload the probe the deployer page reads, and wait for the NEW window's game and generator
+  const reloadProbe = async (landShare) => {
+    await ev(probeWin + '.location.reload()'); await sleep(400);
+    for (let i = 0; i < 160; i++) {
+      if (await ev(`(()=>{try{const w=${probeWin}; return !!(w.base&&w.base.ECON&&w.MapGen&&w.MapGen.MAP_DEFAULT.landShare===${landShare});}catch(e){return false;}})()`)) break;
+      await sleep(250);
+    }
+    await repaint();
+  };
+  await repaint();
+
+  // (b) item 3: the land share, the players and the tiles per player are read, and read at the numbers
+  // the sweep proposes and the generator holds. "AGREES" on these cards compares the game with the
+  // page's field, and a READ row's field starts at what the game reads - so AGREES alone would agree
+  // with anything. The number is what is asserted, and the sweep's own THE GAME READS THE SAME with it.
+  for (const [k, n] of [['How much of the square is land', 52], ['Players on one map', 100], ['Tiles per player', 170]]) {
+    const c = await mapCard(k);
+    ok('M4 item 3: "' + k + '" reads AGREES — THE GAME READS ' + n + ', the sweep line says the game reads the same, and nothing on it says NOT READABLE',
+      !!c && c.game.length === 1 && c.game[0] === 'AGREES — THE GAME READS ' + n && c.sweep.length === 1 && /THE GAME READS THE SAME$/.test(c.sweep[0]) &&
+      !/NOT READABLE/.test(c.all), c ? JSON.stringify({ game: c.game, sweep: c.sweep }) : 'no such card');
+  }
+
+  // (a) item 9: the version card says the generator draws what is recorded for its version ...
+  let vc = await mapCard('Generator version');
+  ok('M4 item 9: the Generator version card AGREES — VERSION ' + (await ev(probeWin + '.MapGen.VERSION')) + ' draws seed 1 as recorded',
+    !!vc && /^AGREES — VERSION \d+ DRAWS SEED \d+ AS RECORDED/.test(vc.verify || '') && !/NOT READABLE/.test(vc.all), vc ? String(vc.verify) : 'no such card');
+  // ... and a generation parameter changed WITHOUT a version bump is caught. The change is made in the
+  // PROBE's window, before mapgen.js hands its table over, so the generator the game loads really
+  // draws with it: MapGen.MAP_DEFAULT.landShare = 0.5 instead of 0.52, VERSION untouched.
+  await send('Page.enable');
+  const inj = await send('Page.addScriptToEvaluateOnNewDocument', { source: `(function(){
+    if (window.top === window || !/\\/base\\.html$/.test(location.pathname)) return;
+    let mg; Object.defineProperty(window, 'MapGen', { configurable: true, get() { return mg; },
+      set(v) { if (v && v.MAP_DEFAULT) v.MAP_DEFAULT.landShare = 0.5; mg = v; } }); })();` });
+  await reloadProbe(0.5);
+  vc = await mapCard('Generator version');
+  const landNow = await ev('(()=>{try{return ' + probeWin + '.MapGen.MAP_DEFAULT.landShare;}catch(e){return "no game";}})()');
+  ok('M4 item 9: with MapGen.MAP_DEFAULT.landShare = 0.5 in the probe and VERSION unchanged, the card says DISAGREES — VERSION ... NOW DRAWS A DIFFERENT MAP',
+    landNow === 0.5 && !!vc && /^DISAGREES — VERSION \d+ NOW DRAWS A DIFFERENT MAP FROM SEED/.test(vc.verify || ''),
+    'landShare in the probe ' + JSON.stringify(landNow) + '; card: ' + (vc ? String(vc.verify) : 'no such card'));
+  const ls = await mapCard('How much of the square is land');
+  ok('M4 item 3: and the land share card follows the generator to 50, with its sweep line saying THEY DIFFER',
+    !!ls && ls.game[0] === 'AGREES — THE GAME READS 50' && /THE GAME READS 50 % - THEY DIFFER$/.test(ls.sweep[0] || ''), ls ? JSON.stringify({ game: ls.game, sweep: ls.sweep }) : 'no such card');
+  // put it back: the generator as it ships, and the card agrees again
+  await send('Page.removeScriptToEvaluateOnNewDocument', { identifier: inj.identifier });
+  await reloadProbe(0.52);
+  vc = await mapCard('Generator version');
+  ok('M4 item 9: put back to 0.52, the same card AGREES again', !!vc && /^AGREES — VERSION \d+ DRAWS SEED \d+ AS RECORDED/.test(vc.verify || ''),
+    vc ? String(vc.verify) : 'no such card');
+
+  // (c) and (d): the game opened at an address of the check's own, in a frame of this page so the
+  // watcher sees it too. Read once the game's handle is up, then the frame is removed.
+  const openGame = async (src, expr) => ev(`new Promise((res) => { const f = document.createElement('iframe');
+    f.style.cssText = 'position:absolute;left:-9999px;top:0;width:900px;height:700px'; f.src = ${JSON.stringify(src)}; document.body.appendChild(f);
+    let n = 0; (function go() { let w = null; try { w = f.contentWindow; } catch (e) {}
+      if (w && w.base && w.base.ECON) { let r; try { r = (${expr})(w); } catch (e) { r = 'THREW: ' + e.message; } f.remove(); return res(r); }
+      if (++n > 240) { f.remove(); return res('the game did not answer in 60 s at ' + ${JSON.stringify(src)}); } setTimeout(go, 250); })(); })`);
+  const census = '(w) => JSON.stringify({ started: w.base.ECON.startBuildings.length, standing: w.base.buildings.length })';
+  const f0 = await openGame('base.html?fresh=0', census), f1 = await openGame('base.html?fresh=1', census);
+  const F0 = /^\{/.test(f0) ? JSON.parse(f0) : null, F1 = /^\{/.test(f1) ? JSON.parse(f1) : null;
+  ok('M4 item 7: base.html?fresh=0 is NOT an empty base - it starts with buildings (a switch is on only when its address says exactly 1)',
+    !!F0 && F0.started > 0 && F0.standing > 0, 'fresh=0: ' + f0);
+  ok('M4 item 7: base.html?fresh=1 starts with 0 buildings', !!F1 && F1.started === 0 && F1.standing === 0, 'fresh=1: ' + f1);
+  const wg = await openGame('base.html?world=1', '(w) => JSON.stringify({ gen: w.base.WORLDGEN ? w.base.WORLDGEN.M.players : null, def: w.MapGen.MAP_DEFAULT.players })');
+  const WG = /^\{/.test(wg) ? JSON.parse(wg) : null;
+  ok('M12 item 2: base.html?world=1 generates its map with MapGen.MAP_DEFAULT.players (' + (WG ? WG.def : '?') + '), not a count of its own',
+    !!WG && typeof WG.gen === 'number' && WG.gen === WG.def, 'world=1: ' + wg);
 
   ok('nothing 404d and nothing was logged as an error, over the page and the two it probes', watch.clean(), watch.why());
   console.log(bad ? '\n' + bad + ' step(s) failed' : '\nthe deployer page refuses, derives and reads back');

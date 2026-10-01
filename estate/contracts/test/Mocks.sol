@@ -108,6 +108,14 @@ contract RollProbe {
     }
 }
 
+/// @dev Test only: a dice that always rolls the same number, so a test can tell WHICH dice a duel settled
+/// with - the one it was challenged under, or the one `setDice` points at now (M20 item 2).
+contract FixedDice {
+    uint256 public immutable fixedRoll;
+    constructor(uint256 r) { fixedRoll = r; }
+    function roll(bytes32, address, uint256, uint256, uint256) external view returns (uint256) { return fixedRoll; }
+}
+
 // =================================================================================================
 // M15 items 5 and 6: the marketplace and the demolition refund
 // =================================================================================================

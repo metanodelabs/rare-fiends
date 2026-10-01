@@ -290,7 +290,7 @@ canvas.base { width: 100%; display: block; background: #000; border: 1px solid v
       '</ul>'));
 
     out.push(sec('dice', '07', 'PAYING FOR THE DICE', 'Every fight and challenge needs a fair random number, and Pyth Entropy charges for each one it sends. Two ways to buy them, for one era, at today\'s prices read from the chain.',
-      '<div id="diceStatus" class="src">READING THE CHAIN…</div><div id="dice"></div>'));
+      '<div id="diceStatus" class="src">READING THE CHAIN…</div><div id="diceTable"></div>'));   // not id="dice": that is the section's own id, and $('dice') found the section and wrote over its heading
 
     $('out').innerHTML = out.join('');
     $('toc').innerHTML = [['spots', 'WHERE A FRIEND STANDS'], ['numbers', 'THE NUMBERS'], ['rules', 'THE RULES'], ['fight', 'YOUR BASE, ATTACKED'], ['gens', 'GEN 1 TO 6'], ['chain', 'ON CHAIN'], ['dice', 'PAYING FOR THE DICE']]
@@ -519,6 +519,30 @@ canvas.base { width: 100%; display: block; background: #000; border: 1px solid v
   // the assumptions are ours, not the chain's: an era of 100 players at a $10 entry, each fighting 20 times and
   // challenging 5 times over 7 days (see the COSTS page to change them)
   const ERA = { players: 100, entryUsd: 10, fights: 20, challenges: 5, days: 7, every: 60 };
+  // WHY A READ FAILED, NAMED RATHER THAN GUESSED. ChainLive.read() reports only which reads failed. Two kinds:
+  // the chain's (fee, gasPrice, request gas - the RPC) and the site's own files (prices and ethUsd = stats.json,
+  // gas = gas.json). Only the second is about where the page was opened from. A chain failure is asked of the RPC
+  // once more: no answer at all is an unreachable chain; an answer that cannot read the Dice contract's state
+  // is, on ?rpc=local, a STALE FORK - anvil forked a block its upstream no longer serves ("historical state
+  // ... is not available"). The same words are in costs.html; neither page may edit chainlive.js.
+  async function whyNotRead(errors) {
+    const CHAIN = ['fee', 'gasPrice', 'request gas'], chainBad = errors.filter((k) => CHAIN.includes(k)), fileBad = errors.filter((k) => !CHAIN.includes(k));
+    const out = [];
+    if (chainBad.length) {
+      const where = ChainLive.LOCAL ? 'THE LOCAL CHAIN AT ' + ChainLive.RPC[0].replace(/^https?:\/\//, '') : 'THE ROBINHOOD CHAIN RPC';
+      let cause;
+      try {
+        await ChainLive.rpc('eth_chainId', []);
+        try { await ChainLive.rpc('eth_getCode', [ChainLive.DICE, 'latest']); cause = where + ' ANSWERED BUT REFUSED THE READ'; }
+        catch (e) { cause = /historical state .* is not available|missing trie node|header not found/i.test(e.message)
+          ? where + (ChainLive.LOCAL ? ' IS A STALE FORK: ITS UPSTREAM NO LONGER SERVES THE BLOCK IT FORKED' : ' NO LONGER SERVES THAT STATE')
+          : where + ' ANSWERED BUT COULD NOT READ THE DICE CONTRACT (' + e.message.slice(0, 120) + ')'; }
+      } catch (_) { cause = where + ' DID NOT ANSWER'; }
+      out.push(cause + ' - FAILED: ' + chainBad.join(', ') + (ChainLive.LOCAL ? '. RESTART IT (deploy/local-chain.sh reset) OR OPEN WITH ?rpc=main' : ''));
+    }
+    if (fileBad.length) out.push("THE SITE'S OWN FILES DID NOT LOAD (" + [...new Set(fileBad.map((k) => k === 'prices' || k === 'ethUsd' ? 'stats.json' : k === 'gas' ? 'gas.json' : k))].join(', ') + '). OPEN THIS PAGE FROM THE SITE');
+    return out.join('. ') + '.';
+  }
   function dice(L) {
     const usd = (v) => (v < 0 ? '−' : '') + '$' + Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: Math.abs(v) < 1 ? 3 : 2, maximumFractionDigits: Math.abs(v) < 1 ? 3 : 2 }),
       num = (v) => Math.round(v).toLocaleString('en-US');
@@ -536,13 +560,13 @@ canvas.base { width: 100%; display: block; background: #000; border: 1px solid v
         '<span class="src">Both writes are in-memory floors, not a real node\'s figures.</span> ' +
         '<span class="src">Measured ' + (when ? when.toLocaleString() : 'at a time gas.json does not record') + ', solc ' + (L.gas.solc || '?') + '.</span> ';
     }
-    if (L.fee == null || L.gasPrice == null || !L.ethUsd || !L.gas) { $('feeLine').textContent = 'could not be read just now'; $('diceStatus').textContent = 'COULD NOT READ: ' + L.errors.join(', ') + '. OPEN THIS PAGE FROM THE SITE.'; return; }
+    if (L.fee == null || L.gasPrice == null || !L.ethUsd || !L.gas) { $('feeLine').textContent = 'could not be read just now'; $('diceStatus').textContent = 'COULD NOT READ…'; whyNotRead(L.errors).then((why) => { $('diceStatus').textContent = 'COULD NOT READ. ' + why; }); return; }
     $('feeLine').innerHTML = L.fee + ' ETH a request, ' + usd(L.fee * L.ethUsd) + ' at today\'s price, read from the Dice contract just now';
     $('diceStatus').innerHTML = 'READ FROM ROBINHOOD CHAIN · ' + L.at.toLocaleString();
     const E = ChainLive.era(L, ERA), a = E.perFight, b = E.batched, q = ChainLive.era(L, Object.assign({}, ERA, { every: 15 })).batched;
     const LIVE = '<span class="tag game">LIVE</span>', MEAS = '<span class="tag game">MEASURED</span>', EST = '<span class="tag ph">ESTIMATE</span>';
     const row = (k, x, y, tag, cls) => '<tr' + (cls ? ' class="' + cls + '"' : '') + '><td>' + k + (tag ? ' ' + tag : '') + '</td><td>' + x + '</td><td>' + y + '</td></tr>';
-    $('dice').innerHTML =
+    $('diceTable').innerHTML =
       '<p class="src">The era: ' + ERA.players + ' players, a $' + ERA.entryUsd + ' entry each (a ' + usd(E.pool) + ' pool, so the 5% is <b>' + usd(E.cut) + '</b>), ' + ERA.fights + ' fights and ' + ERA.challenges +
         ' challenges each (' + num(E.played) + ' in all), over ' + ERA.days + ' days ' + EST + '. Today: a random number ' + L.fee + ' ETH ' + LIVE + ', gas ' + L.gasPrice.toFixed(4) + ' gwei ' + LIVE + ', ETH ' + usd(L.ethUsd) + ' ' + LIVE + '.</p>' +
       '<div class="tw"><table><thead><tr><th></th><th>Pay per fight<br>one random number each</th><th>One big buy per hour<br>shared by every fight in that hour</th></tr></thead><tbody>' +

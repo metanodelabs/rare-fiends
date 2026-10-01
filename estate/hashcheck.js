@@ -1,15 +1,16 @@
 // The fight's hash (combat.js fightHash, BINDING.md §55): the one word a fight publishes on chain.
-// No browser - combat.js and chance.js load in node. The rules are read OUT OF index.html the way
-// contracts/paritycheck.js reads them, so the hash is taken over the game's own tables.
+// No browser - combat.js and chance.js load in node. The rules are read OUT OF values.js - the one
+// home the tables moved to in M3 item 1 - the way contracts/paritycheck.js reads them, so the hash
+// is taken over the game's own tables.
 // Each assertion is a pair: something that must hash equal, and a one-field change that must not.
 const fs = require('fs'), path = require('path');
 const Combat = require('./combat.js'), Chance = require('./chance.js');
 let bad = 0; const ok = (n, c, v) => { console.log((c ? '  ok  ' : 'FAIL  ') + n + (c ? '' : '   -> ' + v)); if (!c) bad++; };
 
-const src = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
+const src = fs.readFileSync(path.join(__dirname, 'values.js'), 'utf8');
 function readConst(name) {           // same reader as paritycheck: brackets counted, strings and comments skipped
   const head = 'const ' + name + ' = ', at = src.indexOf(head);
-  if (at < 0) throw new Error('index.html no longer declares ' + name);
+  if (at < 0) throw new Error('values.js no longer declares ' + name);
   const start = at + head.length; let depth = 0, q = null;
   for (let i = start; i < src.length; i++) {
     const c = src[i], d = src[i + 1];

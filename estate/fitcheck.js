@@ -9,7 +9,7 @@ const SIZES = [[1128, 920], [1280, 720], [1366, 768], [1440, 900], [1024, 640], 
   const prof=fs.mkdtempSync(path.join(os.tmpdir(),'fit-'));
   require("./pagewatch.js").guard(prof);            // close it even if this check throws, or is killed
   const ch=spawn(CHROME,['--headless=new','--hide-scrollbars','--remote-debugging-port='+PORT,'--user-data-dir='+prof,'--window-size=1440,1000','about:blank'],{stdio:'ignore'});
-  let send, sock; for(let i=0;i<40&&!send;i++){await sleep(250);try{const t=(await(await fetch(`http://127.0.0.1:${PORT}/json`)).json()).find(x=>x.type==='page');
+  let send, sock; for(let i=0;i<160&&!send;i++){await sleep(250);try{const t=(await(await fetch(`http://127.0.0.1:${PORT}/json`)).json()).find(x=>x.type==='page');
     const ws=new WebSocket(t.webSocketDebuggerUrl);await new Promise((ok,no)=>{ws.onopen=ok;ws.onerror=no;});let id=0;const m=new Map();ws.onmessage=e=>{const o=JSON.parse(e.data);if(o.id&&m.has(o.id)){m.get(o.id)(o);m.delete(o.id);}};
     send=(me,pa={})=>new Promise((ok,no)=>{const n=++id;m.set(n,o=>o.error?no(new Error(o.error.message)):ok(o.result));ws.send(JSON.stringify({id:n,method:me,params:pa}));});sock=ws;}catch(_){send=null;}}
   const ev=async e=>{const r=await send('Runtime.evaluate',{expression:e,returnByValue:true,awaitPromise:true}); return r.exceptionDetails?'THREW: '+r.exceptionDetails.text:r.result.value;};

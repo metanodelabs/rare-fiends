@@ -41,7 +41,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     '--remote-debugging-port=' + PORT, '--user-data-dir=' + prof, '--window-size=1100,800',
     'http://localhost:8765/base.html'], { stdio: 'ignore' });
   let send, sock;
-  for (let i = 0; i < 40 && !send; i++) {
+  for (let i = 0; i < 160 && !send; i++) {
     await sleep(250);
     try {
       const t = (await (await fetch(`http://127.0.0.1:${PORT}/json`)).json()).find((x) => x.type === 'page');

@@ -29,9 +29,12 @@
 // `combat.js`'s and are proved in `contracts/paritycheck.js`, not here - this file proves the estate
 // lets you man towers and counts them, not that the counting means anything in a battle. Nothing
 // about upgrading a tower (tiers), nothing about a tower being destroyed, and nothing about more than
-// two towers. And the defence arithmetic is checked against the game's OWN tables
-// (`base.ECON.towerDef`, `wallSlot`, `wallCap`), so if a table is wrong the HUD and this check are
-// wrong together - what is proved is that the HUD says what the game thinks, not that the game is right.
+// two towers. And the WALL counter is checked against the game's OWN table (`base.ECON.wallCap`, the
+// wall row's level-1 `capacity`), so if that table is wrong the HUD and this check are wrong together -
+// what is proved is that the HUD says what the game thinks, not that the game is right. It multiplies the
+// LEVEL-1 cap by the number of walls, so it holds only while every wall is level 1, which is true here;
+// a wall at level 2 or 3 and the per-level denominator (Q23) are `registrycheck`'s. towerDef and wallSlot
+// were removed from the game in M8 item 9 and nothing here reads them.
 const { spawn } = require('child_process'); const fs = require('fs'), os = require('os'), path = require('path');
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const PORT = 9557;
@@ -43,9 +46,13 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   require('./pagewatch.js').guard(prof);       // close it even if this check throws, or is killed
   const ch = spawn(CHROME, ['--headless=new', '--enable-unsafe-swiftshader', '--hide-scrollbars',
     '--remote-debugging-port=' + PORT, '--user-data-dir=' + prof, '--window-size=1100,800',
-    'http://localhost:8765/base.html'], { stdio: 'ignore' });
+    // ?record=0: SAVING OFF. The wood and crystals for the second tower are a FIXTURE poured into the page's
+    // purse below; since M6/M8 the record keeps its own ledger and rightly refuses a build the ledger cannot
+    // pay ("cannot pay 3000 wood: holds 0"), which pagewatch then reports as an error. The record is
+    // recordcheck's and buildreloadcheck's; here it is switched off so the fixture stays a fixture.
+    'http://localhost:8765/base.html?record=0'], { stdio: 'ignore' });
   let send, sock;
-  for (let i = 0; i < 40 && !send; i++) {
+  for (let i = 0; i < 160 && !send; i++) {
     await sleep(250);
     try {
       const t = (await (await fetch(`http://127.0.0.1:${PORT}/json`)).json()).find((x) => x.type === 'page');
@@ -191,7 +198,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
         const i=c.findIndex((b,j)=>/^G/.test(b.innerText)&&!/RENTED/.test(b.innerText)&&base.actors[j].kind==='friend'&&!base.buildings.some(x=>x.occupant===base.actors[j]));
         c[i].click(); return base.actors[i].name;})()`);
       await sleep(250);
-      const defW = await def(), crewW = await crew(), slot = await ev('base.ECON.wallSlot');
+      const defW = await def(), crewW = await crew();
       await tapWorld(wx, wy - 0.42, 18, 0);
       ok('a tap on a wall section puts ' + body + ' on the wall',
         await ev(`base.buildings.find(b=>b.crew&&Math.abs(b.x-(${wx}))<0.01&&Math.abs(b.y-(${wy}))<0.01).crew.length`) === 1,

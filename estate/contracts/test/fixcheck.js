@@ -35,6 +35,14 @@
 //      cannot move a new owner's token, no function anywhere names a currency, and every one of the five
 //      boring marketplace races is refused with its own error.
 //
+// And M20 items 11 and 2, part 15: the duel's six numbers as stored state behind guarded setters that a
+// running game refuses (RareRoles.setGame points the guard at RareGame), each duel sealing the numbers it was
+// struck under, and the dice as an address root can re-point - proved by re-pointing it at a loaded one.
+//
+// And M21 item 5, part 17: RareDoopieGate, the on-chain consumer of `traitOf` - the two constants read out of
+// the .sol and held against doopie-trait.mjs, a 1/1 true, an ordinary Doopie false, an unknown or revoked id
+// false without a revert, and no setter to guard.
+//
 // Run: cd estate/contracts && node test/fixcheck.js
 const fs = require('fs'), path = require('path');
 const solc = require('solc');
@@ -94,7 +102,13 @@ function compile() {
     // M15 item 11's chain half and M16 - soft for the same reason again
     rules: soft('RareRules.sol', 'RareRules'), rpart: soft('RarePartners.sol', 'RarePartners'),
     // M18's chain half - soft for the same reason again
-    gameC: soft('RareGame.sol', 'RareGame') };
+    gameC: soft('RareGame.sol', 'RareGame'),
+    // M20 item 2 (part 15): a dice that always rolls the same number, to tell which dice a duel settled with
+    fixedDice: soft('test/Mocks.sol', 'FixedDice'),
+    // M21 item 5 (part 17): the on-chain consumer of traitOf - soft for the same reason again
+    gate: soft('RareDoopieGate.sol', 'RareDoopieGate'),
+    // M20 item 10 (part 18): the sealed orders' commit and reveal - soft for the same reason again
+    orders: soft('RareOrders.sol', 'RareOrders') };
 }
 
 // ---------- a tiny chain ----------
@@ -793,16 +807,16 @@ const errorNames = (abi) => Object.fromEntries(abi.filter((e) => e.type === 'err
   // against whatever the game says today. An assertion that held a copy of the table would go stale the
   // moment M8 rewrites it and would prove nothing about the game.
   console.log('\n  8. demolishing for half: the whole ladder, in hundredths, and never a unit more');
+  // M3 item 1 moved the ladder out of index.html into estate/values.js - the one home - as one row a
+  // kind (cost[] and wood[] per level, in hundredths). It is REQUIRED, not regex-parsed: the module
+  // loads in node and the row is read as the game reads it. PAGE is still read for the one assertion
+  // about the page's own behaviour (payment taken when a level starts).
   const PAGE = fs.readFileSync(path.join(ROOT, '../index.html'), 'utf8');
-  const woodM = PAGE.match(/const WOOD_COST = \{([^}]*)\}/);
-  const WOOD = {};
-  if (woodM) for (const m of woodM[1].matchAll(/(\w+)\s*:\s*(\d+)/g)) WOOD[m[1]] = Number(m[2]);
-  const CRYSTAL = {};
-  for (const m of PAGE.matchAll(/(\w+)\s*:\s*\{\s*tiers:\s*\[[^\]]*\],\s*cost:\s*\[([^\]]*)\]/g)) {
-    CRYSTAL[m[1]] = m[2].split(',').map((x) => Number(x.trim()));
-  }
+  const VALUES = require(path.join(ROOT, '../values.js'));
+  const WOOD = {}, CRYSTAL = {};
+  for (const [k, r] of Object.entries(VALUES.kinds)) { WOOD[k] = r.wood[0]; CRYSTAL[k] = r.cost.slice(); }
   const kinds = Object.keys(CRYSTAL);
-  ok('the cost ladder is read out of estate/index.html rather than copied here: ' + kinds.length
+  ok('the cost ladder is read out of estate/values.js rather than copied here: ' + kinds.length
     + ' buildings, ' + Object.keys(WOOD).length + ' with a wood cost',
     kinds.length >= 8 && Object.keys(WOOD).length >= 8 && kinds.every((k) => CRYSTAL[k].every((n) => Number.isInteger(n))),
     'KIND/WOOD_COST did not parse: ' + JSON.stringify(CRYSTAL).slice(0, 200));
@@ -885,9 +899,13 @@ const errorNames = (abi) => Object.fromEntries(abi.filter((e) => e.type === 'err
   ok('NEGATIVE: a level the ladder has no rung for is refused (LevelBeyondLadder) - this is the read past the end of the array',
     fOver === 'LevelBeyondLadder', fOver);
   const fNone = await fTry('refundHundredths', [[], 1]);
-  ok('NEGATIVE: a building whose cost is not written down at all is refused (NoLadder) - and it is live, not defensive: '
-    + (CRYSTAL.capacitor ? 'the capacitor is in KIND' : 'the capacitor is in NEITHER table'),
-    fNone === 'NoLadder' && !CRYSTAL.capacitor && !WOOD.capacitor, fNone + ', capacitor in KIND: ' + !!CRYSTAL.capacitor);
+  // Until M8 this was LIVE: the capacitor had no cost in either table. M8 gave it a row and a ladder
+  // (values.js, a ninth kind), so the refusal is now defensive, and the label says which it is rather than
+  // asserting the capacitor still has no cost - that premise went false on purpose.
+  const costless = kinds.filter((k) => !CRYSTAL[k] || !CRYSTAL[k].length);
+  ok('NEGATIVE: a building whose cost is not written down at all is refused (NoLadder) - '
+    + (costless.length ? 'LIVE: ' + costless.join(', ') + ' has no ladder in values.js' : 'defensive today: every one of the ' + kinds.length + ' kinds in values.js has a ladder'),
+    fNone === 'NoLadder', fNone);
   // progress: there is no argument for it, and that IS the decision
   const refArgs = C.refund ? (C.refund.abi.find((f) => f.name === 'refundHundredths') || { inputs: [] }).inputs.map((i) => i.name) : [];
   ok('there is no progress or finished argument (' + refArgs.join(', ') + '), because index.html takes the payment when a level STARTS - line 2593 - so a half-built building has already been paid for in full',
@@ -925,7 +943,17 @@ const errorNames = (abi) => Object.fromEntries(abi.filter((e) => e.type === 'err
   // whole and a stand-in for a number the deployer has not set - deploying with it would mean the ceiling
   // protects nobody. A second market below is deployed with a real ceiling to prove the refusal.
   const MKT_FEE = 150, WHOLE = 10_000;
-  const mkt = C.market && gen && part && ROLES ? await net.deploy(TEAM, C.market, [rf.address, ROLES.address, part.address, WHOLE, MKT_FEE, FEES]) : null;
+  // Ruling 54 (part 20) added four constructor arguments: the shadow token, the 1/1 gate, the ceiling on a
+  // terminal's share of the fee and its starting share. The two numbers are READ OUT OF deploy.mjs, the one
+  // place they are written, so this file deploys what M20 would. Read the arity off the ABI so this file still
+  // runs against the market as it was (six) and reports part 20 as failures rather than crashing.
+  const mktArity = C.market ? C.market.abi.find((f) => f.type === 'constructor').inputs.length : 0;
+  const deploySrc = fs.readFileSync(path.join(ROOT, 'deploy.mjs'), 'utf8');
+  const nOf = (k) => { const m = deploySrc.match(new RegExp('\\b' + k + ':\\s*\\[(\\d+),')); return m ? +m[1] : null; };
+  const TERM = { max: nOf('maxTerminalShareBps'), share: nOf('terminalShareBps') };
+  const gate9 = C.gate && mktArity >= 10 ? await net.deploy(TEAM, C.gate, [shadow.address]) : null;
+  const mktArgs = (six) => (mktArity >= 10 ? six.concat([shadow.address, gate9.address, TERM.max, TERM.share]) : six);
+  const mkt = C.market && gen && part && ROLES ? await net.deploy(TEAM, C.market, mktArgs([rf.address, ROLES.address, part.address, WHOLE, MKT_FEE, FEES])) : null;
   const MKTA = mkt ? mkt.address : ethers.ZeroAddress;
   const MERR = C.market ? Object.assign({}, errorNames(C.market.abi), RERR) : {};
   const mTry = async (fn, args, from, value) => (mkt ? await tryCall(mkt, MERR, fn, args, from, value) : 'NO MARKET');
@@ -937,7 +965,7 @@ const errorNames = (abi) => Object.fromEntries(abi.filter((e) => e.type === 'err
     !!POW.FEE && !!POW.TRADE && POW.FEE !== POW.TRADE, 'powers: ' + POW.FEE + ' / ' + POW.TRADE);
   ok('the fee is 1.5% - DESIGN\'s decided starting figure - and it is a CONSTRUCTOR ARGUMENT, not a number in the bytecode',
     Number(await mRead('feeBps')) === MKT_FEE, String(await mRead('feeBps')));
-  const mkt2 = C.market && ROLES ? await net.deploy(TEAM, C.market, [rf.address, ROLES.address, ethers.ZeroAddress, MKT_FEE, MKT_FEE, FEES]) : null;
+  const mkt2 = C.market && ROLES ? await net.deploy(TEAM, C.market, mktArgs([rf.address, ROLES.address, ethers.ZeroAddress, MKT_FEE, MKT_FEE, FEES])) : null;
   ok('proved by a second deployment reading back a different ceiling from the same bytecode - and one deployed with NO partnership layer, which is where M16 stands',
     !!mkt2 && Number((await mkt2.call('maxFeeBps')).out[0]) === MKT_FEE && (await mkt2.call('partners')).out[0] === ethers.ZeroAddress,
     mkt2 ? 'ceiling ' + (await mkt2.call('maxFeeBps')).out[0] : 'no second market');
@@ -1228,6 +1256,45 @@ const errorNames = (abi) => Object.fromEntries(abi.filter((e) => e.type === 'err
     const dRoot = await rTry('setRoleChangeDelay', [3600], TEAM);
     ok('roleChangeDelay starts at 0, a stranger cannot set it (PowerNotHeld), root can, and it reads back',
       d0 === 0 && dStranger === 'PowerNotHeld' && dRoot === 'MOVED' && Number((await rBool('roleChangeDelay')).toString()) === 3600, JSON.stringify([d0, dStranger, dRoot]));
+    // THE READ (M20 item 4, M4 item 16): the delay used to be stored and read by nothing, so a grant landed at
+    // once whatever it held - right at zero and silently wrong at anything else. With it at 3600 a grant and a
+    // membership are PENDING for the hour and land on it; a revoke and a removal land at once; back at zero a
+    // grant lands at once and the log carries no `..Scheduled` line, so the decided v1 behaves as it did.
+    const PEND = '0xc00000000000000000000000000000000000000c';
+    await net.acct(PEND);
+    const tGrant = BigInt(net.at());
+    const gPend = R ? await R.call('grantPower', [RECORD_FIGHT, ROLE.GAMEMASTER, true], TEAM).catch(() => null) : null;   // SERVER is in GAMEMASTER since above
+    const pendEv = gPend ? gPend.events.map((e) => e.name) : [];
+    const gFrom = BigInt((await rBool('grantFrom', [RECORD_FIGHT, ROLE.GAMEMASTER])) || 0);
+    const pendHeld = await rBool('hasPower', [SERVER, RECORD_FIGHT]), pendRole = await rBool('roleHasPower', [RECORD_FIGHT, ROLE.GAMEMASTER]);
+    const pendWrite = await fTry('commitFight', [1, 4, H1], SERVER);
+    ok('DELAY 3600: root grants RECORD_FIGHT to the role again - PowerGranted AND PowerGrantScheduled are both logged, grantFrom reads now+3600, and the server key does NOT hold it yet: hasPower false, roleHasPower false, commitFight PowerNotHeld',
+      !!gPend && pendEv.includes('PowerGranted') && pendEv.includes('PowerGrantScheduled') && gFrom === tGrant + 3600n && pendHeld === false && pendRole === false && pendWrite === 'PowerNotHeld',
+      JSON.stringify({ pendEv, gFrom: String(gFrom), want: String(tGrant + 3600n), pendHeld, pendRole, pendWrite }));
+    const mPend = await rTry('setRoleMember', [ROLE.GAMEMASTER, PEND, true], TEAM);
+    const mFrom = BigInt((await rBool('memberFrom', [ROLE.GAMEMASTER, PEND])) || 0);
+    const mAgain = await rTry('setRoleMember', [ROLE.GAMEMASTER, PEND, true], TEAM);
+    ok('and a membership written under the delay is pending the same way: inRole false, memberFrom now+3600, and writing it again while pending is RoleMemberUnchanged (it is written, not absent)',
+      mPend === 'MOVED' && (await rBool('inRole', [ROLE.GAMEMASTER, PEND])) === false && mFrom === tGrant + 3600n && mAgain === 'RoleMemberUnchanged', JSON.stringify([mPend, String(mFrom), mAgain]));
+    net.travel(3599);
+    const almost = await rBool('hasPower', [SERVER, RECORD_FIGHT]), almostIn = await rBool('inRole', [ROLE.GAMEMASTER, PEND]);
+    net.travel(1);
+    const landed = await rBool('hasPower', [SERVER, RECORD_FIGHT]), landedIn = await rBool('inRole', [ROLE.GAMEMASTER, PEND]);
+    const landedWrite = await fTry('commitFight', [1, 4, H1], SERVER);
+    ok('at 3599 s neither counts; at 3600 s both do - the grant lands (hasPower true, commitFight MOVED) and the member is in the role',
+      almost === false && almostIn === false && landed === true && landedIn === true && landedWrite === 'MOVED', JSON.stringify({ almost, almostIn, landed, landedIn, landedWrite }));
+    const revokeNow = await rTry('grantPower', [RECORD_FIGHT, ROLE.GAMEMASTER, false], TEAM);
+    const removeNow = await rTry('setRoleMember', [ROLE.GAMEMASTER, PEND, false], TEAM);
+    ok('a REVOKE and a REMOVAL land at once under the same 3600 delay - a wait on taking a power back would be a window in which a leaked key keeps it',
+      revokeNow === 'MOVED' && (await rBool('hasPower', [SERVER, RECORD_FIGHT])) === false && (await fTry('commitFight', [1, 5, H1], SERVER)) === 'PowerNotHeld'
+      && removeNow === 'MOVED' && (await rBool('inRole', [ROLE.GAMEMASTER, PEND])) === false && BigInt((await rBool('memberFrom', [ROLE.GAMEMASTER, PEND])) || 0) === 0n, JSON.stringify([revokeNow, removeNow]));
+    const dBack = await rTry('setRoleChangeDelay', [0], TEAM);
+    const gZero = R ? await R.call('grantPower', [RECORD_FIGHT, ROLE.GAMEMASTER, true], TEAM).catch(() => null) : null;
+    const zeroEv = gZero ? gZero.events.map((e) => e.name) : [];
+    ok('back at the DECIDED zero: a grant lands at once (hasPower true in the same block) and the log is PowerGranted alone - no Scheduled line, so v1 reads and logs exactly as before the delay was read',
+      dBack === 'MOVED' && !!gZero && zeroEv.join() === 'PowerGranted' && (await rBool('hasPower', [SERVER, RECORD_FIGHT])) === true
+      && BigInt((await rBool('grantFrom', [RECORD_FIGHT, ROLE.GAMEMASTER])) || 0) === BigInt(net.at()), JSON.stringify([dBack, zeroEv]));
+    await rTry('grantPower', [RECORD_FIGHT, ROLE.GAMEMASTER, false], TEAM);   // leave the role as the earlier lines left it
     ok('the fight log holds no $RF and takes none: no payable function in its ABI',
       !C.fightLog.abi.some((f) => f.type === 'function' && f.stateMutability === 'payable') && !C.fightLog.abi.some((f) => f.type === 'receive' || f.type === 'fallback'), 'it can receive value');
   }
@@ -1353,7 +1420,7 @@ const errorNames = (abi) => Object.fromEntries(abi.filter((e) => e.type === 'err
   ok('RareRules compiles and deploys against the registry once SET_RULES is registered' + (RU ? ' at ' + RU.address + ', ' + C.rules.size.toLocaleString('en-US') + ' bytes' : ''),
     !!RU && C.rules.size < 24576, RU ? String(C.rules.size) : 'no RareRules.sol or no RareRoles');
   const RID = ethers.id('fixcheck rules table'), KINDS = Object.keys(CRYSTAL);
-  const wallKind = KINDS.indexOf('wall');
+  const wallKind = KINDS.indexOf('wall') + 1;   // kindId counts from 1: 0 is "none" (schema needsKind), and RareRules refuses it
   ok('the root test is RareRules\' OWN power, SET_RULES, not the registry\'s MANAGE_ROLES: the contract reads it back, it differs from MANAGE_ROLES, and the registry marks it ROOT-ONLY',
     !!RU && (await RU.call('SET_RULES')).out[0] === SET_RULES && SET_RULES !== POWER.MANAGE_ROLES && !C.rules.abi.some((f) => f.name === 'ROOT_POWER')
     && (await ROLES.call('rootOnly', [SET_RULES])).out[0] === true, 'SET_RULES mismatch or ROOT_POWER still present');
@@ -1361,12 +1428,15 @@ const errorNames = (abi) => Object.fromEntries(abi.filter((e) => e.type === 'err
   ok('NEGATIVE: a stranger cannot write a ladder (PowerNotHeld)', uThief === 'PowerNotHeld', uThief);
   const uEmpty = await uTry('freeze', [RID], TEAM);
   ok('NEGATIVE: an id with no ladders cannot be frozen (NothingToFreeze) - a game created against no numbers', uEmpty === 'NothingToFreeze', uEmpty);
-  let setAll = true;
+  const setFail = [];
   for (const k of KINDS) {
     const wood = CRYSTAL[k].map((_, i) => BigInt(i === 0 ? (WOOD[k] || 0) : 0));
-    if ((await uTry('setLadder', [RID, KINDS.indexOf(k), CRYSTAL[k].map(BigInt), wood], TEAM)) !== 'MOVED') setAll = false;
+    const r = await uTry('setLadder', [RID, KINDS.indexOf(k) + 1, CRYSTAL[k].map(BigInt), wood], TEAM);
+    if (r !== 'MOVED') setFail.push(k + ': ' + r);
   }
-  ok('root sets all ' + KINDS.length + ' ladders read off index.html (' + KINDS.join(', ') + ')', setAll && KINDS.length === 8, 'a set failed');
+  // the count is values.js's own, not a typed 8 - that went red the day M8 added the capacitor
+  ok('root sets all ' + KINDS.length + ' ladders read off values.js (' + KINDS.join(', ') + ')',
+    !setFail.length && KINDS.length === Object.keys(VALUES.kinds).length, setFail.length ? setFail.join('; ') : KINDS.length + ' ladders against ' + Object.keys(VALUES.kinds).length + ' kinds');
   const uShape = await uTry('setLadder', [RID, wallKind, [1n, 2n], [1n]], TEAM);
   ok('NEGATIVE: crystal and wood rungs of different lengths are refused (LadderShape)', uShape === 'LadderShape', uShape);
   const lad = RU ? (await RU.call('ladderOf', [RID, wallKind])).out : null;
@@ -1386,16 +1456,16 @@ const errorNames = (abi) => Object.fromEntries(abi.filter((e) => e.type === 'err
     + (wallWood === null ? '-' : (Number(wallWood) / 100).toFixed(2)) + ' wood - half of every rung index.html charges, in the same hundredths',
     !!wallBoth && wallBoth.length === 2 && wallHalf === wantWall && wallHalf === 1250n && wallWood === wantWallWood && wallWood === 500n, String(wallBoth) + ' vs ' + wantWall + '/' + wantWallWood);
   // the MANSION is the `hut` kind in index.html's KIND table - the same key part 8's worked example uses
-  const mansionKind = KINDS.indexOf('hut');
+  const mansionKind = KINDS.indexOf('hut') + 1;
   const manBoth = RU && mansionKind >= 0 && CRYSTAL.hut.length >= 3 ? (await RU.call('refundFor', [RID, mansionKind, 3n])).out : null;
   const manWantC = CRYSTAL.hut ? BigInt(CRYSTAL.hut.slice(0, 3).reduce((a, b) => a + b, 0)) / 2n : null;
   const manWantW = BigInt(WOOD.hut || 0) / 2n;
   ok('a MANSION raised three times: crystal leg is half the SUM of rungs 0..2 (' + (manWantC === null ? '-' : Number(manWantC) / 100) + ') and the wood leg is half of what wood was paid (' + Number(manWantW) / 100 + ') - both legs, one halving',
     !!manBoth && BigInt(manBoth[0]) === manWantC && BigInt(manBoth[1]) === manWantW, String(manBoth) + ' vs ' + manWantC + '/' + manWantW);
   const RID2 = ethers.id('fixcheck rules table, no wood');
-  const uNoWoodSet = await uTry('setLadder', [RID2, 0, [2500n, 3000n], [0n, 0n]], TEAM);
+  const uNoWoodSet = await uTry('setLadder', [RID2, 1, [2500n, 3000n], [0n, 0n]], TEAM);
   const uNoWoodFrz = await uTry('freeze', [RID2], TEAM);
-  const noWood = RU && uNoWoodSet === 'MOVED' && uNoWoodFrz === 'MOVED' ? (await RU.call('refundFor', [RID2, 0, 2n])).out : null;
+  const noWood = RU && uNoWoodSet === 'MOVED' && uNoWoodFrz === 'MOVED' ? (await RU.call('refundFor', [RID2, 1, 2n])).out : null;
   ok('a kind with NO wood ladder (all-zero rungs) refunds (x, 0): ' + String(noWood) + ' - the wood leg is zero, not refused and not invented',
     !!noWood && BigInt(noWood[0]) === 2750n && BigInt(noWood[1]) === 0n, String(noWood) + ' / ' + uNoWoodSet + ' / ' + uNoWoodFrz);
   const uNone = await uTry('ladderOf', [RID, 200], TEAM);
@@ -1553,11 +1623,21 @@ const errorNames = (abi) => Object.fromEntries(abi.filter((e) => e.type === 'err
     !!RG && (await RG.call('split', [1000n, 1n])).out[0].map(String).join() === '1000' && (await RG.call('split', [1000n, 2n])).out[0].map(String).join() === '600,400'
     && (await RG.call('split', [1000n, 4n])).out[0].map(String).join() === '500,300,100,100' && (await RG.call('split', [1000n, 10n])).out[0].map(String).join() === '500,300,' + Array(8).fill('25').join(), 'split differs');
   ok('a second declare is refused (WrongState): a settled game cannot pay twice', (await gTry('declare', [1n, [GC]], TEAM)) === 'WrongState', 'paid twice');
+  // DEPLOYER RULING (2026-10-01): declaring the placings belongs to the deployer or the game master, and to no one
+  // else. The server's sync key held RECORD_SYNC and used to be accepted; it is refused now. KEEPER stands for the
+  // server key (in GAMEMASTER with RECORD_SYNC), and the role is then granted DECLARE_PLACINGS to stand for the
+  // game master - the same mechanism, root granting a narrow power to the role.
   const syncOk = (r) => r === 'MOVED' || r === 'PowerUnchanged' || r === 'RoleMemberUnchanged';
-  const GMR = (await ROLES.call('GAMEMASTER')).out[0], RSYNC = (await ROLES.call('RECORD_SYNC')).out[0];
+  const GMR = (await ROLES.call('GAMEMASTER')).out[0], RSYNC = (await ROLES.call('RECORD_SYNC')).out[0], DECL = RG ? await gRead('DECLARE_PLACINGS') : null;
   const grantSync = await tryCall(ROLES, RERR, 'grantPower', [RSYNC, GMR, true], TEAM), memberSync = await tryCall(ROLES, RERR, 'setRoleMember', [GMR, KEEPER, true], TEAM);
-  ok('a non-root with RECORD_SYNC may declare (the server\'s sync key): granted to GAMEMASTER, KEEPER passes the power check (reaches WrongState, not PowerNotHeld)',
-    syncOk(grantSync) && syncOk(memberSync) && (await gTry('declare', [1n, [GC]], KEEPER)) === 'WrongState', JSON.stringify([grantSync, memberSync]));
+  const syncDeclares = await gTry('declare', [1n, [GC]], KEEPER);
+  ok('RULING: a holder of RECORD_SYNC alone (the server\'s sync key, in GAMEMASTER) CANNOT declare - PowerNotHeld, not WrongState - and RareGame.sol names no RECORD_SYNC constant any more',
+    syncOk(grantSync) && syncOk(memberSync) && syncDeclares === 'PowerNotHeld' && !!C.gameC && !C.gameC.abi.some((f) => f.name === 'RECORD_SYNC'), JSON.stringify([grantSync, memberSync, syncDeclares]));
+  const grantDecl = DECL ? await tryCall(ROLES, RERR, 'grantPower', [DECL, GMR, true], TEAM) : 'NO POWER';
+  const gmDeclares = await gTry('declare', [1n, [GC]], KEEPER);
+  const revokeDecl = DECL ? await tryCall(ROLES, RERR, 'grantPower', [DECL, GMR, false], TEAM) : 'NO POWER';
+  ok('and root grants DECLARE_PLACINGS to the game master role: the same key now passes the power check (reaches WrongState on the settled game); taken back, it is PowerNotHeld again',
+    grantDecl === 'MOVED' && gmDeclares === 'WrongState' && revokeDecl === 'MOVED' && (await gTry('declare', [1n, [GC]], KEEPER)) === 'PowerNotHeld', JSON.stringify([grantDecl, gmDeclares, revokeDecl]));
   // demo mode: a free game pays nothing and takes nothing
   await tryCall(ROLES, RERR, 'setDemoMode', [true], TEAM);
   for (const [who, on] of [[GA, true], [GB, true], [GD, false]]) await tryCall(ROLES, RERR, 'setAllowed', [who, on], TEAM);
@@ -1581,9 +1661,586 @@ const errorNames = (abi) => Object.fromEntries(abi.filter((e) => e.type === 'err
     (await gTry('setClocks', [LEN, JOINW, DELAY], STRANGER)) === 'PowerNotHeld' && (await gTry('setDefaults', [CUT, PLACES, MINP, GRID], STRANGER)) === 'PowerNotHeld'
     && (await gTry('setPlaces', [did, 2], STRANGER)) === 'PowerNotHeld' && (await gTry('setLength', [did, LEN], STRANGER)) === 'PowerNotHeld' && (await gTry('setFeeTo', [STRANGER], STRANGER)) === 'PowerNotHeld', 'a setter is open');
   await tryCall(ROLES, RERR, 'setDemoMode', [false], TEAM);
-  note('RareGame is NOT in deploy.mjs: it is new tonight and deploys last when the deployer adds it, needing RF, FEE_TO, RareRoles and the six decided figures above.');
+  note('RareGame deploys LAST (deploy.mjs --game), after RareRules is frozen; RareRoles.setGame then points the running-game guards at it (part 15).');
+
+  // ---------- 15. M20 items 11 and 2 ----------
+  // Item 11: the duel's six numbers were `immutable`; they are stored state now, each setter guarded on chain
+  // and refused while a game runs (DESIGN, *No number changes under a running game*), and a duel settles under
+  // the numbers it was STRUCK under - its own `Sealed` row - never the live ones. Item 2: the dice roll is an
+  // address the duel looks up and root can re-point, and the re-point reaches the next duel, never one in flight.
+  console.log('\n--- 15. RareDuel: six numbers as stored state, every setter guarded and refused under a running game; a duel settles under what it was struck under; the dice is an address root can re-point ---');
+  const sTry = async (fn, args, from) => tryCall(duel, Object.assign({}, DERR, RERR), fn, args, from);
+  const rTry = async (fn, args, from) => (ROLES ? await tryCall(ROLES, RERR, fn, args, from) : 'NO ROLES');
+  const dRead = async (fn, args) => (await duel.call(fn, args || [])).out[0];
+  const want15 = ['setOdds', 'setFee', 'setWindows', 'setDice', 'sealedOf', 'dice'];
+  ok('RareDuel has setOdds, setFee, setWindows, setDice, sealedOf and dice(): the six immutables are gone', want15.every(has), 'missing: ' + want15.filter((f) => !has(f)).join(','));
+  ok('RareGame.runningGames is 1: game 2 started and was never declared (game 1 and the demo game were) - the count the guard reads',
+    !!RG && BigInt(await gRead('runningGames')) === 1n, RG ? String(await gRead('runningGames')) : 'no RareGame');
+  const sgStranger = await rTry('setGame', [RG ? RG.address : TEAM], STRANGER), sgZero = await rTry('setGame', [ethers.ZeroAddress], TEAM);
+  const sgEoa = await rTry('setGame', [STRANGER], TEAM), sgOk = await rTry('setGame', [RG ? RG.address : TEAM], TEAM);
+  ok('RareRoles.setGame: a stranger is refused (PowerNotHeld), zero (ZeroAddress), an address with no code (NotAContract); root points it at RareGame and roles.runningGames() reads 1 through it',
+    sgStranger === 'PowerNotHeld' && sgZero === 'ZeroAddress' && sgEoa === 'NotAContract' && sgOk === 'MOVED' && !!RG
+    && (await ROLES.call('game')).out[0].toLowerCase() === RG.address.toLowerCase() && BigInt((await ROLES.call('runningGames')).out[0]) === 1n, JSON.stringify([sgStranger, sgZero, sgEoa, sgOk]));
+  const underRun = [await sTry('setOdds', [6000, 5000], TEAM), await sTry('setFee', [0, FEES], TEAM), await sTry('setWindows', [301, 601, 601], TEAM), await sTry('setDice', [duel.address], TEAM),
+    await gTry('setClocks', [LEN, JOINW, DELAY], TEAM), await gTry('setDefaults', [CUT, PLACES, MINP, GRID], TEAM)];
+  ok('WHILE A GAME RUNS every number\'s setter is refused, from root itself (GameRunning): RareDuel setOdds/setFee/setWindows/setDice and RareGame setClocks/setDefaults',
+    underRun.every((r) => r === 'GameRunning'), JSON.stringify(underRun));
+  const strangers = [await sTry('setOdds', [6000, 5000], STRANGER), await sTry('setFee', [0, FEES], STRANGER), await sTry('setWindows', [301, 601, 601], STRANGER), await sTry('setDice', [duel.address], STRANGER)];
+  ok('and a stranger gets PowerNotHeld, never GameRunning: the power is asked first, so a refusal teaches nothing about the game', strangers.every((r) => r === 'PowerNotHeld'), JSON.stringify(strangers));
+  const decl2 = await gTry('declare', [2n, [GD, GC]], TEAM);
+  ok('game 2 is declared and runningGames falls to 0', decl2 === 'MOVED' && BigInt(await gRead('runningGames')) === 0n, decl2 + ' ' + String(await gRead('runningGames')));
+  await tryCall(ROLES, RERR, 'setWhitelistOpen', [true], TEAM);
+  const dice0 = await dRead('dice');
+  const idX = Number(await dRead('duelCount')) + 1;
+  const cX = await duel.call('challenge', [GAME_ID, P2, STAKE, await commitOf(idX, P1, 1, salt(idX * 2))], P1);
+  const evX = (cX.events || []).find((e) => e && e.name === 'Challenged');
+  const sealedX = await dRead('sealedOf', [idX]);
+  ok('a duel struck under 70/50 and fee ' + FEE_BPS + ' seals those three and the dice into its own row (sealedOf), and Challenged carries gameId ' + GAME_ID + ' - the one field that could not be added after the deploy',
+    !!evX && BigInt(evX.args.gameId) === GAME_ID && BigInt((await dRead('getDuel', [idX])).gameId) === GAME_ID && Number(sealedX.counterBps) === 7000 && Number(sealedX.sameBps) === 5000
+    && Number(sealedX.feeBps) === FEE_BPS && sealedX.dice.toLowerCase() === dice0.toLowerCase(),
+    JSON.stringify({ ev: evX ? String(evX.args.gameId) : null, sealed: [String(sealedX.counterBps), String(sealedX.sameBps), String(sealedX.feeBps), sealedX.dice] }));
+  const so = await sTry('setOdds', [6000, 5000], TEAM), sw = await sTry('setWindows', [301, 601, 601], TEAM), sf = await sTry('setFee', [100, FEES], TEAM);
+  ok('with no game running root sets the odds to 60/50, the windows to 301/601/601 and the fee to 100 bps, and each getter reads the new value: stored state, not immutable; oddsBps(rock, paper) now says 4000',
+    so === 'MOVED' && sw === 'MOVED' && sf === 'MOVED' && Number(await dRead('counterBps')) === 6000 && Number(await dRead('answerWindow')) === 301 && Number(await dRead('revealWindow')) === 601
+    && Number(await dRead('rollWindow')) === 601 && Number(await dRead('feeBps')) === 100 && Number(await dRead('oddsBps', [1, 2])) === 4000, JSON.stringify([so, sw, sf]));
+  const finish = async (i) => {
+    await duel.call('accept', [i, await commitOf(i, P2, 2, salt(i * 2 + 1))], P2);
+    await duel.call('reveal', [i, 1, salt(i * 2)], P1);
+    await duel.call('reveal', [i, 2, salt(i * 2 + 1)], P2);
+    await duel.call('requestRandomness', [i], KEEPER, fee);
+    await ent.call('deliver', [BigInt((await dRead('getDuel', [i])).seq), PROVIDER, ethers.id('word ' + i)], KEEPER);
+    await duel.call('settle', [i], KEEPER);
+    return dRead('getDuel', [i]);
+  };
+  const feesX0 = await bal(FEES);
+  const dX = await finish(idX);
+  ok('the duel struck BEFORE the change settles under its sealed numbers: odds 3000 (rock v paper at 70%), not the live 4000; the fee is ' + FEE_BPS + ' bps of the pot, not 100',
+    Number(dX.odds) === 3000 && (await bal(FEES)) - feesX0 === (2n * STAKE * BigInt(FEE_BPS)) / 10_000n, JSON.stringify({ odds: String(dX.odds), fee: String((await bal(FEES)) - feesX0) }));
+  const idY = idX + 1;
+  await duel.call('challenge', [GAME_ID, P2, STAKE, await commitOf(idY, P1, 1, salt(idY * 2))], P1);
+  const fixed = C.fixedDice ? await net.deploy(TEAM, C.fixedDice, [9999n]) : null;
+  const sdEoa = await sTry('setDice', [STRANGER], TEAM), sd = fixed ? await sTry('setDice', [fixed.address], TEAM) : 'NO MOCK';
+  ok('setDice: an address with no code is refused (InvalidTerms); root points the dice at a FixedDice that always rolls 9999, and dice() reads it',
+    sdEoa === 'InvalidTerms' && sd === 'MOVED' && !!fixed && (await dRead('dice')).toLowerCase() === fixed.address.toLowerCase(), JSON.stringify([sdEoa, sd]));
+  const idZ = idY + 1;
+  await duel.call('challenge', [GAME_ID, P2, STAKE, await commitOf(idZ, P1, 1, salt(idZ * 2))], P1);
+  const dY = await finish(idY), dZ = await finish(idZ), sY = await dRead('sealedOf', [idY]), sZ = await dRead('sealedOf', [idZ]);
+  ok('a duel struck before the re-point settles with the dice it was struck under (sealed dice = the original, roll not 9999, odds 60/50); one struck after settles with the new one (roll 9999: the challenged wins)',
+    sY.dice.toLowerCase() === dice0.toLowerCase() && Number(dY.roll) !== 9999 && Number(sY.counterBps) === 6000
+    && !!fixed && sZ.dice.toLowerCase() === fixed.address.toLowerCase() && Number(dZ.roll) === 9999 && dZ.winner.toLowerCase() === P2.toLowerCase(),
+    JSON.stringify({ y: [String(dY.roll), sY.dice], z: [String(dZ.roll), sZ.dice, dZ.winner] }));
+
+  // ---------- 18. M20 item 10: RareOrders - the sealed standing orders, the MECHANISM and not the policy ----------
+  // DESIGN decided the approach (a hash committed, the orders revealed later) and left WHO OPENS THE BOX open.
+  // The contract is shaped so that it need not be decided here: `commit` is behind RECORD_ORDERS (the session
+  // write's key, grantable, a sibling of RECORD_FIGHT / RECORD_SYNC); `reveal` is open to anyone holding the
+  // preimage, so the opener is whoever is handed the salt - policy, not bytecode. The proof is the shape: nothing
+  // but a holder commits, a zero word is refused, an unsealed base cannot be opened, the opened orders must hash
+  // to the standing word, an order above 3 is refused (BINDING §10.5.4), a fight opens once, the word is NOT
+  // consumed by an opening, and demo mode gates neither (the commit is a power, the reveal an exit).
+  console.log('\n--- 18. RareOrders: a base seals one word, a fight opens it against that word, anyone with the preimage may open, and the box is never gated ---');
+  const ORD = C.orders && ROLES ? await net.deploy(TEAM, C.orders, [ROLES.address]) : null;
+  const OERR = C.orders ? Object.assign({}, errorNames(C.orders.abi), RERR) : {};
+  const oTry = async (fn, args, from) => (ORD ? await tryCall(ORD, OERR, fn, args, from) : 'NO ORDERS');
+  const oRead = async (fn, args) => (ORD ? (await ORD.call(fn, args)).out[0] : null);
+  const RORD = ROLES ? await soft(ROLES, 'RECORD_ORDERS').then((r) => (r ? r.out[0] : null)) : null;
+  ok('RareOrders compiles and deploys against the registry' + (ORD ? ' at ' + ORD.address + ', ' + C.orders.size.toLocaleString('en-US') + ' bytes' : '') + '; RECORD_ORDERS is a public constant of RareRoles, repeated by RareOrders, and GRANTABLE (the session write\'s key, never root)',
+    !!ORD && C.orders.size < 24576 && !!RORD && (await oRead('RECORD_ORDERS')) === RORD && (await ROLES.call('rootOnly', [RORD])).out[0] === false, ORD ? String(C.orders.size) : 'no RareOrders.sol, or RareRoles has no RECORD_ORDERS');
+  const OG = 7n, OB = 3n, OS = ethers.id('orders salt'), ORDERS = '0x010300';   // one byte a Friend: engage, fallback, hold
+  const oHash = ORD ? await oRead('commitment', [OG, OB, ORDERS, OS]) : ethers.ZeroHash;
+  const oThief = await oTry('commit', [OG, OB, oHash], STRANGER), oKeeper0 = await oTry('commit', [OG, OB, oHash], KEEPER);
+  const oGrant = RORD ? await tryCall(ROLES, RERR, 'grantPower', [RORD, ROLE.GAMEMASTER, true], TEAM) : 'NO POWER';
+  const oZero = await oTry('commit', [OG, OB, ethers.ZeroHash], KEEPER);
+  const oEarly = await oTry('reveal', [OG, OB, 11n, ORDERS, OS], STRANGER);
+  ok('NEGATIVE: a stranger cannot commit (PowerNotHeld), nor the server key before the grant; root grants RECORD_ORDERS to the role (KEEPER is in it); a zero word is refused (ZeroCommitment); a base that sealed nothing cannot be opened (OrdersNotCommitted - BINDING §11.3)',
+    oThief === 'PowerNotHeld' && oKeeper0 === 'PowerNotHeld' && oGrant === 'MOVED' && oZero === 'ZeroCommitment' && oEarly === 'OrdersNotCommitted', JSON.stringify([oThief, oKeeper0, oGrant, oZero, oEarly]));
+  const tSeal = BigInt(net.at());
+  const oCommit = ORD ? await ORD.call('commit', [OG, OB, oHash], KEEPER).catch(() => null) : null;
+  const oCEv = oCommit && oCommit.events.find((e) => e.name === 'OrdersCommitted');
+  const cRow = ORD ? await oRead('commitmentOf', [OG, OB]) : null;
+  ok('the session key seals base 3 of game 7: OrdersCommitted(gameId, baseId, hash, by) and commitmentOf holds the hash, the time and the block - the record "predates the fight" is checked against',
+    !!oCEv && BigInt(oCEv.args.gameId) === OG && BigInt(oCEv.args.baseId) === OB && oCEv.args.hash === oHash && oCEv.args.by.toLowerCase() === KEEPER
+    && !!cRow && cRow.hash === oHash && BigInt(cRow.committedAt) === tSeal && Number(cRow.committedBlock) > 0, JSON.stringify(cRow && [cRow.hash, String(cRow.committedAt), String(cRow.committedBlock)]));
+  console.log('        commit: ' + (oCommit ? Number(oCommit.gas).toLocaleString('en-US') : '-') + ' gas (execution only, in-memory EVM - a floor, not a price)');
+  const oWrongSalt = await oTry('reveal', [OG, OB, 11n, ORDERS, ethers.id('other salt')], STRANGER);
+  const oWrongOrders = await oTry('reveal', [OG, OB, 11n, '0x010301', OS], STRANGER);
+  const badHash = ORD ? await oRead('commitment', [OG, OB, '0x010304', OS]) : ethers.ZeroHash;
+  await oTry('commit', [OG, OB, badHash], KEEPER);
+  const oRange = await oTry('reveal', [OG, OB, 11n, '0x010304', OS], STRANGER);
+  const oResealed = await oTry('commit', [OG, OB, oHash], KEEPER);
+  ok('NEGATIVE: the wrong salt and the wrong orders are both BadOrderReveal (BINDING §11.7); an order of 4 sealed and opened is OrderOutOfRange rather than a silent HOLD (§10.5.4); a later commit REPLACES the word',
+    oWrongSalt === 'BadOrderReveal' && oWrongOrders === 'BadOrderReveal' && oRange === 'OrderOutOfRange' && oResealed === 'MOVED' && !!ORD && (await oRead('commitmentOf', [OG, OB])).hash === oHash, JSON.stringify([oWrongSalt, oWrongOrders, oRange, oResealed]));
+  net.travel(60);
+  const oOpen = ORD ? await ORD.call('reveal', [OG, OB, 11n, ORDERS, OS], STRANGER).catch(() => null) : null;
+  const oOEv = oOpen && oOpen.events.find((e) => e.name === 'OrdersOpened');
+  const oRow = ORD ? await oRead('openedOf', [OG, 11n]) : null;
+  ok('ANYONE holding the preimage opens the box for fight 11 - a stranger on no list did: OrdersOpened(game, base, fight, hash, orders, by), openedOf carries the orders, the word it opened and that word\'s time, which is BEFORE the opening',
+    !!oOEv && BigInt(oOEv.args.fightId) === 11n && oOEv.args.hash === oHash && oOEv.args.orders === ORDERS && oOEv.args.by.toLowerCase() === STRANGER
+    && !!oRow && oRow.hash === oHash && oRow.orders === ORDERS && BigInt(oRow.committedAt) < BigInt(oRow.openedAt) && oRow.openedBy.toLowerCase() === STRANGER,
+    JSON.stringify(oRow && { hash: oRow.hash, orders: oRow.orders, at: [String(oRow.committedAt), String(oRow.openedAt)] }));
+  const oTwice = await oTry('reveal', [OG, OB, 11n, ORDERS, OS], KEEPER);
+  const oNext = await oTry('reveal', [OG, OB, 12n, ORDERS, OS], KEEPER);
+  ok('a fight opens ONCE (AlreadyOpened); the word is not consumed - the next fight against the same base opens the same word until a new one is sealed',
+    oTwice === 'AlreadyOpened' && oNext === 'MOVED' && !!ORD && (await oRead('openedOf', [OG, 12n])).hash === oHash, oTwice + ' / ' + oNext);
+  await tryCall(ROLES, RERR, 'setDemoMode', [true], TEAM);
+  const oDemoCommit = await oTry('commit', [OG, 4n, oHash], KEEPER), oDemoOpen = await oTry('reveal', [OG, OB, 13n, ORDERS, OS], GD);
+  await tryCall(ROLES, RERR, 'setDemoMode', [false], TEAM);
+  ok('DEMO MODE gates neither: the commit is a power (not a player verb) and still lands; the reveal is an EXIT and still opens, from an address not on the allowlist - a blocked reveal is a decided fight (§26.3)',
+    oDemoCommit === 'MOVED' && oDemoOpen === 'MOVED', oDemoCommit + ' / ' + oDemoOpen);
+  ok('it holds no $RF and has no setter but the two verbs: no payable function, no receive, and nothing in its ABI writes state except commit and reveal',
+    !!C.orders && !C.orders.abi.some((f) => f.type === 'function' && f.stateMutability === 'payable') && !C.orders.abi.some((f) => f.type === 'receive' || f.type === 'fallback')
+    && C.orders.abi.filter((f) => f.type === 'function' && f.stateMutability !== 'view' && f.stateMutability !== 'pure').map((f) => f.name).sort().join() === 'commit,reveal',
+    C.orders ? C.orders.abi.filter((f) => f.type === 'function').map((f) => f.name + ':' + f.stateMutability).join() : 'no orders');
+  note('WHO OPENS THE BOX is not decided here: the opener is whoever holds the salt, which is policy and the deployer\'s (DESIGN question 11, BINDING §13 item 6). What a never-opened fight does has no contract to live in (ruling 7).');
+
+  // ---------- 19. M20 item 13: the gate, audited at EVERY §26.3 entry point that has a contract ----------
+  // The row said "one real call site, needs eight". This is the count, taken off the contracts rather than carried:
+  // every entry point BINDING §26.3 marks "allowed only" that a contract exists for is asked with demo mode ON by a
+  // caller who IS whitelisted and is NOT on the allowlist, and must refuse by the mode's name; every other
+  // state-changing function of the seven game contracts - the exits, the in-game verbs and the setters - is asked
+  // the same way and must answer with anything BUT the mode's name. The third assertion walks the ABIs, so a
+  // function added to a contract later must join one of the two lists or this part goes red.
+  console.log('\n--- 19. the demo-mode gate audited at every §26.3 entry point that has a contract: the gated sites counted off the contracts, and the exits and setters never gated ---');
+  await tryCall(ROLES, RERR, 'setWhitelistOpen', [true], TEAM);
+  await tryCall(ROLES, RERR, 'setDemoMode', [true], TEAM);
+  await tryCall(ROLES, RERR, 'setAllowed', [GA, true], TEAM);     // GA may; GD is whitelisted (the list is open) and NOT allowed
+  await tryCall(ROLES, RERR, 'setAllowed', [GD, false], TEAM);
+  const demoGame = await gTry('create', [0n], GA);
+  const dgid = RG ? BigInt(await gRead('gameCount')) : 0n;
+  const FL2 = C.fightLog && ROLES ? await net.deploy(TEAM, C.fightLog, [ROLES.address]) : null;
+  const ALL = Object.assign({}, RERR, GERR, MERR, DERR, OERR, PERR, UERR, C.fightLog ? errorNames(C.fightLog.abi) : {});
+  const ask = async (c, fn, args, from) => (c ? await tryCall(c, ALL, fn, args, from) : 'NO CONTRACT');
+  const P0K = { needsKeep: true, isKeep: false, cappedByKeepLevel: true, onWater: false, onBaseEdge: false, onClaimedGround: false, maxPerBase: 0, needsKind: 0, nextToKind: 0, scienceGen: [0] };
+  const K1 = { codeName: ethers.id('x'), levelName: [ethers.id('x')], buildMs: [1], strength: [0], energy: [0], supply: [0], release: [0], leak: [0], capacity: [0], reach: [0], footprint: [0, 0], placement: P0K, abilityId: 0, addedInGame: 1 };
+  const GATE_SITES = [
+    ['RareGame.create', () => ask(RG, 'create', [0n], GD), 'NotAllowedInDemoMode'],
+    ['RareGame.join', () => ask(RG, 'join', [dgid], GD), 'NotAllowedInDemoMode'],
+    ['RareMarket.list', () => ask(mkt, 'list', [GEN, 1n, PRICE], GD), 'NotAllowedInDemoMode'],
+    ['RareMarket.reprice', () => ask(mkt, 'reprice', [GEN, 1n, PRICE], GD), 'NotAllowedInDemoMode'],
+    ['RareMarket.buy', () => ask(mkt, 'buy', [GEN, 1n], GD), 'NotAllowedInDemoMode'],
+    ['RareMarket.offer', () => ask(mkt, 'offer', [GEN, 1n, PRICE, 4_000_000_000], GD), 'NotAllowedInDemoMode'],
+    ['RareMarket.acceptOffer', () => ask(mkt, 'acceptOffer', [GEN, 1n, TEAM, PRICE], GD), 'NotAllowedInDemoMode'],
+    // ruling 54's two terminal routes are the same two ways in, and are gated FIRST - before the signature is read
+    ['RareMarket.buyVia', () => ask(mkt, 'buyVia', [GEN, 1n, [1n, 0n, 0n], '0x'], GD), 'NotAllowedInDemoMode'],
+    ['RareMarket.acceptOfferVia', () => ask(mkt, 'acceptOfferVia', [GEN, 1n, TEAM, PRICE, [1n, 0n, 0n], '0x'], GD), 'NotAllowedInDemoMode'],
+    ['RareDuel.challenge', () => ask(duel, 'challenge', [GAME_ID, P2, STAKE, ethers.id('g')], GD), 'PaidDuelsClosedInDemoMode'],
+  ];
+  const OPEN_SITES = [
+    // exits and in-game verbs - §26.3 "OPEN - must be", and the roster/ownership is the guard
+    ['RareGame.start', () => ask(RG, 'start', [dgid], GD)], ['RareGame.restart', () => ask(RG, 'restart', [dgid], GD)],
+    ['RareGame.declare', () => ask(RG, 'declare', [dgid, [GA]], GD)], ['RareGame.abandon', () => ask(RG, 'abandon', [dgid], GD)],
+    ['RareMarket.cancel', () => ask(mkt, 'cancel', [GEN, 1n], GD)], ['RareMarket.withdrawOffer', () => ask(mkt, 'withdrawOffer', [GEN, 1n], GD)],
+    ['RareDuel.accept', () => ask(duel, 'accept', [1n, ethers.id('x')], GD)], ['RareDuel.decline', () => ask(duel, 'decline', [1n], GD)],
+    ['RareDuel.withdraw', () => ask(duel, 'withdraw', [1n], GD)], ['RareDuel.reveal', () => ask(duel, 'reveal', [1n, 1, ethers.id('s')], GD)],
+    ['RareDuel.forfeit', () => ask(duel, 'forfeit', [1n], GD)], ['RareDuel.settle', () => ask(duel, 'settle', [1n], GD)],
+    ['RareDuel.refundStuck', () => ask(duel, 'refundStuck', [1n], GD)], ['RareDuel.requestRandomness', () => ask(duel, 'requestRandomness', [1n], GD)],
+    ['RareDuel._entropyCallback', () => ask(duel, '_entropyCallback', [1, PROVIDER, ethers.id('w')], GD)],
+    ['RareOrders.reveal', () => ask(ORD, 'reveal', [OG, 99n, 1n, ORDERS, OS], GD)],
+    ['RarePartners.propose', () => ask(RP, 'propose', [GEN, 1n, GD, 100], GD)], ['RarePartners.accept', () => ask(RP, 'accept', [GEN, 1n], GD)],
+    // the server's writes and every setter - role-guarded, and §26.3's last row: NOT gated by demo mode at all
+    ['RareFightLog.commitFight', () => ask(FL2, 'commitFight', [dgid, 1n, ethers.id('h')], GD)], ['RareFightLog.commitSync', () => ask(FL2, 'commitSync', [dgid, 1n, ethers.id('h')], GD)],
+    ['RareOrders.commit', () => ask(ORD, 'commit', [OG, 5n, oHash], GD)], ['RarePartners.freeze', () => ask(RP, 'freeze', [GEN, 1n], GD)],
+    ['RareMarket.setTradeable', () => ask(mkt, 'setTradeable', [GEN, true], GD)], ['RareMarket.setFeeBps', () => ask(mkt, 'setFeeBps', [100], GD)], ['RareMarket.setFeeTo', () => ask(mkt, 'setFeeTo', [FEES], GD)],
+    ['RareMarket.setTerminalShareBps', () => ask(mkt, 'setTerminalShareBps', [1], GD)], ['RareMarket.setGate', () => ask(mkt, 'setGate', [FEES], GD)],
+    ['RareDuel.setOdds', () => ask(duel, 'setOdds', [7000, 5000], GD)], ['RareDuel.setFee', () => ask(duel, 'setFee', [0, FEES], GD)],
+    ['RareDuel.setWindows', () => ask(duel, 'setWindows', [301, 601, 601], GD)], ['RareDuel.setDice', () => ask(duel, 'setDice', [duel.address], GD)],
+    ['RareGame.setClocks', () => ask(RG, 'setClocks', [LEN, JOINW, DELAY], GD)], ['RareGame.setDefaults', () => ask(RG, 'setDefaults', [CUT, PLACES, MINP, GRID], GD)],
+    ['RareGame.setCut', () => ask(RG, 'setCut', [dgid, 600], GD)], ['RareGame.setPlaces', () => ask(RG, 'setPlaces', [dgid, 2], GD)],
+    ['RareGame.setLength', () => ask(RG, 'setLength', [dgid, LEN], GD)], ['RareGame.setFeeTo', () => ask(RG, 'setFeeTo', [FEES], GD)],
+    ['RareRules.setLadder', () => ask(RU, 'setLadder', [ethers.id('x'), 1, [1n], [0n]], GD)], ['RareRules.setKind', () => ask(RU, 'setKind', [ethers.id('x'), 1, K1], GD)],
+    ['RareRules.freeze', () => ask(RU, 'freeze', [ethers.id('x')], GD)],
+  ];
+  const gateGot = {}; for (const [n, f] of GATE_SITES) gateGot[n] = await f();
+  const openGot = {}; for (const [n, f] of OPEN_SITES) openGot[n] = await f();
+  const DEMO_ERRS = ['NotAllowedInDemoMode', 'PaidDuelsClosedInDemoMode', 'PaidInDemoMode'];
+  ok('THE COUNT: ' + GATE_SITES.length + ' gated entry points with a contract (' + GATE_SITES.map((g) => g[0]).join(', ') + ') each refuse a whitelisted, not-allowed caller BY THE MODE\'S NAME with demo mode on - the row\'s "one of eight" is stale',
+    demoGame === 'MOVED' && GATE_SITES.every((g) => gateGot[g[0]] === g[2]), JSON.stringify(gateGot));
+  ok('and NONE of the other ' + OPEN_SITES.length + ' state-changing functions answers with the mode\'s name - each exit, in-game verb and setter refuses by its own rule or moves (gate entry, never exit; setters are role-guarded, never mode-guarded)',
+    OPEN_SITES.every((o) => !DEMO_ERRS.includes(openGot[o[0]]) && openGot[o[0]] !== 'NO CONTRACT'), JSON.stringify(openGot));
+  const KNOWN = new Set(GATE_SITES.map((g) => g[0]).concat(OPEN_SITES.map((o) => o[0])));
+  const surface = [];
+  for (const [name, c] of [['RareGame', C.gameC], ['RareMarket', C.market], ['RareDuel', C.duel], ['RareOrders', C.orders], ['RarePartners', C.rpart], ['RareFightLog', C.fightLog], ['RareRules', C.rules]])
+    for (const f of (c ? c.abi : [])) if (f.type === 'function' && f.stateMutability !== 'view' && f.stateMutability !== 'pure') surface.push(name + '.' + f.name);
+  const unaccounted = surface.filter((s) => !KNOWN.has(s));
+  ok('taken off the ABIs: every state-changing function of the seven game contracts (' + surface.length + ') is in one of the two lists above, so nothing is unaudited' + (unaccounted.length ? ' - UNACCOUNTED: ' + unaccounted.join(', ') : ''),
+    surface.length === GATE_SITES.length + OPEN_SITES.length && !unaccounted.length, unaccounted.join(', ') || (surface.length + ' vs ' + (GATE_SITES.length + OPEN_SITES.length)));
+  note('ShadowFriends.claim is whitelist-only (ruling 21, part 11) and not in §26.3; RareRoles\' own setters are proved in parts 6 and 7. RarePartners.propose/accept are OPEN on purpose: ownership is the guard and no $RF moves until a gated sale.');
+  await tryCall(ROLES, RERR, 'setDemoMode', [false], TEAM);
   }
 
-  console.log(fails ? '\n' + fails + ' check(s) failed' : '\nall nine items hold, and the fight log, and the whitelist');
+  // ---------- 16. M20 item 3: the building registry on chain - a new building is data, not a release ----------
+  // The rest of schema.json's buildingType row, in RareRules beside the ladders, read off index.html rather than
+  // typed, frozen with the ladders. The point of the item is the last assertion: a ninth building and a fourth
+  // level are rows under the next game's id with no .sol changed and nothing redeployed.
+  console.log('\n--- 16. RareRules.setKind: the building registry - the rest of the buildingType row, read off values.js, frozen with the ladders; a new kind and a new level are rows, not code ---');
+  {
+  // Since M3 item 1 these are columns of values.js's kind rows (the one home), read as the game reads
+  // them rather than regex-parsed off the page. CELL_REACH keeps the page's tier-indexed shape (index 0
+  // unused) so the slice below means what it always meant.
+  const VK = VALUES.kinds;
+  const SILO_CAP = VK.silo.capacity.slice(), CELL_REACH = [0].concat(VK.cell.reach);
+  const WALL_CAP = VK.wall.capacity[0], WALL_HP = VALUES.wallHp, BUILD_MS = VALUES.buildMs;
+  const TIERS = {}; for (const [k, r] of Object.entries(VK)) TIERS[k] = r.tiers.slice();
+  ok('values.js holds what the row needs: SILO_CAP ' + SILO_CAP.join('/') + ', CELL_REACH ' + CELL_REACH.join('/') + ', WALL_CAP ' + WALL_CAP + ', WALL_HP ' + WALL_HP + ', BUILD_MS ' + BUILD_MS + ', tiers for ' + Object.keys(TIERS).length + ' kinds',
+    SILO_CAP.length === 3 && CELL_REACH.length === 5 && WALL_CAP > 0 && WALL_HP > 0 && BUILD_MS > 0
+    && KINDS.length === Object.keys(TIERS).length && KINDS.every((k) => TIERS[k] && TIERS[k].length === CRYSTAL[k].length), 'values.js columns not found, or a kind\'s tiers and ladder disagree');
+  // EVERY CHAIN-HOME FIELD OF THE BUILDING ROW HAS A SLOT ON CHAIN. schema.json says what a buildingType
+  // row holds and that its home is the chain; RareRules.Kind is where it lands. M8 and M10 added columns
+  // (energy, supply, release, leak) and a fourth placement rule (nextToKind) to the schema and to values.js;
+  // a row written without them would read back "all rows set" while dropping the capacitor's rule. Read
+  // off the compiled ABI, so a field added to the struct turns this green without editing here. The two
+  // ladder fields are RareRules' Ladder (setLadder), and kindId/levels are the key and levelName's length.
+  {
+    const SCH = require(path.join(ROOT, '../schema.json'));
+    const findBT = (o) => { for (const k in o) { if (k === 'buildingType') return o[k]; if (o[k] && typeof o[k] === 'object') { const r = findBT(o[k]); if (r) return r; } } return null; };
+    const BT = findBT(SCH), want = BT ? Object.keys(BT.fields || BT).filter((f) => !['kindId', 'levels', 'crystalCost', 'woodCost'].includes(f)) : [];
+    const setKindAbi = C.rules ? C.rules.abi.find((f) => f.name === 'setKind') : null;
+    const kindTuple = setKindAbi ? setKindAbi.inputs.find((i) => i.type === 'tuple') : null;
+    const have = kindTuple ? kindTuple.components.map((c) => c.name) : [];
+    const plHave = kindTuple ? ((kindTuple.components.find((c) => c.name === 'placement') || {}).components || []).map((c) => c.name) : [];
+    const plWant = Object.keys(VALUES.kinds.keep.placement);
+    const missing = want.filter((f) => !have.includes(f)), plMissing = plWant.filter((f) => !plHave.includes(f));
+    ok('every chain-home field of schema.json\'s buildingType has a slot in RareRules.Kind (' + want.length + '), and every placement rule values.js writes has one in Placement (' + plWant.length + ')',
+      !!BT && BT.home === 'chain' && have.length > 0 && !missing.length && !plMissing.length,
+      'RareRules.Kind lacks [' + missing.join(', ') + '], Placement lacks [' + plMissing.join(', ') + '] - a row on chain cannot hold them (chain-engineer)');
+  }
+  const b32s = (s) => ethers.encodeBytes32String(s.slice(0, 31));
+  const P0 = { needsKeep: true, isKeep: false, cappedByKeepLevel: true, onWater: false, onBaseEdge: false, onClaimedGround: false, maxPerBase: 0, needsKind: 0, scienceGen: [] };
+  const row = (k, over, pl) => {
+    const n = TIERS[k].length, z = Array(n).fill(0);
+    // energy/supply/release/leak and nextToKind are values.js's own (M8, M10). RareRules.Kind has no slot for
+    // them yet - asserted above - and ethers ignores a key the struct does not have, so they ride along now
+    // and are written the day the struct gains them, without this line changing.
+    const r = VK[k] || {}, col = (c) => (Array.isArray(r[c]) && r[c].length === n ? r[c].slice() : z);
+    const nt = r.placement && r.placement.nextToKind ? kid(r.placement.nextToKind) : 0;
+    return Object.assign({ codeName: b32s(k), levelName: TIERS[k].map(b32s), buildMs: Array(n).fill(BUILD_MS), strength: z, capacity: z, reach: z, footprint: [0, 0],
+      energy: col('energy'), supply: col('supply'), release: col('release'), leak: col('leak'),
+      placement: Object.assign({}, P0, { scienceGen: z, nextToKind: nt }, pl || {}), abilityId: 0, addedInGame: 1 }, over || {});
+  };
+  const kid = (k) => KINDS.indexOf(k) + 1, KEEP = kid('keep');
+  const ROWS = {
+    keep: row('keep', {}, { needsKeep: false, isKeep: true, cappedByKeepLevel: false, maxPerBase: 1 }),
+    hut: row('hut'), silo: row('silo', { capacity: SILO_CAP }), tower: row('tower'),
+    wall: row('wall', { strength: [WALL_HP].concat(Array(TIERS.wall.length - 1).fill(0)), capacity: Array(TIERS.wall.length).fill(WALL_CAP) }, { onBaseEdge: true }),
+    cell: row('cell', { reach: CELL_REACH.slice(1, 1 + TIERS.cell.length) }, { onClaimedGround: true }),
+    generator: row('generator', {}, { onWater: true }), collectionDepot: row('collectionDepot'),
+  };
+  // Any kind values.js has and the list above does not (the capacitor, since M8) is written as a plain row,
+  // so "all rows" means all of values.js's. What its row cannot carry on chain is asserted above, not hidden.
+  for (const k of KINDS) if (!ROWS[k]) ROWS[k] = row(k);
+  const RID3 = ethers.id('fixcheck registry');
+  for (const k of KINDS) await uTry('setLadder', [RID3, kid(k), CRYSTAL[k].map(BigInt), CRYSTAL[k].map((_, i) => BigInt(i === 0 ? (WOOD[k] || 0) : 0))], TEAM);   // the ladders first, so the row has to agree
+  const kThief = await uTry('setKind', [RID3, KEEP, ROWS.keep], STRANGER), kZero = await uTry('setKind', [RID3, 0, ROWS.keep], TEAM);
+  ok('NEGATIVE: a stranger cannot write a row (PowerNotHeld); kind 0 is "none" and refused (KindZero), so needsKind 0 can mean nothing', kThief === 'PowerNotHeld' && kZero === 'KindZero', kThief + ' / ' + kZero);
+  // the four energy columns (M8/M10) are per level too, so a fixture that changes the level count sizes them with it
+  const cols = (n) => ({ energy: Array(n).fill(0), supply: Array(n).fill(0), release: Array(n).fill(0), leak: Array(n).fill(0) });
+  const two = Object.assign({ levelName: ROWS.keep.levelName.slice(0, 2), buildMs: [1, 1], strength: [0, 0], capacity: [0, 0], reach: [0, 0], placement: Object.assign({}, ROWS.keep.placement, { scienceGen: [0, 0] }) }, cols(2));
+  const shapes = [await uTry('setKind', [RID3, KEEP, Object.assign({}, ROWS.keep, { strength: [1, 2] })], TEAM), await uTry('setKind', [RID3, KEEP, Object.assign({}, ROWS.keep, { footprint: [0, 0, 1] })], TEAM),
+    await uTry('setKind', [RID3, KEEP, Object.assign({}, ROWS.keep, { codeName: ethers.ZeroHash })], TEAM), await uTry('setKind', [RID3, KEEP, Object.assign({}, ROWS.keep, two)], TEAM)];
+  ok('NEGATIVE: a per-level array of the wrong length, a footprint that is not x,y pairs, an empty name, and a row whose levels disagree with the ladder already set are each refused (KindShape x3, LevelsDisagree)',
+    shapes[0] === 'KindShape' && shapes[1] === 'KindShape' && shapes[2] === 'KindShape' && shapes[3] === 'LevelsDisagree', JSON.stringify(shapes));
+  let allRows = true; for (const k of KINDS) if ((await uTry('setKind', [RID3, kid(k), ROWS[k]], TEAM)) !== 'MOVED') allRows = false;
+  const kRead = async (rid, id) => { try { return (await RU.call('kindOf', [rid, id])).out[0]; } catch (_) { return null; } };
+  const silo = RU ? await kRead(RID3, kid('silo')) : null, cell = RU ? await kRead(RID3, kid('cell')) : null, wall = RU ? await kRead(RID3, kid('wall')) : null;
+  const keep = RU ? await kRead(RID3, KEEP) : null, gen = RU ? await kRead(RID3, kid('generator')) : null;
+  const rows = RU ? Number((await RU.call('rowsSet', [RID3])).out[0]) : 0;
+  ok('root writes all ' + KINDS.length + ' rows read off values.js and they read back: silo capacity = SILO_CAP, cell reach = CELL_REACH by tier, wall strength = WALL_HP at level 1 and crew = WALL_CAP, keep isKeep and one per base, generator onWater, wall onBaseEdge, cell onClaimedGround, every buildMs = BUILD_MS, every level name = KIND.tiers',
+    allRows && rows === KINDS.length && !!silo && !!cell && !!wall && !!keep && !!gen
+    && Array.from(silo.capacity).map(Number).join() === SILO_CAP.join() && Array.from(cell.reach).map(Number).join() === CELL_REACH.slice(1, 1 + TIERS.cell.length).join()
+    && Number(wall.strength[0]) === WALL_HP && Array.from(wall.capacity).every((c) => Number(c) === WALL_CAP) && keep.placement.isKeep === true && Number(keep.placement.maxPerBase) === 1
+    && gen.placement.onWater === true && wall.placement.onBaseEdge === true && cell.placement.onClaimedGround === true && Array.from(silo.buildMs).every((b) => Number(b) === BUILD_MS)
+    && Array.from(cell.levelName).map((b) => ethers.decodeBytes32String(b)).join() === TIERS.cell.join(),
+    JSON.stringify({ allRows, rows, silo: silo && Array.from(silo.capacity).map(String), cell: cell && Array.from(cell.reach).map(String) }));
+  const ladderLate = await uTry('setLadder', [RID3, kid('cell'), [1n, 2n], [0n, 0n]], TEAM);
+  ok('NEGATIVE: once the row is set, a ladder with a different number of rungs is refused too (LevelsDisagree) - the two halves of one row cannot drift', ladderLate === 'LevelsDisagree', ladderLate);
+  const frz = await uTry('freeze', [RID3], TEAM), late = await uTry('setKind', [RID3, KEEP, ROWS.keep], TEAM);
+  ok('frozen: no row under the id moves again (RulesAreFrozen)', frz === 'MOVED' && late === 'RulesAreFrozen', frz + ' / ' + late);
+  const RID4 = ethers.id('fixcheck registry, next game');
+  const light = Object.assign(row('cell', Object.assign({ codeName: b32s('lighthouse'), levelName: ['BEACON', 'LIGHTHOUSE'].map(b32s), buildMs: [BUILD_MS, BUILD_MS], strength: [0, 0], capacity: [0, 0], reach: [6, 8], footprint: [0, 0, 1, 0] }, cols(2)),
+    { onWater: true, needsKind: kid('generator'), scienceGen: [0, 3] }), { addedInGame: 2 });
+  const hut4 = row('hut', Object.assign({ levelName: TIERS.hut.concat(['PALACE']).map(b32s), buildMs: Array(4).fill(BUILD_MS), strength: [0, 0, 0, 0], capacity: [0, 0, 0, 0], reach: [0, 0, 0, 0] }, cols(4)), { scienceGen: [0, 0, 0, 0] });
+  const NEW = KINDS.length + 1;   // the first id past the real registry: 9 until M8, 10 since the capacitor
+  const nine = await uTry('setKind', [RID4, NEW, light], TEAM), four = await uTry('setKind', [RID4, kid('hut'), hut4], TEAM);
+  const nineRow = nine === 'MOVED' ? await kRead(RID4, NEW) : null;
+  const lv = async (id) => (RU ? Number((await RU.call('levelsOf', [RID4, id])).out[0]) : -1);
+  ok('THE POINT: a NEW kind (lighthouse, id ' + NEW + ', past the ' + KINDS.length + ' values.js has; two tiles, needs a generator, reach 6/8, on water) and a FOURTH hut level are rows under the next game\'s id - no .sol changed, nothing redeployed; levelsOf reads 2 and 4; kindOf(' + NEW + ') under the old id is NoSuchKind',
+    nine === 'MOVED' && four === 'MOVED' && !!nineRow && Number(nineRow.placement.needsKind) === kid('generator') && Array.from(nineRow.footprint).map(Number).join() === '0,0,1,0'
+    && (await lv(NEW)) === 2 && (await lv(kid('hut'))) === 4 && (await uTry('kindOf', [RID3, NEW], TEAM)) === 'NoSuchKind', JSON.stringify([nine, four]));
+  note('what the page has no number for is written as ZERO and said so: hut, tower and depot capacity, tower reach, every strength but the wall\'s level 1; buildMs is one number for all (BUILD_MS). The schema names the field; the game has not decided the value.');
+  }
+
+  // =============================================================================================
+  // 17. M21 item 5: RareDoopieGate, the on-chain consumer of traitOf. Section 2 proved the token answers
+  // `traitOf(id, "Evolution")`; nothing in any .sol ASKED until now. The two constants are read OUT OF THE
+  // .sol as text (the way bridgecheck reads the EIP-712 type string out of ShadowFriends.sol) and held
+  // against doopie-trait.mjs, the one place the bytes are written down, so the attestor's signature and the
+  // gate's comparison cannot drift. Then the three answers: a 1/1 true, an ordinary Doopie false, an unknown
+  // id false WITHOUT a revert - and a revoked 1/1 false from then on. The fixtures here carry the shape a
+  // real one-of-one has (Species, Background, Evolution - three attributes, 75 of 75; M21 item 10).
+  // =============================================================================================
+  {
+  console.log('\n--- 17. RareDoopieGate: something other than the client reads what a Doopie is - the constants are doopie-trait.mjs\'s, a 1/1 reads true, an ordinary Doopie false, an unknown id false and never a revert ---');
+  const DT = await import('../../doopie-trait.mjs');
+  const gatePath = path.join(ROOT, 'RareDoopieGate.sol');
+  const gsrc = fs.existsSync(gatePath) ? fs.readFileSync(gatePath, 'utf8') : '';
+  const constOf = (name) => { const m = gsrc.match(new RegExp('bytes32 public constant ' + name + ' = (0x[0-9a-fA-F]{64});')); return m ? m[1].toLowerCase() : null; };
+  const keySrc = constOf('EVOLUTION_KEY'), valSrc = constOf('ONE_OF_ONE');
+  ok('the two constants READ OUT OF RareDoopieGate.sol are the exact bytes doopie-trait.mjs signs: EVOLUTION_KEY = KEY_B32 ("' + DT.TRAIT_KEY + '"), ONE_OF_ONE = ONE_OF_ONE_B32 ("' + DT.ONE_OF_ONE + '"), both right-padded',
+    !!keySrc && !!valSrc && keySrc === DT.KEY_B32.toLowerCase() && valSrc === DT.ONE_OF_ONE_B32.toLowerCase() && DT.unb32(keySrc) === DT.TRAIT_KEY && DT.unb32(valSrc) === DT.ONE_OF_ONE,
+    JSON.stringify({ sol: [keySrc, valSrc], mjs: [DT.KEY_B32, DT.ONE_OF_ONE_B32] }));
+  const GATE = C.gate ? await net.deploy(TEAM, C.gate, [shadow.address]) : null;
+  const GTE = C.gate ? errorNames(C.gate.abi) : {};
+  ok('RareDoopieGate compiles and deploys against the REAL ShadowFriends, holding nothing but one address and two constants' + (GATE ? ' (' + C.gate.size.toLocaleString('en-US') + ' bytes)' : ''),
+    !!GATE && C.gate.size < 24576, GATE ? String(C.gate.size) : 'no RareDoopieGate.sol');
+  const onChain = GATE ? [(await GATE.call('EVOLUTION_KEY')).out[0].toLowerCase(), (await GATE.call('ONE_OF_ONE')).out[0].toLowerCase(), (await GATE.call('shadows')).out[0]] : [];
+  ok('and the deployed bytecode answers the same two constants, and points at the shadow token it was given',
+    onChain[0] === DT.KEY_B32.toLowerCase() && onChain[1] === DT.ONE_OF_ONE_B32.toLowerCase() && String(onChain[2]).toLowerCase() === shadow.address.toLowerCase(), JSON.stringify(onChain));
+  const is1 = async (id) => { if (!GATE) return { v: 'NO GATE' }; try { const r = await GATE.call('isOneOfOne', [id]); return { v: r.out[0], gas: Number(r.gas) }; }
+    catch (e) { const sel = (e.data || '').slice(0, 10); return { v: 'REVERT ' + (GTE[sel] || SERR[sel] || sel) }; } };
+  const three = (evo) => ({ traitKeys: ['Species', 'Background', 'Evolution'].map(b32), traitValues: ['Lint', 'Neotide', evo].map(b32) });
+  const rare = claimFor(Object.assign({ solMint: mintOf('mint-gate-1of1') }, three('1/1')));
+  const rRare = await tryShadow('claim', [rare, await sign(rare)], OWNER);
+  const tokRare = BigInt(rare.solMint);
+  const one = rRare === 'MOVED' ? await is1(tokRare) : { v: rRare };
+  ok('a one-of-one in the shape a real one has (three attributes, Evolution = 1/1) reads TRUE' + (one.gas ? ' - ' + one.gas.toLocaleString('en-US') + ' gas, a view' : ''), one.v === true, String(one.v));
+  const ord = claimFor(Object.assign({ solMint: mintOf('mint-gate-ordinary') }, three('Evolution 2')));
+  const rOrd = await tryShadow('claim', [ord, await sign(ord)], OWNER);
+  const ordRead = rOrd === 'MOVED' ? await is1(BigInt(ord.solMint)) : { v: rOrd };
+  ok('an ORDINARY Doopie (Evolution = "Evolution 2") reads FALSE - the key is found and the value is not 1/1', ordRead.v === false, String(ordRead.v));
+  const none = claimFor({ solMint: mintOf('mint-gate-no-evolution'), traitKeys: ['Species', 'Background'].map(b32), traitValues: ['Lint', 'Neotide'].map(b32) });
+  const rNone = await tryShadow('claim', [none, await sign(none)], OWNER);
+  const noneRead = rNone === 'MOVED' ? await is1(BigInt(none.solMint)) : { v: rNone };
+  ok('a shadow with NO Evolution trait reads FALSE (found = false), not a zero mistaken for an answer', noneRead.v === false, String(noneRead.v));
+  const unk = await is1(12345n);
+  ok('an UNKNOWN id reads FALSE and does not revert, though traitOf itself reverts NoSuchShadow for it (section 2)', unk.v === false, String(unk.v));
+  const rRev = await tryShadow('revoke', [tokRare, 'sold: fixcheck'], attestor.address);
+  const after = rRev === 'MOVED' ? await is1(tokRare) : { v: rRev };
+  ok('and the one-of-one REVOKED (sold on Solana) reads FALSE from then on, without a revert - the gate follows the ledger, never a cached answer', after.v === false, String(after.v));
+  const tryDeploy = async (arg) => { if (!GATE) return 'NO GATE'; try { await net.deploy(TEAM, C.gate, [arg]); return 'MOVED'; } catch (e) { return GTE[(e.data || '').slice(0, 10)] || 'revert'; } };
+  const noCode = await tryDeploy(STRANGER), zeroAddr = await tryDeploy(ethers.ZeroAddress);
+  ok('NEGATIVE: it refuses to deploy against an address with no code (NotAContract) or the zero address (ZeroAddress) - a gate that could never answer is refused at deploy, not discovered at the first call',
+    noCode === 'NotAContract' && zeroAddr === 'ZeroAddress', noCode + ' / ' + zeroAddr);
+  ok('and it has no setter at all: nothing in its ABI writes state, so there is nothing to guard', !!C.gate && !C.gate.abi.some((f) => f.type === 'function' && f.stateMutability !== 'view' && f.stateMutability !== 'pure'),
+    C.gate ? C.gate.abi.filter((f) => f.type === 'function').map((f) => f.name + ':' + f.stateMutability).join() : 'no gate');
+  }
+
+  // =============================================================================================
+  // 20. Ruling 54, M20 item 20: a planted terminal made from a 1/1 pays its owner a cut of the trades made
+  // through it. The chain cannot see where a Friend stands (decision 9), so a trade claims a terminal with a
+  // server-signed TerminalSale; the cut is paid to ShadowFriends.ownerOf(shadowId), read LIVE, only when
+  // RareDoopieGate.isOneOfOne(shadowId) holds LIVE, and it comes OUT OF OUR FEE - the buyer and the seller
+  // see exactly what an ordinary trade gives them. Every row below is run against the REAL ShadowFriends and
+  // the REAL gate, and each was broken once by a mutation of RareMarket.sol to show it can fail.
+  // =============================================================================================
+  {
+  console.log('\n--- 20. RareMarket: a planted 1/1 terminal\'s cut - server-signed, paid to the live 1/1 holder out of our fee, never fakeable, never replayed, ordinary trades unchanged ---');
+  const has20 = !!C.market && C.market.abi.some((f) => f.name === 'buyVia') && !!C.gate;
+  const [TS, TB, TB2, HOST, NEWHOST, TFEES] = ['0xb000000000000000000000000000000000000001', '0xb000000000000000000000000000000000000002',
+    '0xb000000000000000000000000000000000000003', '0xb000000000000000000000000000000000000004', '0xb000000000000000000000000000000000000005',
+    '0xb000000000000000000000000000000000000006'];
+  for (const a of [TS, TB, TB2, HOST, NEWHOST, TFEES]) await net.acct(a);
+  await tryCall(ROLES, RERR, 'setWhitelisted', [[TS, TB, TB2, HOST, NEWHOST, OWNER], true], TEAM);
+  const SERVER = ethers.Wallet.createRandom(), FORGER = ethers.Wallet.createRandom();
+  const G20 = has20 ? await net.deploy(TEAM, C.gate, [shadow.address]) : null;
+  const TFEE = 150, TPRICE = 1000n * 10n ** 18n;
+  const tm = has20 ? await net.deploy(TEAM, C.market, [rf.address, ROLES.address, ethers.ZeroAddress, 1000, TFEE, TFEES, shadow.address, G20.address, TERM.max, TERM.share]) : null;
+  const TERR = C.market ? Object.assign({}, errorNames(C.market.abi), RERR) : {};
+  const tTry = async (fn, args, from) => (tm ? await tryCall(tm, TERR, fn, args, from) : 'NO buyVia');
+  const tRead = async (fn, args) => { const v = tm ? await soft(tm, fn, args) : null; return v ? v.out[0] : null; };
+  ok('RareMarket deploys with the terminal cut: shadow token and gate wired, share ' + TERM.share + ' bps of the fee under an immutable ceiling of ' + TERM.max + ' - both read out of deploy.mjs, where they are marked PROPOSED',
+    !!tm && TERM.share !== null && TERM.max !== null && Number(await tRead('terminalShareBps')) === TERM.share && Number(await tRead('maxTerminalShareBps')) === TERM.max
+    && String(await tRead('shadows')).toLowerCase() === shadow.address.toLowerCase() && /PROPOSED/.test(deploySrc.match(/terminalShareBps:\s*\[[^\]]*\]/)?.[0] || ''),
+    tm ? String(await tRead('terminalShareBps')) + ' / ' + String(await tRead('maxTerminalShareBps')) : 'RareMarket has no buyVia');
+  // the server key holds SIGN_TERMINAL through a role, the way grant.mjs gives it to the server role
+  const SIGN_T = tm ? await tRead('SIGN_TERMINAL') : ethers.ZeroHash, GMR = (await ROLES.call('GAMEMASTER')).out[0];
+  if (tm) { await tryCall(ROLES, RERR, 'grantPower', [SIGN_T, GMR, true], TEAM); await tryCall(ROLES, RERR, 'setRoleMember', [GMR, SERVER.address, true], TEAM); }
+  ok('the signer is a key holding SIGN_TERMINAL in RareRoles (grantable, like RECORD_FIGHT), and the forger holds nothing',
+    tm && (await ROLES.call('hasPower', [SERVER.address, SIGN_T])).out[0] === true && (await ROLES.call('hasPower', [FORGER.address, SIGN_T])).out[0] === false, 'no market');
+  const dom20 = tm ? (await tm.call('eip712Domain')).out : [];
+  const tdomain = { name: dom20[1], version: dom20[2], chainId: CHAIN_ID, verifyingContract: tm ? tm.address : ethers.ZeroAddress };
+  const ttypes = { TerminalSale: [{ name: 'shadowId', type: 'uint256' }, { name: 'actor', type: 'address' }, { name: 'collection', type: 'address' },
+    { name: 'tokenId', type: 'uint256' }, { name: 'counterparty', type: 'address' }, { name: 'price', type: 'uint128' }, { name: 'fromOffer', type: 'bool' },
+    { name: 'nonce', type: 'uint256' }, { name: 'deadline', type: 'uint64' }] };
+  let nonce20 = 0n;
+  // what the server signs: an actor at a terminal, for one exact sale
+  const auth = async (signer, s) => {
+    const t = { shadowId: s.shadowId, nonce: s.nonce ?? ++nonce20, deadline: s.deadline ?? BigInt(net.at()) + 600n };
+    const sig = await signer.signTypedData(tdomain, ttypes, { shadowId: t.shadowId, actor: s.actor, collection: s.collection, tokenId: s.tokenId,
+      counterparty: s.counterparty, price: s.price, fromOffer: !!s.fromOffer, nonce: t.nonce, deadline: t.deadline });
+    return { t: [t.shadowId, t.nonce, t.deadline], sig };
+  };
+  // the terminals: one 1/1 held by HOST, one ordinary Doopie held by HOST
+  const three = (evo) => ({ traitKeys: ['Species', 'Background', 'Evolution'].map(b32), traitValues: ['Lint', 'Neotide', evo].map(b32) });
+  const c11 = claimFor(Object.assign({ to: HOST, solMint: mintOf('mint-terminal-1of1') }, three('1/1')));
+  const cOrd = claimFor(Object.assign({ to: HOST, solMint: mintOf('mint-terminal-ordinary') }, three('Evolution 3')));
+  const r11 = await tryShadow('claim', [c11, await sign(c11)], HOST), rOrd2 = await tryShadow('claim', [cOrd, await sign(cOrd)], HOST);
+  const T11 = BigInt(c11.solMint), TORD = BigInt(cOrd.solMint);
+  ok('two terminals stand: a 1/1 Doopie\'s shadow and an ordinary one, both held by HOST, and the gate tells them apart',
+    r11 === 'MOVED' && rOrd2 === 'MOVED' && !!G20 && (await G20.call('isOneOfOne', [T11])).out[0] === true && (await G20.call('isOneOfOne', [TORD])).out[0] === false, r11 + ' / ' + rOrd2);
+
+  // tokens and money
+  const GEN20 = gen ? gen.address : ethers.ZeroAddress;
+  if (tm) {
+    await tTry('setTradeable', [GEN20, true], TEAM);
+    for (const a of [TS, TB, TB2]) { await rf.call('mint', [a, 10n ** 24n]); await rf.call('approve', [tm.address, ethers.MaxUint256], a); await gc('setApprovalForAll', [tm.address, true], a); }
+    for (let i = 100n; i < 112n; i++) await gc('mint', [TS, i]);
+  }
+  const bal20 = async (a) => BigInt((await rf.call('balanceOf', [a])).out[0]);
+  const snap = async () => ({ s: await bal20(TS), b: await bal20(TB), b2: await bal20(TB2), h: await bal20(HOST), n: await bal20(NEWHOST), f: await bal20(TFEES) });
+  const delta = (a, b) => Object.fromEntries(Object.keys(a).map((k) => [k, b[k] - a[k]]));
+  const FEE20 = (TPRICE * BigInt(TFEE)) / 10_000n, CUT20 = (FEE20 * BigInt(TERM.share || 0)) / 10_000n;
+  const RFX = ethers.id('Transfer(address,address,uint256)');
+  const cutEv = (r) => (r && r.events ? r.events.find((e) => e.name === 'TerminalCut') : null);
+  const buyVia = async (from, tokenId, a) => (tm ? await tm.call('buyVia', [GEN20, tokenId, a.t, a.sig], from).catch((e) => ({ err: TERR[(e.data || '').slice(0, 10)] || 'revert' })) : { err: 'NO buyVia' });
+  const errOf = (r) => (r && r.err ? r.err : 'MOVED');
+
+  // --- 8. ORDINARY TRADES UNCHANGED - measured first, as the baseline every terminal trade is held against ---
+  await tTry('list', [GEN20, 100n, TPRICE], TS);
+  const o0 = await snap();
+  const plain = tm ? await tm.call('buy', [GEN20, 100n], TB).catch(() => null) : null;
+  const o1 = await snap(), dPlain = delta(o0, o1);
+  const plainRf = plain ? plain.logs.filter((l) => l.address.toLowerCase() === rf.address.toLowerCase() && l.topics[0] === RFX) : [];
+  ok('ORDINARY TRADES UNCHANGED: a plain buy() on the same market moves exactly two $RF transfers - fee, then seller, nothing else - pays our fee in full, emits no TerminalCut, and reads nothing about a terminal',
+    !!plain && plainRf.length === 2 && dPlain.f === FEE20 && dPlain.s === TPRICE - FEE20 && dPlain.b === -TPRICE && dPlain.h === 0n && !cutEv(plain),
+    plain ? JSON.stringify(Object.fromEntries(Object.entries(dPlain).map(([k, v]) => [k, String(v)]))) + ' transfers ' + plainRf.length + ' cut ' + !!cutEv(plain) : 'buy failed');
+  note('(no partnership layer on this market, so an ordinary sale is two $RF legs; part 9 above proves the three-leg partner sale on the same bytecode, unchanged)');
+
+  // --- 1. A TERMINAL TRADE PAYS THE 1/1's OWNER ---
+  await tTry('list', [GEN20, 101n, TPRICE], TS);
+  const a1 = await auth(SERVER, { shadowId: T11, actor: TB, collection: GEN20, tokenId: 101n, counterparty: TS, price: TPRICE });
+  const v0 = await snap();
+  const via1 = await buyVia(TB, 101n, a1);
+  const v1 = await snap(), dVia = delta(v0, v1);
+  const ev1 = cutEv(via1);
+  ok('A TERMINAL TRADE PAYS THE 1/1\'s OWNER: buyVia through the 1/1 terminal pays HOST ' + ethers.formatEther(CUT20) + ' $RF - ' + TERM.share + ' bps of the ' + ethers.formatEther(FEE20) + ' fee - and the event names HOST and the sum',
+    errOf(via1) === 'MOVED' && dVia.h === CUT20 && CUT20 > 0n && !!ev1 && ev1.args[3].toLowerCase() === HOST && ev1.args[4] === CUT20 && ev1.args[2] === T11,
+    errOf(via1) + ' host +' + dVia.h);
+  ok('and IT COMES OUT OF OUR FEE ONLY: the buyer paid and the seller received EXACTLY what the plain buy gave them; feeTo got the fee less the cut',
+    errOf(via1) === 'MOVED' && dVia.b === dPlain.b && dVia.s === dPlain.s && dVia.f === FEE20 - CUT20 && dVia.f + dVia.h === dPlain.f,
+    JSON.stringify(Object.fromEntries(Object.entries(dVia).map(([k, v]) => [k, String(v)]))));
+  const gasPlain = plain ? Number(plain.gas) : 0, gasVia = via1 && via1.gas ? Number(via1.gas) : 0;
+  note('execution gas, in memory (Ethereum rules, floors): buy ' + gasPlain.toLocaleString('en-US') + ', buyVia ' + gasVia.toLocaleString('en-US') + ' (+' + (gasVia - gasPlain).toLocaleString('en-US') + ': one ecrecover, a hasPower walk, one SSTORE to spend the digest, two reads of the shadow, a fourth transfer)');
+  // and the other way in: a seller accepting an offer while standing at the terminal
+  const EXP20 = BigInt(net.at()) + 3600n;
+  await tTry('offer', [GEN20, 102n, TPRICE, EXP20], TB2);
+  const aOf = await auth(SERVER, { shadowId: T11, actor: TS, collection: GEN20, tokenId: 102n, counterparty: TB2, price: TPRICE, fromOffer: true });
+  const w0 = await snap();
+  const accVia = tm ? await tm.call('acceptOfferVia', [GEN20, 102n, TB2, TPRICE, aOf.t, aOf.sig], TS).catch((e) => ({ err: TERR[(e.data || '').slice(0, 10)] || 'revert' })) : { err: 'NO' };
+  const dAcc = delta(w0, await snap());
+  ok('and acceptOfferVia - the seller at the terminal - pays HOST the same cut, out of the same fee, with the offerer and the seller untouched',
+    errOf(accVia) === 'MOVED' && dAcc.h === CUT20 && dAcc.f === FEE20 - CUT20 && dAcc.s === TPRICE - FEE20 && dAcc.b2 === -TPRICE, errOf(accVia) + ' host +' + dAcc.h);
+
+  // --- 2. A FAKED OR UNSIGNED HOST ---
+  await tTry('list', [GEN20, 103n, TPRICE], TS);
+  const fk = await auth(FORGER, { shadowId: T11, actor: TB, collection: GEN20, tokenId: 103n, counterparty: TS, price: TPRICE });
+  const rForged = errOf(await buyVia(TB, 103n, fk));
+  ok('NEGATIVE, A FAKED HOST: an authorization signed by a key WITHOUT SIGN_TERMINAL is refused (TerminalSignerUnauthorized) - naming yourself as host is not a thing a caller can do',
+    rForged === 'TerminalSignerUnauthorized' && (await holder(103n)) === TS.toLowerCase(), rForged);
+  const real = await auth(SERVER, { shadowId: TORD, actor: TB, collection: GEN20, tokenId: 103n, counterparty: TS, price: TPRICE });
+  const swapped = { t: [T11, real.t[1], real.t[2]], sig: real.sig };
+  const rSwap = errOf(await buyVia(TB, 103n, swapped));
+  ok('NEGATIVE: a REAL server signature for one terminal, with the shadow id edited to the 1/1, is refused - the edited digest recovers to a stranger (TerminalSignerUnauthorized)',
+    rSwap === 'TerminalSignerUnauthorized', rSwap);
+  const lifted = await auth(SERVER, { shadowId: T11, actor: TB, collection: GEN20, tokenId: 103n, counterparty: TS, price: TPRICE });
+  const rLift = errOf(await buyVia(TB2, 103n, lifted));
+  ok('NEGATIVE: an authorization LIFTED by somebody else - the server signed it for TB, TB2 submits it - is refused: the actor is msg.sender, inside the digest',
+    rLift === 'TerminalSignerUnauthorized', rLift);
+  const rUnsigned = errOf(await buyVia(TB, 103n, { t: lifted.t, sig: '0x' }));
+  ok('NEGATIVE, UNSIGNED: no signature at all is refused (' + rUnsigned + ') and the token does not move',
+    rUnsigned !== 'MOVED' && (await holder(103n)) === TS.toLowerCase(), rUnsigned);
+  await tTry('reprice', [GEN20, 103n, TPRICE / 2n], TS);
+  const rRepriced = errOf(await buyVia(TB, 103n, lifted));
+  ok('NEGATIVE: an authorization for one PRICE does not carry to another - the seller repriced, the signed sale no longer exists (TerminalSignerUnauthorized)',
+    rRepriced === 'TerminalSignerUnauthorized', rRepriced);
+  await tTry('reprice', [GEN20, 103n, TPRICE], TS);
+
+  // --- 3. AN EXPIRED OR REPLAYED SIGNATURE ---
+  const stale = await auth(SERVER, { shadowId: T11, actor: TB, collection: GEN20, tokenId: 103n, counterparty: TS, price: TPRICE, deadline: BigInt(net.at()) + 60n });
+  net.travel(61);
+  const rExpired = errOf(await buyVia(TB, 103n, stale));
+  ok('NEGATIVE, EXPIRED: an authorization used after its deadline is refused (TerminalAuthExpired)', rExpired === 'TerminalAuthExpired', rExpired);
+  const TTL = Number(await tRead('TERMINAL_AUTH_TTL'));
+  const longA = await auth(SERVER, { shadowId: T11, actor: TB, collection: GEN20, tokenId: 103n, counterparty: TS, price: TPRICE, deadline: BigInt(net.at()) + BigInt(TTL) + 1n });
+  const rLong = errOf(await buyVia(TB, 103n, longA));
+  ok('NEGATIVE: an authorization meant to live longer than TERMINAL_AUTH_TTL (' + TTL + ' s, the same as ShadowFriends.CLAIM_TTL) is refused (TerminalAuthTooLong) - a leaked or careless signature cannot stand for days',
+    rLong === 'TerminalAuthTooLong' && TTL === 900, rLong + ' ttl ' + TTL);
+  // the replay: the very same sale again - seller, buyer, token and price - with the authorization already spent
+  await gc('transferFrom', [TB, TS, 101n], TB);
+  await tTry('list', [GEN20, 101n, TPRICE], TS);
+  const rReplay = errOf(await buyVia(TB, 101n, a1));
+  ok('NEGATIVE, REPLAYED: the SAME authorization on the SAME sale a second time is refused (TerminalAuthUsed) - it is spent by digest, and the token stays put',
+    rReplay === 'TerminalAuthUsed' && (await holder(101n)) === TS.toLowerCase() && (await tRead('terminalAuthUsed', [await tm.call('terminalSaleDigest', [a1.t, TB, GEN20, 101n, TS, TPRICE, false]).then((r) => r.out[0])])) === true, rReplay);
+  ok('and the same terminal, the same sale, with a FRESH authorization (a new nonce) settles - the refusal was the replay, not the sale',
+    errOf(await buyVia(TB, 101n, await auth(SERVER, { shadowId: T11, actor: TB, collection: GEN20, tokenId: 101n, counterparty: TS, price: TPRICE }))) === 'MOVED', 'fresh auth refused');
+
+  // --- 4. A NON-1/1 SHADOW GETS NOTHING ---
+  await tTry('list', [GEN20, 104n, TPRICE], TS);
+  const n0 = await snap();
+  const viaOrd = await buyVia(TB, 104n, await auth(SERVER, { shadowId: TORD, actor: TB, collection: GEN20, tokenId: 104n, counterparty: TS, price: TPRICE }));
+  const dOrd = delta(n0, await snap()), evOrd = cutEv(viaOrd);
+  ok('NEGATIVE, NOT A 1/1: a properly signed trade through an ORDINARY Doopie\'s terminal settles, pays HOST NOTHING and leaves our whole fee with us - and the record says it claimed a terminal and paid nobody',
+    errOf(viaOrd) === 'MOVED' && dOrd.h === 0n && dOrd.f === FEE20 && dOrd.s === TPRICE - FEE20 && !!evOrd && evOrd.args[3] === ethers.ZeroAddress && evOrd.args[4] === 0n,
+    errOf(viaOrd) + ' host +' + dOrd.h + ' fee +' + dOrd.f);
+  const notShadow = 424242n;
+  await tTry('list', [GEN20, 105n, TPRICE], TS);
+  const viaNone = await buyVia(TB, 105n, await auth(SERVER, { shadowId: notShadow, actor: TB, collection: GEN20, tokenId: 105n, counterparty: TS, price: TPRICE }));
+  ok('and an id that is no shadow at all pays nobody and does not revert - the gate answers false, ownerOf is never trusted to exist',
+    errOf(viaNone) === 'MOVED' && !!cutEv(viaNone) && cutEv(viaNone).args[4] === 0n, errOf(viaNone));
+
+  // --- 5. A SOLD OR REVOKED SHADOW PAYS THE NEW OWNER, OR NOBODY ---
+  await tTry('list', [GEN20, 106n, TPRICE], TS);
+  const preRevoke = await auth(SERVER, { shadowId: T11, actor: TB, collection: GEN20, tokenId: 106n, counterparty: TS, price: TPRICE });
+  const rRevoke = await tryShadow('revoke', [T11, 'sold on Solana: fixcheck part 20'], attestor.address);
+  const k0 = await snap();
+  const viaRev = await buyVia(TB, 106n, preRevoke);
+  const dRev = delta(k0, await snap());
+  ok('a 1/1 REVOKED between signing and settling (sold on Solana): the sale STILL SETTLES, the old holder gets NOTHING, and the whole fee stays ours - nobody is paid for a terminal that is no longer theirs',
+    rRevoke === 'MOVED' && errOf(viaRev) === 'MOVED' && dRev.h === 0n && dRev.f === FEE20 && (await holder(106n)) === TB.toLowerCase(), rRevoke + ' / ' + errOf(viaRev) + ' host +' + dRev.h);
+  // the buyer on Solana claims the shadow: same mint, so the same shadow id, a NEW holder. Signed after the revoke.
+  net.travel(2);
+  const cNew = claimFor(Object.assign({ to: NEWHOST, solMint: c11.solMint, solOwner: mintOf('solowner-new'), deadline: Number(net.at()) + 900 }, three('1/1')));
+  const rReclaim = await tryShadow('claim', [cNew, await sign(cNew)], NEWHOST);
+  await tTry('list', [GEN20, 107n, TPRICE], TS);
+  const m0 = await snap();
+  const viaNew = await buyVia(TB, 107n, await auth(SERVER, { shadowId: T11, actor: TB, collection: GEN20, tokenId: 107n, counterparty: TS, price: TPRICE }));
+  const dNew = delta(m0, await snap()), evNew = cutEv(viaNew);
+  ok('and once the NEW holder claims the same mint (the same shadow id), the same terminal pays THE NEW OWNER - the payee is ownerOf read live, never a stored or signed address',
+    rReclaim === 'MOVED' && errOf(viaNew) === 'MOVED' && dNew.n === CUT20 && dNew.h === 0n && !!evNew && evNew.args[3].toLowerCase() === NEWHOST,
+    rReclaim + ' / ' + errOf(viaNew) + ' new +' + dNew.n + ' old +' + dNew.h);
+
+  // --- the setters: guarded, ceilinged, and unable to name a payee ---
+  const sThief = await tTry('setTerminalShareBps', [1], TB);
+  const sOver = await tTry('setTerminalShareBps', [(TERM.max || 0) + 1], TEAM);
+  const sSame = await tTry('setTerminalShareBps', [TERM.share], TEAM);
+  const sOk = await tTry('setTerminalShareBps', [TERM.max], TEAM);
+  ok('NEGATIVE, the share\'s setter: a stranger is refused (PowerNotHeld), above the IMMUTABLE ceiling is refused (FeeAboveCeiling), a no-op is refused (TerminalShareUnchanged), and root may move it up to the ceiling',
+    sThief === 'PowerNotHeld' && sOver === 'FeeAboveCeiling' && sSame === 'TerminalShareUnchanged' && sOk === 'MOVED' && Number(await tRead('terminalShareBps')) === TERM.max,
+    [sThief, sOver, sSame, sOk].join(' / '));
+  await tTry('setTerminalShareBps', [TERM.share], TEAM);
+  const gThief = await tTry('setGate', [G20.address], TB), gEmpty = await tTry('setGate', [TB], TEAM), gSame = await tTry('setGate', [G20.address], TEAM);
+  const G20b = has20 ? await net.deploy(TEAM, C.gate, [shadow.address]) : null;
+  const gOk = G20b ? await tTry('setGate', [G20b.address], TEAM) : 'NO GATE';
+  ok('NEGATIVE, the gate\'s setter: a stranger is refused (PowerNotHeld), an address with no code is refused (NotAContract), a no-op is refused (GateUnchanged), and a NEW RareDoopieGate can be pointed at - the repairable tier the gate was designed to be',
+    gThief === 'PowerNotHeld' && gEmpty === 'NotAContract' && gSame === 'GateUnchanged' && gOk === 'MOVED', [gThief, gEmpty, gSame, gOk].join(' / '));
+  const ctor = async (args) => { try { await net.deploy(TEAM, C.market, args); return 'MOVED'; } catch (e) { return TERR[(e.data || '').slice(0, 10)] || 'revert'; } };
+  const cOverCeil = has20 ? await ctor([rf.address, ROLES.address, ethers.ZeroAddress, 1000, TFEE, TFEES, shadow.address, G20.address, 10_001, 0]) : 'NO';
+  const cShareOver = has20 ? await ctor([rf.address, ROLES.address, ethers.ZeroAddress, 1000, TFEE, TFEES, shadow.address, G20.address, 100, 101]) : 'NO';
+  const cNoShadow = has20 ? await ctor([rf.address, ROLES.address, ethers.ZeroAddress, 1000, TFEE, TFEES, TB, G20.address, 100, 50]) : 'NO';
+  ok('NEGATIVE at deploy: a ceiling above the whole fee (CeilingAboveWhole), a starting share above its ceiling (FeeAboveCeiling) and a shadow token with no code (NotAContract) are all refused',
+    cOverCeil === 'CeilingAboveWhole' && cShareOver === 'FeeAboveCeiling' && cNoShadow === 'NotAContract', [cOverCeil, cShareOver, cNoShadow].join(' / '));
+  ok('and no setter anywhere names a payee or the shadow token: the payee is ownerOf on an IMMUTABLE ShadowFriends, so no power in RareRoles can redirect a terminal\'s cut',
+    !!C.market && !C.market.abi.some((f) => f.type === 'function' && /^set(Shadow|Host|Payee|Terminal(To|Host|Payee))/i.test(f.name))
+    && !!C.market.abi.find((f) => f.name === 'shadows' && f.stateMutability === 'view'), 'a payee setter exists');
+  // revoking the signing power kills what it signed
+  await tTry('list', [GEN20, 108n, TPRICE], TS);
+  const pending = await auth(SERVER, { shadowId: T11, actor: TB, collection: GEN20, tokenId: 108n, counterparty: TS, price: TPRICE });
+  await tryCall(ROLES, RERR, 'grantPower', [SIGN_T, GMR, false], TEAM);
+  const rRevoked = errOf(await buyVia(TB, 108n, pending));
+  ok('NEGATIVE: SIGN_TERMINAL taken back from the server\'s role kills every authorization it had outstanding (TerminalSignerUnauthorized) - the power is read live, at settlement',
+    rRevoked === 'TerminalSignerUnauthorized', rRevoked);
+  ok('and the market escrowed nothing through any of it: its $RF balance is zero', tm ? (await bal20(tm.address)) === 0n : false, tm ? String(await bal20(tm.address)) : 'no market');
+  }
+
+  console.log(fails ? '\n' + fails + ' check(s) failed' : '\nall nine items hold, and the fight log, and the whitelist, and the duel\'s numbers are state a running game freezes, and a building is a row');
   process.exit(fails ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(1); });

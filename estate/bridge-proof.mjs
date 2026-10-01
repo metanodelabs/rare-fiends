@@ -1,10 +1,11 @@
 // The bridge, end to end, with nothing published and nothing reached: a Doopie bridges, its shadow
-// appears, the shadow refuses transfer, and selling it on Solana revokes it. M21 items 3, 4, 5 (the read)
-// and 10, proved against the contract AS COMPILED, not against a mock of it.
+// appears, the shadow refuses transfer, and selling it on Solana revokes it. M21 items 3, 4, 5 (the read,
+// and the on-chain consumer that makes it: `RareDoopieGate.isOneOfOne`) and 10, proved against the
+// contracts AS COMPILED, not against a mock of them.
 //
 //     node estate/bridge-proof.mjs
 //
-// WHAT RUNS. `ShadowFriends.sol` and `RareRoles.sol` are compiled with the contracts' own solc and run in
+// WHAT RUNS. `ShadowFriends.sol`, `RareRoles.sol` and `RareDoopieGate.sol` are compiled with the contracts' own solc and run in
 // the contracts' own in-process EVM (the same `@ethereumjs/evm` the parity check uses, chain id 4663).
 // The attestor is `attestor.mjs`'s real `attest` and real `recheck`, with an EPHEMERAL key made here.
 // Solana is a fake with two wallets and one Doopie - the one-of-one the design names - and it counts
@@ -52,7 +53,7 @@ const finding = (name, c, v) => { console.log((c ? '  ok  ' : 'FINDING  ') + nam
 // ---------------------------------------------------------------- compile, the parity check's way
 function compile() {
   const files = {};
-  for (const f of ['ShadowFriends.sol', 'RareRoles.sol']) files[f] = { content: fs.readFileSync(path.join(CONTRACTS, f), 'utf8') };
+  for (const f of ['ShadowFriends.sol', 'RareRoles.sol', 'RareDoopieGate.sol']) files[f] = { content: fs.readFileSync(path.join(CONTRACTS, f), 'utf8') };
   const find = (p) => {
     const f = p.startsWith('lib/openzeppelin-contracts/')
       ? path.join(CONTRACTS, 'node_modules/@openzeppelin/contracts', p.slice('lib/openzeppelin-contracts/contracts/'.length))
@@ -66,7 +67,8 @@ function compile() {
   if (errs.length) { console.log(errs.map((e) => e.formattedMessage).join('\n')); process.exit(1); }
   const pick = (file, name) => ({ abi: out.contracts[file][name].abi, bin: '0x' + out.contracts[file][name].evm.bytecode.object,
     size: out.contracts[file][name].evm.deployedBytecode.object.length / 2 });
-  return { shadow: pick('ShadowFriends.sol', 'ShadowFriends'), roles: pick('RareRoles.sol', 'RareRoles'), solc: solc.version().split('+')[0] };
+  return { shadow: pick('ShadowFriends.sol', 'ShadowFriends'), roles: pick('RareRoles.sol', 'RareRoles'),
+    gate: pick('RareDoopieGate.sol', 'RareDoopieGate'), solc: solc.version().split('+')[0] };
 }
 
 // ---------------------------------------------------------------- a tiny chain, with its logs kept
@@ -176,7 +178,16 @@ async function chain() {
   ok('traitOf(tokenId, ' + JSON.stringify(TRAIT_KEY) + ') answers (' + JSON.stringify(ONE_OF_ONE) + ', found) with the exact bytes doopie-trait.mjs signs - the read an on-chain consumer makes',
     t[1] === true && t[0] === ONE_OF_ONE_B32 && unb32(t[0]) === ONE_OF_ONE, JSON.stringify(t));
   ok('and a key spelled another way is (0, not found), never a guess', miss[1] === false && BigInt(miss[0]) === 0n, JSON.stringify(miss));
-  console.log('      the consumer\'s two constants, for the chain engineer: key ' + KEY_B32 + '  value ' + ONE_OF_ONE_B32);
+  // The consumer (item 5's other half): RareDoopieGate, a replaceable contract carrying the two constants
+  // and asking the token. Nothing here types the bytes - the gate's own are read back and held against
+  // doopie-trait.mjs, so the attestor's signature and the on-chain comparison are the same bytes.
+  const gate = await net.deploy(TEAM, C.gate, [shadow.address]);
+  const gateConst = [(await gate.call('EVOLUTION_KEY')).out[0], (await gate.call('ONE_OF_ONE')).out[0]];
+  ok('RareDoopieGate deploys against the real shadow token and carries exactly the bytes doopie-trait.mjs signs (key, value)',
+    gateConst[0].toLowerCase() === KEY_B32.toLowerCase() && gateConst[1].toLowerCase() === ONE_OF_ONE_B32.toLowerCase(), JSON.stringify(gateConst));
+  const isOne = async (id) => { try { return (await gate.call('isOneOfOne', [id])).out[0]; } catch (e) { return 'REVERT ' + why(e); } };
+  ok('isOneOfOne(tokenId) reads TRUE for the one-of-one - something other than the client has now read what this Doopie is', (await isOne(tokenId)) === true, String(await isOne(tokenId)));
+  ok('isOneOfOne(an id nobody claimed) reads FALSE and does not revert, though traitOf would', (await isOne(12345n)) === false, String(await isOne(12345n)));
 
   // ---------------------------------------------------------------- 4. the shadow refuses to be transferred
   const xfer = await refused(() => shadow.call('transferFrom', [OWNER, BUYER, tokenId], OWNER));
@@ -223,6 +234,7 @@ async function chain() {
     await refused(() => shadow.call('ownerOf', [tokenId])) === 'ERC721NonexistentToken' && (await shadow.call('shadowed', [keyToBytes32(MINT)])).out[0] === false,
     await refused(() => shadow.call('ownerOf', [tokenId])));
   ok('and the next run finds nothing live', (await chainIO.liveShadows()).length === 0, 'still listed');
+  ok('and the gate follows the ledger: isOneOfOne(tokenId) reads FALSE the moment the shadow is revoked, without a revert', (await isOne(tokenId)) === false, String(await isOne(tokenId)));
 
   // A FINDING, not a pass: the first owner's signed claim is still inside its 15-minute deadline. Can they
   // re-send it after the revoke and get the shadow back for a Doopie they sold? `claim` checks `shadowed`
@@ -235,10 +247,15 @@ async function chain() {
   }
 
   // ---------------------------------------------------------------- 6. the buyer bridges the same Doopie
+  // One second later. The replay fix refuses any claim signed at or before the revoke's SECOND - the contract
+  // cannot tell "same second, before" from "same second, after" and refuses both - and this file never moved
+  // the clock, so the buyer asking in the revoke's own second would be refused as if they were the seller.
+  net.travel(1);
   const again = await attest(requestFor(BUYER_SOL, BUYER), io);
   const r2 = again.ok ? await shadow.raw(again.claims[0].data, BUYER) : null;
   ok('the buyer bridges the same mint to their own wallet: same tokenId, new owner', again.ok === true && r2 && (await shadow.call('ownerOf', [tokenId])).out[0] === BUYER,
     again.ok ? 'owner ' + (await refused(() => shadow.call('ownerOf', [tokenId]))) : again.code + ': ' + again.error);
+  ok('and the gate reads TRUE again for the same mint under its new owner: the trait is the Doopie\'s, the shadow is the holder\'s', (await isOne(tokenId)) === true, String(await isOne(tokenId)));
   const seller = await attest(requestFor(HOLDER, OWNER), io);
   ok('the seller\'s wallet, asking the attestor now, is refused not-owner (Solana says the buyer holds it)',
     seller.ok === false && seller.code === 'not-owner', seller.ok ? 'it SIGNED' : seller.code + ': ' + seller.error);

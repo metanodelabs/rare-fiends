@@ -297,6 +297,11 @@ button { font: inherit; color: inherit; }
 .street .cap { font-family: var(--display); font-size: 13px; letter-spacing: .1em; color: var(--dim); }
 .acts2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(92px, 1fr)); gap: 6px; }
 .acts2 .go { font-size: 17px; padding: 10px 6px; }
+/* hold'em's betting unit (ruling 7): crystals on, $RF present and shut. A small seg, not a second stake row. */
+.unit { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.unit .seg .ghost { font-size: 12px; padding: 3px 6px; letter-spacing: .06em; }
+.unit .seg .ghost[disabled] { opacity: .4; cursor: default; }
+.unit .k { font-family: var(--display); font-size: 13px; letter-spacing: .1em; color: var(--dim); }
 
 /* ---------- Friend or Fiend: the hidden-things grid ---------- */
 .fof { display: grid; gap: 7px; justify-items: center; }
@@ -493,6 +498,7 @@ button { font: inherit; color: inherit; }
     <div class="mtop">
       <i class="dot"></i><span>CHALLENGE</span><span>·</span><span id="phase">SET THE TERMS</span>
       <span class="sp"></span>
+      <span class="sample" id="demotag" hidden></span>
       <span class="sample">SAMPLE RECORDS</span>
       <button class="ghost" type="button" id="xclose">CLOSE</button>
     </div>
@@ -502,7 +508,7 @@ button { font: inherit; color: inherit; }
       <section class="player" id="p2"></section>
     </div>
     <div class="mfoot">
-      <span><b>THE POT</b> · both stake the same · the winner takes the pot</span>
+      <span id="demofoot"><b>THE POT</b> · both stake the same · the winner takes the pot</span>
       <span class="sp" style="flex:1"></span>
       <span>DEMO: THE OTHER SIDE IS PLAYED BY THE PAGE</span>
       <button class="ghost" type="button" id="algoBtn">THE ALGORITHM</button>
@@ -511,6 +517,7 @@ button { font: inherit; color: inherit; }
 </div>
 <script src="chance.js"></script>
 <script src="duel.js"></script>
+<script src="chainlive.js"></script>
 <script>
 (() => {
   'use strict';
@@ -579,12 +586,14 @@ button { font: inherit; color: inherit; }
 
   /* ---------- the players ---------- */
   // Genesis #4 and #1: their real on-chain art. Purses and records are SAMPLE numbers, since no one
-  // has played yet; the page keeps them honest from here on as you play.
+  // has played yet; the page keeps them honest from here on as you play. `purse` is crystals; `rf` is the
+  // $RF purse hold'em's second betting unit would draw on (ruling 7: present in the code, OFF in v1), and it
+  // is 0 because nothing has put any $RF into a purse - not a sample, an empty one.
   const P = {
-    p1: { id: 4, px: '0x003c3c5a5a5a7e00', purse: 240,
+    p1: { id: 4, px: '0x003c3c5a5a5a7e00', purse: 240, rf: 0,
           rec: { wins: 7, losses: 4, draws: 2, highest: 180, lowest: 20, net: 95, streak: 2 },
           recent: [['ROCK PAPER SCISSORS', 60, 'W'], ['ROCK PAPER SCISSORS', 40, 'W'], ['ROCK PAPER SCISSORS', 180, 'L'], ['ROCK PAPER SCISSORS', 20, 'D'], ['ROCK PAPER SCISSORS', 100, 'W']] },
-    p2: { id: 1, px: '0x007e663c5a5a7e00', purse: 610,
+    p2: { id: 1, px: '0x007e663c5a5a7e00', purse: 610, rf: 0,
           rec: { wins: 12, losses: 9, draws: 1, highest: 400, lowest: 10, net: 140, streak: -1 },
           recent: [['ROCK PAPER SCISSORS', 120, 'L'], ['ROCK PAPER SCISSORS', 400, 'W'], ['ROCK PAPER SCISSORS', 60, 'W'], ['ROCK PAPER SCISSORS', 10, 'L'], ['ROCK PAPER SCISSORS', 80, 'W']] },
   };
@@ -618,7 +627,7 @@ button { font: inherit; color: inherit; }
       blurb: 'Closest to 21 without going over. Aces count 11 until the hand would bust. Dealt from the duel’s word, so the same word deals the same cards.',
       play: playBJ },
     { id: 'holdem', name: 'TEXAS HOLD’EM', ready: true,
-      blurb: 'Two cards each, five in the middle, best five of seven. The stake is the ante — play on or fold at every street.',
+      blurb: 'Two cards each, five in the middle, best five of seven. The stake is the ante; a betting round at every street, in crystals.',
       play: playHoldem },
     { id: 'fof', name: 'FRIEND OR FIEND', ready: true, terminal: true,
       blurb: 'Reached through a glitching terminal. Each side hides things; you probe theirs. What you turn up is a Friend or a fiend.',
@@ -626,20 +635,92 @@ button { font: inherit; color: inherit; }
   ];
   const STAKES = [10, 25, 50, 100, 200];
 
+  /* ---------- hold'em's betting: ruling 7, in the deployer's own words ----------
+     "Texas hold'em has betting, in crystals. Betting in $RF is supported in the code and switched off in
+     v1." (DESIGN.md, the deployer's rulings of 2026-09-30, row 7.) So the UNIT a bet moves in is data,
+     and the betting code below moves a bet between whichever purse and pot the unit names: turning $RF on
+     is flipping `on` here, not writing a second betting path. The first unit that is on is the one the
+     table bets in; a unit that is off is shown, shut, with its reason on it.
+     The ante is still the stake - set once, paid by both - and the bets go on top of it. The bet ladder
+     in $RF is a number nobody has set and is the economist's the day that switch turns on. */
+  const BET_UNITS = [
+    { id: 'crystals', name: 'CRYSTALS', purse: 'purse', pot: 'pot', on: true },
+    { id: 'rf', name: '$RF', purse: 'rf', pot: 'potRF', on: false, off: 'OFF IN V1 · RULING 7' },
+  ];
+  const betUnit = () => BET_UNITS.find(u => u.on);
+  // FIXED LIMIT, the ordinary shape and the one that needs no number nobody chose: a bet is one stake on
+  // the hole cards and the flop and two on the turn and the river, a raise is one more bet, and a street
+  // is capped at `raises`. It lives in this one object and changes in one line, like Friend or Fiend's
+  // board: askable, and nothing reads it twice.
+  const HOLDEM = { bets: [1, 1, 2, 2], raises: 3 };
+
   // screen: 'main' (terms, play, result) · 'prompt' (a challenge has arrived) · 'nope' (it was not accepted)
-  const S = { view: 'challenger', screen: 'main', answer: 'accept', phase: 'terms', stake: 50, game: 'rps', pot: 0, winner: null, duels: 0, last: null, det: false, sprung: false };
+  // `paid` is what each side has put in, by unit: the ante and then every bet. The record's NET is what a
+  // side actually won or lost, which with betting is no longer half the pot.
+  const freshPaid = () => Object.fromEntries(BET_UNITS.map(u => [u.id, { p1: 0, p2: 0 }]));
+  const S = { view: 'challenger', screen: 'main', answer: 'accept', phase: 'terms', stake: 50, game: 'rps', pot: 0, potRF: 0, paid: freshPaid(),
+    winner: null, duels: 0, last: null, det: false, sprung: false };
   const me = () => S.view === 'challenger' ? 'p1' : 'p2';           // whose seat you are in
   const them = () => me() === 'p1' ? 'p2' : 'p1';
   const $ = (id) => document.getElementById(id);
   const maxStake = () => Math.min(P.p1.purse, P.p2.purse);
   const PHASES = { terms: 'SET THE TERMS', sent: 'WAITING FOR AN ANSWER', staking: 'STAKES IN', play: 'PLAY', done: 'RESULT' };
 
+  /* ---------- demo mode: THE one switch, read - never a flag of this page's own ----------
+     DESIGN.md, Demo mode: "demo mode forces every game free. No entry fee, no stake, no payout." And M17 item
+     9: the four games READ the mode rather than carrying a second idea with a second name. The switch lives in
+     ONE place, `RareRoles.demoMode()` (estate/contracts/RareRoles.sol), and the contract makes free mean free by
+     REFUSING a non-zero stake (`requireFreeInDemoMode`) rather than branching - force the input, never branch
+     the path. This page does the same: while the mode is on the stake IS 0. The picker is shut on FREE, the pot
+     is 0, nothing leaves a purse and nothing lands in one, and every game runs the code it runs for money, with
+     zeros in it. A free game is counted in the record - it was played - but it is not a pot, so it enters no
+     pot list and moves no high or low.
+     WHERE IT IS READ FROM, in order, and the page says which on screen:
+       1. the chain: RareRoles.demoMode() at the `rareRoles` address bridge-config.json records, over the RPC
+          chainlive.js names (the fork under ?rpc=local). The deployer page reads the same getter.
+       2. until M20 records that address there is no contract to ask, and `?demo=1` stands in - the way the
+          deployer page already delivers its other switches to the game (?seams=1, ?fresh=1). The tag on the
+          top bar says so, so a reading of a query is never mistaken for a reading of the chain.
+     A gate on a page is not a gate - the deployer's own sentence - so this is a READ that sets the table's
+     behaviour, not an enforcement; the enforcement is M20's, in the contract. The chain's answer, when there
+     is one, wins over the query. And the mode is FROZEN PER GAME, as DESIGN.md recommends for the cut: an
+     answer that arrives while a game is in play waits for the next terms screen. */
+  const DEMO = { on: false, src: 'none', why: 'not read', chain: null, pending: null, stakeWas: null };
+  function applyDemo(on, src, why) {
+    if (S.phase !== 'terms') { DEMO.pending = { on, src, why }; return false; }   // frozen per game
+    if (on && !DEMO.on) DEMO.stakeWas = S.stake;
+    Object.assign(DEMO, { on, src, why, pending: null });
+    S.stake = on ? 0 : (S.stake || DEMO.stakeWas);
+    return true;
+  }
+  function paintDemo() {
+    const t = $('demotag'), f = $('demofoot');
+    if (t) { t.hidden = !DEMO.on; t.title = DEMO.why;
+      t.textContent = 'DEMO MODE · FREE · ' + (DEMO.src === 'chain' ? 'READ FROM RareRoles.demoMode()' : '?demo=1 STANDS IN · NO CONTRACT DEPLOYED'); }
+    if (f) f.innerHTML = DEMO.on ? '<b>DEMO MODE</b> · free · no stake, no pot, no payout' : '<b>THE POT</b> · both stake the same · the winner takes the pot';
+    document.body.dataset.demo = DEMO.on ? '1' : '0'; document.body.dataset.demoSrc = DEMO.src;
+  }
+  async function readDemoChain() {
+    const CL = window.ChainLive; if (!CL) { DEMO.chain = 'chainlive.js did not load'; return; }
+    let cfg = null;
+    try { cfg = await (await fetch(CL.BRIDGE_CONFIG, { cache: 'no-store' })).json(); } catch (e) { cfg = null; }
+    const a = cfg && (cfg.rareRoles || cfg.roles);           // the same two keys the deployer page reads
+    if (!a) { DEMO.chain = 'no contract deployed: ' + CL.BRIDGE_CONFIG + ' records no rareRoles address'; paintDemo(); return; }
+    try {
+      const sel = Chance.hex(Chance.keccak256(new TextEncoder().encode('demoMode()'))).slice(0, 10);
+      const w = await CL.rpc('eth_call', [{ to: a, data: sel }, 'latest']);
+      DEMO.chain = 'read';
+      applyDemo(/[1-9a-f]/i.test(String(w).replace(/^0x/, '')), 'chain', 'RareRoles.demoMode() at ' + a);
+      if (S.phase === 'terms') render(); else paintDemo();
+    } catch (e) { DEMO.chain = 'the chain did not answer: ' + e.message; paintDemo(); }
+  }
+
   function renderPlayer(k) {
     const p = P[k], r = p.rec, played = r.wins + r.losses + r.draws, rate = played ? r.wins / played : 0;
     const el = $(k);
     el.classList.toggle('win', S.winner === k);
     const head =
-      (S.winner === k ? '<span class="tag">WINS ' + S.pot + '</span>' : '') +
+      (S.winner === k ? '<span class="tag">' + (S.pot ? 'WINS ' + S.pot : 'WINS · FREE') + '</span>' : '') +
       '<div class="who"><canvas></canvas><div>' +
         '<div class="name">GENESIS #' + p.id + '<span class="pcrank">RANK ' + rankOf(p) + '</span></div>' +
         '<div class="role">' + (k === 'p1' ? 'CHALLENGER' : 'CHALLENGED') + (k === me() ? ' · YOU' : '') + '</div>' +
@@ -664,7 +745,7 @@ button { font: inherit; color: inherit; }
       '</div>' +
       '<div class="lab"><span>LAST 5</span><span>POT</span></div>' +
       '<div class="recent">' + p.recent.slice(0, 5).map(([g, pot, res]) =>
-        '<div><span class="r' + (res === 'W' ? ' w' : '') + '">' + res + '</span><span class="g">' + g + '</span><span class="p">' + pot + '</span></div>').join('') + '</div>';
+        '<div><span class="r' + (res === 'W' ? ' w' : '') + '">' + res + '</span><span class="g">' + g + '</span><span class="p">' + (pot || 'FREE') + '</span></div>').join('') + '</div>';
     paint(el.querySelector('canvas'), rows8(p.px), '#fff');
   }
 
@@ -673,15 +754,18 @@ button { font: inherit; color: inherit; }
     const terms = S.phase === 'terms';
     let html =
       '<div class="pot' + (terms ? '' : ' slim') + '"><div class="k">POT</div><div class="n' + (S.pot ? ' live' : '') + '" id="potn">' + (S.pot || S.stake * 2) + '</div>' +
-      '<div class="sub" id="potsub">' + (S.pot ? 'in the pot' : 'each stakes ' + S.stake + ' · winner takes ' + S.stake * 2) + '</div></div>';
+      '<div class="sub" id="potsub">' + (S.pot ? 'in the pot' + (S.potRF ? ' · and ' + S.potRF + ' $RF' : '') : DEMO.on ? 'demo mode · free · no stake, no pot, no payout'
+        : 'each stakes ' + S.stake + ' · winner takes ' + S.stake * 2) + '</div></div>';
     if (terms) {
-      html += '<div class="lab"><span>STAKE EACH</span><span>MAX ' + maxStake() + '</span></div><div class="stake">' +
-        STAKES.map(v => '<button class="ghost" type="button" data-stake="' + v + '"' + (S.stake === v ? ' aria-pressed="true"' : '') + (v > maxStake() ? ' disabled' : '') + '>' + v + '</button>').join('') + '</div>';
+      // in demo mode the picker is shut on FREE: the stake is 0 and no button can make it anything else
+      html += '<div class="lab"><span>STAKE EACH</span><span>' + (DEMO.on ? 'DEMO MODE · FREE' : 'MAX ' + maxStake()) + '</span></div><div class="stake">' +
+        (DEMO.on ? '<button class="ghost" type="button" data-stake="0" aria-pressed="true" disabled>FREE</button>' : '') +
+        STAKES.map(v => '<button class="ghost" type="button" data-stake="' + v + '"' + (S.stake === v ? ' aria-pressed="true"' : '') + (v > maxStake() || DEMO.on ? ' disabled' : '') + '>' + v + '</button>').join('') + '</div>';
       html += '<div class="lab"><span>GAME</span><span>' + GAMES.filter(x => x.ready).length + ' OF ' + GAMES.length + ' READY</span></div><div class="games' + (S.det ? '' : ' slim') + '">' +
         GAMES.map(x => '<button class="game" type="button" data-game="' + x.id + '"' + (S.game === x.id ? ' aria-pressed="true"' : '') + (x.ready ? '' : ' disabled') + '>' +
           '<b>' + x.name + '</b>' + (S.det ? '<span>' + x.blurb + '</span>' : '') + (x.ready ? '' : '<em>COMING LATER</em>') + '</button>').join('') + '</div>';
     } else {
-      html += '<div class="lab"><span style="color:var(--signal)">' + g.name + '</span><span>STAKE ' + S.stake + ' EACH</span></div>';
+      html += '<div class="lab"><span style="color:var(--signal)">' + g.name + '</span><span>' + (S.stake ? 'STAKE ' + S.stake + ' EACH' : 'FREE · DEMO MODE') + '</span></div>';
     }
     if (terms && S.det) html += '<div class="lab"><span>HEAD TO HEAD</span><span>' + (H2H.p1 + H2H.p2 + H2H.draws) + ' GAMES</span></div>' +
       '<div class="h2h"><span class="s">' + H2H.p1 + '</span><span class="m">#' + P.p1.id + ' · WINS · #' + P.p2.id + '<br>' + H2H.draws + ' DRAW' + (H2H.draws === 1 ? '' : 'S') + '</span><span class="s">' + H2H.p2 + '</span></div>';
@@ -690,7 +774,7 @@ button { font: inherit; color: inherit; }
     html += '<div class="msg" id="msg"></div>';
     if (terms) html += '<div class="acts">' +
       '<button class="go" type="button" id="send"' + (S.stake > maxStake() ? ' disabled' : '') + '>' +
-        (g.terminal ? 'FIND A TERMINAL · ' + S.stake : 'CHALLENGE GENESIS #' + P[them()].id + ' · ' + S.stake) + '</button>' +
+        (g.terminal ? 'FIND A TERMINAL · ' : 'CHALLENGE GENESIS #' + P[them()].id + ' · ') + (S.stake || 'FREE') + '</button>' +
       '<button class="pcmore" type="button" id="cmore" aria-expanded="' + S.det + '">' + (S.det ? 'LESS' : 'MORE') + ' <i>' + (S.det ? 'v' : '^') + '</i></button></div>';
     if (S.phase === 'done') html += '<div class="row2 acts"><button class="go alt" type="button" id="close">BACK TO THE BASE</button><button class="go" type="button" id="again">REMATCH</button></div>';
     c.innerHTML = html;
@@ -717,8 +801,8 @@ button { font: inherit; color: inherit; }
         '<div class="nft"><div class="art"><canvas aria-label="Genesis #' + from.id + '"></canvas></div></div>' +
         '<div class="pcmain">' +
           '<div class="pcwho"><b>GENESIS #' + from.id + '</b><span class="pcrank">RANK ' + rankOf(from) + '</span></div>' +
-          '<div class="pcbig"><span class="n" id="bign">' + pot + '</span><span class="u">CRYSTALS<br>TO WIN</span></div>' +
-          '<div class="pcline">' + g.name.toLowerCase() + ' · you stake <b>' + S.stake + '</b> of your <b>' + you.purse + '</b></div>' +
+          '<div class="pcbig"><span class="n" id="bign">' + pot + '</span><span class="u">' + (DEMO.on ? 'CRYSTALS<br>DEMO · FREE' : 'CRYSTALS<br>TO WIN') + '</span></div>' +
+          '<div class="pcline">' + g.name.toLowerCase() + (DEMO.on ? ' · <b>demo mode</b> · free · nothing is staked' : ' · you stake <b>' + S.stake + '</b> of your <b>' + you.purse + '</b>') + '</div>' +
           '<button class="pcmore" type="button" id="pmore" aria-expanded="false" aria-controls="pdet">MORE <i>^</i></button>' +
         '</div>' +
         '<div class="pcdet" id="pdet" hidden>' +
@@ -732,7 +816,7 @@ button { font: inherit; color: inherit; }
           '<div class="traits">' + traits + '</div>' +
         '</div>' +
         '<div class="row2 acts"><button class="go alt" type="button" id="pdecline">NOT WORTH MY TIME</button>' +
-          '<button class="go" type="button" id="paccept"' + (afford ? '' : ' disabled') + '>' + (afford ? "LET'S GET IT ON · " + S.stake : 'NOT ENOUGH CRYSTALS') + '</button></div>' +
+          '<button class="go" type="button" id="paccept"' + (afford ? '' : ' disabled') + '>' + (afford ? "LET'S GET IT ON · " + (S.stake || 'FREE') : 'NOT ENOUGH CRYSTALS') + '</button></div>' +
       '</div>';
     glitchArt($('prompt').querySelector('.art canvas'), rows8(from.px));
     $('pmore').onclick = () => { const d = $('pdet'), open = d.hidden; d.hidden = !open;
@@ -776,7 +860,7 @@ button { font: inherit; color: inherit; }
       '<div class="body">' +
         '<div class="from"><canvas style="opacity:.5"></canvas><div><div class="name">GENESIS #' + to.id + '<br>DECLINED</div>' +
           '<div class="line">your challenge to <b>' + g.name + '</b></div></div></div>' +
-        '<div class="big gone"><div class="k">THE POT WOULD HAVE BEEN</div><div class="n">' + S.stake * 2 + '</div><div class="u">CRYSTALS</div></div>' +
+        '<div class="big gone"><div class="k">THE POT WOULD HAVE BEEN</div><div class="n">' + (S.stake * 2 || 'FREE') + '</div><div class="u">' + (S.stake ? 'CRYSTALS' : 'DEMO MODE') + '</div></div>' +
         '<div class="terms2"><div><span class="k">GAME</span><span class="v" style="font-size:21px">' + g.name + '</span></div>' +
           '<div><span class="k">STAKE EACH</span><span class="v">' + S.stake + '</span></div>' +
           '<div><span class="k">YOUR PURSE</span><span class="v">' + you.purse + '</span></div></div>' +
@@ -793,13 +877,15 @@ button { font: inherit; color: inherit; }
     if (S.screen === 'prompt') S.sprung ? renderSprung() : renderPrompt();
     if (S.screen === 'nope') renderNope();
     if (S.screen === 'main') { $('phase').textContent = PHASES[S.phase]; renderPlayer('p1'); renderPlayer('p2'); renderCentre(); }
+    paintDemo();
     document.querySelectorAll('[data-view]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.view === S.view)));
     document.querySelectorAll('[data-answer]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.answer === S.answer)));
   }
   // back to the start of whichever side you are on
   function restart() {
-    S.winner = null; S.pot = 0; S.phase = 'terms';
+    S.winner = null; S.pot = 0; S.potRF = 0; S.paid = freshPaid(); S.phase = 'terms';
     S.screen = S.view === 'challenger' ? 'main' : 'prompt';
+    if (DEMO.pending) { const p = DEMO.pending; applyDemo(p.on, p.src, p.why); }   // a reading that waited for the game to end
     render();
   }
   function say(html) { const m = $('msg'); if (m) m.innerHTML = html; }
@@ -816,11 +902,15 @@ button { font: inherit; color: inherit; }
   }
   // both stakes leave the purses and land in the pot; this part is the same for every game
   async function startStakes() {
-    S.phase = 'staking'; S.pot = 0; render();
+    // the money path reads the mode itself, as RareGame's `requireFreeInDemoMode` does: whatever set the stake
+    // (a query, a handle, a stale render), in demo mode it is 0 by the time it reaches a purse
+    if (DEMO.on) S.stake = 0;
+    S.phase = 'staking'; S.pot = 0; S.potRF = 0; S.paid = freshPaid(); render();
     P.p1.purse -= S.stake; P.p2.purse -= S.stake;
+    S.paid.crystals.p1 = S.paid.crystals.p2 = S.stake;                  // the ante; hold'em's bets add to it
     renderPlayer('p1'); renderPlayer('p2');
     const pot = document.querySelector('.pot');
-    ['l', 'r'].forEach((side, i) => { for (let j = 0; j < 4; j++) setTimeout(() => {
+    if (S.stake) ['l', 'r'].forEach((side, i) => { for (let j = 0; j < 4; j++) setTimeout(() => {
       const gm = document.createElement('i'); gm.className = 'gem ' + side; pot.appendChild(gm); setTimeout(() => gm.remove(), 800); }, i * 120 + j * 90); });
     await tick('potn', 0, S.stake * 2, 700);
     S.pot = S.stake * 2;
@@ -832,28 +922,32 @@ button { font: inherit; color: inherit; }
       const q = Math.min(1, (t - t0) / ms), el = $(id); if (el) el.textContent = Math.round(from + (to - from) * q);
       if (q < 1) requestAnimationFrame(step); else res(); }; requestAnimationFrame(step); });
   }
-  // the pot goes to the winner, or back to both on a draw; every game ends here
+  // the pot goes to the winner, or is split on a draw; every game ends here. A draw is half each: the only
+  // draw there is comes at a showdown, where every bet has been matched, so half the pot IS each side's own
+  // money back. The NET in the record is what a side actually put in and won or lost, which with hold'em's
+  // bets is no longer half the pot. A free game (demo mode, pot 0) counts as a game and not as a pot.
   async function settle(result) {
     const pot = S.pot, game = GAMES.find(x => x.id === S.game).name;
-    if (result === 'draw') { P.p1.purse += S.stake; P.p2.purse += S.stake; }
-    else P[result].purse += pot;
+    BET_UNITS.forEach(u => { const t = S[u.pot]; if (!t) return;
+      if (result === 'draw') { P.p1[u.purse] += t / 2; P.p2[u.purse] += t / 2; } else P[result][u.purse] += t; });
     ['p1', 'p2'].forEach(k => {
-      const r = P[k].rec, won = result === k, lost = result !== 'draw' && !won;
+      const r = P[k].rec, won = result === k, lost = result !== 'draw' && !won, paid = S.paid.crystals[k];
       if (result === 'draw') r.draws++; else if (won) r.wins++; else r.losses++;
-      r.highest = Math.max(r.highest, pot); r.lowest = Math.min(r.lowest, pot);
-      r.net += won ? pot / 2 : lost ? -pot / 2 : 0;
+      if (pot) { r.highest = Math.max(r.highest, pot); r.lowest = Math.min(r.lowest, pot); }
+      r.net += won ? pot - paid : lost ? -paid : 0;
       r.streak = result === 'draw' ? 0 : won ? Math.max(1, r.streak + 1) : Math.min(-1, r.streak - 1);
       P[k].recent.unshift([game, pot, result === 'draw' ? 'D' : won ? 'W' : 'L']);
     });
     if (result === 'draw') H2H.draws++; else H2H[result]++;
-    (POTS[S.game] = POTS[S.game] || []).push(pot);
+    if (pot) (POTS[S.game] = POTS[S.game] || []).push(pot);
     S.winner = result === 'draw' ? null : result;
     S.phase = 'done';
     const arena = $('arena');
     render();
     $('arena').replaceWith(arena);                      // keep the final hands (canvases and all) on screen
-    say(result === 'draw' ? 'A draw. Both stakes go back: <b>' + S.stake + '</b> each.'
-      : '<b>GENESIS #' + P[result].id + '</b> takes the pot of <b>' + pot + '</b>.');
+    say(result === 'draw' ? (pot ? 'A draw. The pot is split: <b>' + pot / 2 + '</b> each.' : 'A draw. Demo mode: nothing was staked, so nothing goes back.')
+      : pot ? '<b>GENESIS #' + P[result].id + '</b> takes the pot of <b>' + pot + '</b>.'
+      : '<b>GENESIS #' + P[result].id + '</b> wins. Demo mode: nothing was staked and nothing is paid.');
   }
 
   /* ---------- rock paper scissors ---------- */
@@ -1003,12 +1097,15 @@ button { font: inherit; color: inherit; }
     say('Two cards each, one of theirs face down. You are on <b>' + bjTotal(mine) + '</b> — hit or stand.');
   }
 
-  /* ---------- Texas hold'em: the best five of seven ----------
-     Ranked the ordinary way and compared on the kickers after that. There are NO betting rounds and
-     that is not a shortcut: the stake is set once, by whoever opened the game, and everyone who joins
-     pays it — so there is nothing for a raise to change. The stake is the ante. PLAY ON or FOLD is the
-     decision at every street. Whether folding should be allowed at all is written down nowhere:
-     flagged for the deployer, not invented into a number. */
+  /* ---------- Texas hold'em: the best five of seven, with a betting round at every street ----------
+     Ranked the ordinary way and compared on the kickers after that. The stake is the ante, paid by both
+     before a card is dealt; then at every street a betting round, in the unit BET_UNITS names (ruling 7:
+     crystals; $RF is in the code and off) and the shape HOLDEM names (fixed limit). The page plays the
+     other side until M7 makes it a person, and its decisions come off the same Entropy word the deck came
+     off, so the whole hand - cards and bets - replays from one word. A bet has to be one both purses can
+     cover, because the other side has to be able to call it. FOLD is what you do against a bet you will
+     not match: it hands the pot across without a hand being shown, which is the ordinary rule now that
+     there is a bet to fold to. */
   const HAND_NAMES = ['HIGH CARD', 'A PAIR', 'TWO PAIR', 'THREE OF A KIND', 'A STRAIGHT', 'A FLUSH',
     'A FULL HOUSE', 'FOUR OF A KIND', 'A STRAIGHT FLUSH'];
   function score5(cs) {
@@ -1043,61 +1140,127 @@ button { font: inherit; color: inherit; }
     return { score: best, cards: which, name: HAND_NAMES[best[0]] };
   }
   function playHoldem(arena, done) {
-    const word = Chance.randomWord(), duelId = ++S.duels, draw = deckFor(word, duelId);
+    // one stream off the word: the deck comes off it first, then every decision the page makes
+    const word = Chance.randomWord(), duelId = ++S.duels, below = rolls(word, duelId);
+    const deck = shuffled(52, below), draw = () => deck.pop();
     const mine = [draw(), draw()], theirs = [draw(), draw()], board = [draw(), draw(), draw(), draw(), draw()];
-    S.last = { duelId, word };
+    S.last = { duelId, word, acts: [] };                 // `acts` is the hand's transcript: [street, who, what, amount], in order
     const STREETS = [['HOLE CARDS', 0], ['THE FLOP', 3], ['THE TURN', 4], ['THE RIVER', 5]];
     const TABLE = ['THE TABLE · FACE DOWN', 'THE FLOP', 'THE TURN', 'THE RIVER'];
-    let at = 0, over = false, folded = false;
+    const U = betUnit(), who = (k) => 'GENESIS #' + P[k].id, log = (k, what, n) => S.last.acts.push([at, k, what, n || 0]);
+    // `due` is what the side about to act still owes to match the last bet; `raises` counts the raises on
+    // this street; `busy` is the page taking its turn OR the street about to advance: from the moment a bet
+    // is matched until `next` has drawn the new street nothing can be pressed, because a press in that gap
+    // would start a second turn on top of the one already going
+    let at = 0, over = false, folded = null, due = 0, raises = 0, busy = false;
+    const betN = () => HOLDEM.bets[at] * S.stake;
+    const cover = (n) => n > 0 && P[me()][U.purse] >= n && P[them()][U.purse] >= n;
+    const canRaise = () => raises < HOLDEM.raises && cover(due + betN());
+    function paintPot() { const n = $('potn'), s = $('potsub'); if (n) n.textContent = S.pot;
+      if (s) s.textContent = 'in the pot' + (S.potRF ? ' · and ' + S.potRF + ' $RF' : ''); }
+    function pay(k, n) { P[k][U.purse] -= n; S[U.pot] += n; S.paid[U.id][k] += n; renderPlayer(k); paintPot(); }
     function paintH(msg, cls, hi) {
-      const n = STREETS[at][1], up = over && !folded;
+      const n = STREETS[at][1], up = over && !folded, b = betN();
+      const acts = due
+        ? '<button class="go" type="button" id="hcall">CALL ' + due + '</button>' +
+          (canRaise() ? '<button class="go alt" type="button" id="hraise">RAISE ' + (due + b) + '</button>' : '')
+        : '<button class="go" type="button" id="hcheck">' + 'CHECK' + '</button>' +
+          (cover(b) ? '<button class="go alt" type="button" id="hbet">BET ' + b + '</button>' : '');
       arena.innerHTML =
         '<div class="seats">' +
           '<div class="street"><span class="cap">' + TABLE[at] + '</span><div class="cards">' +
             (n ? handHTML(board.slice(0, n), hi) : handHTML([null, null, null])) + '</div></div>' +
           '<div class="pair">' +
-          '<div class="seat"><span class="cap' + (up ? ' locked' : '') + '">GENESIS #' + P[them()].id +
+          '<div class="seat"><span class="cap' + (up ? ' locked' : '') + '">' + who(them()) +
             (up ? '' : ' · FACE DOWN') + '</span>' +
             '<div class="cards">' + (up ? handHTML(theirs, hi) : handHTML([null, null])) + '</div>' +
             '<span class="cap" id="htname">' + (up ? bestOf(theirs.concat(board)).name : '') + '</span></div>' +
-          '<div class="seat"><span class="cap locked">GENESIS #' + P[me()].id + ' · YOU</span>' +
+          '<div class="seat"><span class="cap locked">' + who(me()) + ' · YOU</span>' +
             '<div class="cards">' + handHTML(mine, hi) + '</div>' +
             '<span class="cap" id="hmname">' + (n >= 3 ? bestOf(mine.concat(board.slice(0, n))).name : '') + '</span></div>' +
           '</div>' +
         '</div>' +
-        (over ? '' : '<div class="acts2"><button class="go" type="button" id="hon">' + (at < 3 ? 'PLAY ON' : 'SHOWDOWN') + '</button>' +
-          '<button class="go alt" type="button" id="hfold">FOLD</button></div>') +
+        '<div class="unit"><span class="k">BETS IN' + (S.stake ? '' : ' · NOTHING TO BET · DEMO MODE') + '</span><span class="seg">' +
+          BET_UNITS.map(u => '<button class="ghost" type="button" data-unit="' + u.id + '" aria-pressed="' + (u === U) + '"' +
+            (u.on ? '' : ' disabled title="' + u.off + '"') + '>' + u.name + (u.on ? '' : ' · ' + u.off) + '</button>').join('') + '</span></div>' +
+        (over ? '' : '<div class="acts2">' + acts + '<button class="go alt" type="button" id="hfold">FOLD</button></div>') +
         '<div class="result' + (cls || '') + '" id="hres">' + (msg || '') + '</div>';
-      if ($('hon')) $('hon').onclick = on;
+      if (busy) arena.querySelectorAll('.acts2 .go').forEach(x => { x.disabled = true; });
+      if ($('hcheck')) $('hcheck').onclick = check;
+      if ($('hbet')) $('hbet').onclick = bet;
+      if ($('hcall')) $('hcall').onclick = call;
+      if ($('hraise')) $('hraise').onclick = raise;
       if ($('hfold')) $('hfold').onclick = fold;
     }
-    async function on() {
+    // how good their hand looks to them: the category of the best hand on the cards showing, or before the
+    // flop the hole cards alone - a pair, two high cards, or not much. One number in 0..1 and nothing else.
+    function strength() {
+      const n = STREETS[at][1];
+      if (!n) { const r = theirs.map(c => { const x = rankIx(c); return x === 0 ? 14 : x + 1; });
+        return r[0] === r[1] ? 0.7 + r[0] / 50 : Math.min(r[0], r[1]) >= 10 ? 0.55 : 0.25 + Math.max(r[0], r[1]) / 70; }
+      return [0.2, 0.45, 0.6, 0.75, 0.85, 0.9, 0.95, 1, 1][bestOf(theirs.concat(board.slice(0, n))).score[0]];
+    }
+    // the page's turn. `facing` is the bet it has to answer, 0 when it was checked to.
+    async function theirTurn(facing) {
+      busy = true; paintH($('hres') ? $('hres').innerHTML : '');
+      const s = strength(), r = below(100) / 100, street = STREETS[at][0].toLowerCase();
+      await wait(700);
+      if (facing) {
+        if (s < 0.4 && r < 0.65) { over = true; folded = them(); busy = false; log(them(), 'fold');
+          paintH(who(them()) + ' FOLDS <span class="need">· THE POT IS YOURS</span>', ' win');
+          say('<b>' + who(them()) + '</b> folds at ' + street + '. The pot of <b>' + S.pot + '</b> is yours.');
+          await wait(900); done(me()); return; }
+        if (s >= 0.7 && r < 0.6 && raises < HOLDEM.raises && cover(facing + betN())) {
+          pay(them(), facing + betN()); due = betN(); raises++; busy = false; log(them(), 'raise', facing + betN());
+          paintH(who(them()) + ' RAISES ' + (facing + betN()) + ' <span class="need">· ' + due + ' TO YOU</span>');
+          say('<b>' + who(them()) + '</b> calls your ' + facing + ' and raises ' + betN() + '. <b>' + due + '</b> to you: call, raise or fold.'); return; }
+        pay(them(), facing); log(them(), 'call', facing);
+        paintH(who(them()) + ' CALLS ' + facing); say('<b>' + who(them()) + '</b> calls ' + facing + '.');
+        await wait(600); next(); return;                  // busy stays up until the new street is drawn
+      }
+      if (s >= 0.6 && r < 0.7 && cover(betN())) {
+        pay(them(), betN()); due = betN(); busy = false; log(them(), 'bet', due);
+        paintH(who(them()) + ' BETS ' + due + ' <span class="need">· ' + due + ' TO YOU</span>');
+        say('<b>' + who(them()) + '</b> bets <b>' + due + '</b>. Call, raise or fold.'); return; }
+      log(them(), 'check'); paintH(who(them()) + ' CHECKS'); say('<b>' + who(them()) + '</b> checks.');
+      await wait(500); next();
+    }
+    function check() { if (over || busy || due) return; log(me(), 'check'); theirTurn(0); }
+    function bet() { if (over || busy || due || !cover(betN())) return; const n = betN(); pay(me(), n); raises = 0; log(me(), 'bet', n);
+      paintH('YOU BET ' + n); say('You bet <b>' + n + '</b>.'); theirTurn(n); }
+    function call() { if (over || busy || !due) return; const n = due; pay(me(), n); due = 0; busy = true; log(me(), 'call', n);
+      paintH('YOU CALL ' + n); say('You call <b>' + n + '</b>.'); setTimeout(next, 500); }
+    function raise() { if (over || busy || !due || !canRaise()) return; const n = due + betN(); pay(me(), n); raises++; due = 0; log(me(), 'raise', n);
+      paintH('YOU RAISE ' + n); say('You call and raise: <b>' + n + '</b> in.'); theirTurn(betN()); }
+    // the bets are matched: the next street, or the showdown after the river
+    async function next() {
       if (over) return;
+      due = 0; raises = 0; busy = false;
       if (at < 3) { at++;
         const n = STREETS[at][1], mb = bestOf(mine.concat(board.slice(0, n)));
         paintH(STREETS[at][0] + ' · YOU HAVE ' + mb.name);
-        say(STREETS[at][0].toLowerCase() + ': you have <b>' + mb.name.toLowerCase() + '</b>. Play on or fold.');
+        say(STREETS[at][0].toLowerCase() + ': you have <b>' + mb.name.toLowerCase() + '</b>. ' + (cover(betN()) ? 'Check, bet or fold.' : 'Check or fold.'));
         return; }
       over = true;
       const m = bestOf(mine.concat(board)), t = bestOf(theirs.concat(board)), d = cmpScore(m.score, t.score);
       const res = d === 0 ? 'draw' : d > 0 ? me() : them();
       paintH((res === 'draw' ? 'A SPLIT POT' : res === me() ? 'YOU WIN' : 'YOU LOSE') +
         ' <span class="need">· ' + m.name + ' V ' + t.name + '</span>', res === me() ? ' win' : '', (d >= 0 ? m : t).cards);
-      say(res === 'draw' ? 'The same hand both ways: <b>' + m.name.toLowerCase() + '</b>. Both stakes go back.'
-        : '<b>' + (res === me() ? m.name.toLowerCase() : t.name.toLowerCase()) + '</b> takes the pot.');
+      say(res === 'draw' ? 'The same hand both ways: <b>' + m.name.toLowerCase() + '</b>. The pot is split.'
+        : '<b>' + (res === me() ? m.name.toLowerCase() : t.name.toLowerCase()) + '</b> takes the pot of <b>' + S.pot + '</b>.');
       await wait(900);
       done(res);
     }
     async function fold() {
-      if (over) return;
-      over = true; folded = true;
+      if (over || busy) return;
+      over = true; folded = me(); log(me(), 'fold');
       paintH('YOU FOLDED <span class="need">· THE POT GOES ACROSS</span>');
-      say('You folded at <b>' + STREETS[at][0].toLowerCase() + '</b>. The pot goes to <b>GENESIS #' + P[them()].id + '</b>.');
+      say('You folded at <b>' + STREETS[at][0].toLowerCase() + '</b>. The pot of <b>' + S.pot + '</b> goes to <b>' + who(them()) + '</b>.');
       await wait(900);
       done(them());
     }
     paintH('HOLE CARDS');
-    say('Two cards each, five to come in the middle. The stake is the ante — <b>PLAY ON</b> or <b>FOLD</b>.');
+    say('Two cards each, five to come in the middle. The stake is the ante; now a betting round, in ' + U.name.toLowerCase() + ' — <b>CHECK</b>, <b>BET</b> or <b>FOLD</b>.');
   }
 
   /* ---------- the glitching terminal ----------
@@ -1255,7 +1418,7 @@ button { font: inherit; color: inherit; }
           '<div class="pcwho"><b>IT WAS NOT A MACHINE</b></div>' +
           '<div class="pcline">A <b>1/1 DOOPIE</b> was standing as a terminal. You used it; it has you.</div>' +
           '<div class="pcbig"><span class="n" id="bign">' + pot + '</span><span class="u">CRYSTALS<br>IN THE POT</span></div>' +
-          '<div class="pcline">' + g.name.toLowerCase() + ' · you stake <b>' + S.stake + '</b> of your <b>' + you.purse + '</b></div>' +
+          '<div class="pcline">' + g.name.toLowerCase() + (DEMO.on ? ' · <b>demo mode</b> · free · nothing is staked' : ' · you stake <b>' + S.stake + '</b> of your <b>' + you.purse + '</b>') + '</div>' +
           '<span class="sample">THE DOOPIE’S EDGE, AND WHAT IT RISKS · NOT SET · THE DEPLOYER’S</span>' +
         '</div>' +
         '<div class="acts"><button class="go" type="button" id="paccept">THE MACHINE HAS YOU · PLAY IT OUT</button></div>' +
@@ -1324,9 +1487,17 @@ button { font: inherit; color: inherit; }
   // ?sprung=1 opens the ambush: a duel a terminal sprang, which cannot be declined. It does NOT pick a
   // game — which game a planted terminal opens is the collision item 7 exists to settle.
   if (q.get('sprung') === '1') { S.sprung = true; S.view = 'defender'; }
+  // ?demo=1 (or =0) is the stand-in for RareRoles.demoMode() until M20 records the contract's address - see DEMO
+  // Embedded in the base, the address bar is the BASE's, not this frame's (index.html opens `challenge.html?embed=1`
+  // and forwards nothing), so the frame reads its parent's - the same origin, so it is allowed to.
+  const demoQ = q.has('demo') ? q.get('demo')
+    : EMBED ? (() => { try { return new URLSearchParams(window.parent.location.search).get('demo'); } catch (e) { return null; } })() : null;
+  if (demoQ != null) applyDemo(demoQ === '1', 'url', '?demo=' + demoQ + ' on the address bar; no contract to ask');
   restart();
+  readDemoChain();                                       // the chain's answer, when there is one, wins over the query
   window.challenge = { S, P, H2H, GAMES, POTS, STAKES, settle, restart, potStats, rankOf, PLAYERS, TERMS: Duel.TERMS,
-    bjTotal, score5, bestOf, cmpScore, rolls, deckFor, shuffled, FOF, STAND_ON };                      // a handle for the checks
+    bjTotal, score5, bestOf, cmpScore, rolls, deckFor, shuffled, FOF, STAND_ON,
+    DEMO, applyDemo, readDemoChain, BET_UNITS, HOLDEM, betUnit };                                      // a handle for the checks
 })();
 </script>
 </body>

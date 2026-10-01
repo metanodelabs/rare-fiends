@@ -16,7 +16,9 @@ library RareCombat {
 
     uint8 internal constant WIPED = 0;      // every defender down: the attack wins
     uint8 internal constant REPELLED = 1;   // every attacker down: the defence holds
-    uint8 internal constant HELD = 2;       // the clock ran out: the defence holds
+    // 2 was HELD, the clock running out. THERE IS NO FIGHT CLOCK (ruling 47, 2026-10-01): a fight runs until one
+    // side wins. combat.js keeps 2 for a spared capture fight that cannot move, which this library never runs -
+    // here every living attacker shoots or steps on every turn, so the loop below always ends in 0 or 1.
 
     uint8 internal constant HOLD = 0;       // a defender's standing orders
     uint8 internal constant ENGAGE = 1;     // after the nearest attacker, however far off
@@ -42,9 +44,8 @@ library RareCombat {
         uint32 landVsBuildingBps;
         uint32 towerReach;
         uint32 dropReach;
-        uint32 coverDiv;
-        uint32 maxMs;
-        uint32 stepMs;
+        uint32 coverDiv;     // a Friend ON a standing wall is hit 1/coverDiv as often (ruling 45); behind one, no cover
+        uint32 stepMs;       // 1000 / (2 x speed): speed is the deployer's setting, 1 tile a second (ruling 44)
         uint32 defendReach;
     }
 
@@ -167,7 +168,6 @@ library RareCombat {
             uint32 next = type(uint32).max;
             for (uint256 k; k < F.u.length; ++k) if (F.u[k].hp > 0 && F.u[k].ready < next) next = F.u[k].ready;
             F.t = next;
-            if (F.t >= R.maxMs) { res.reason = HELD; break; }
             for (uint256 k; k < F.u.length; ++k) if (F.u[k].hp > 0 && F.u[k].ready <= F.t) _act(R, F, k);
         }
         res.attackWins = res.reason == WIPED;
@@ -293,7 +293,7 @@ library RareCombat {
             bps = R.landVsBuildingBps;
         } else {
             bps = uint256(R.hp[u.gen]) * 10_000 / (uint256(R.hp[u.gen]) + R.hp[F.u[tgt].gen]);
-            if (!F.u[tgt].att && _inCover(F, u.x, u.y, F.u[tgt].x, F.u[tgt].y)) bps = bps / R.coverDiv;
+            if (!F.u[tgt].att && _wallAt(F, F.u[tgt].x, F.u[tgt].y) != NONE) bps = bps / R.coverDiv;   // ON a wall: its crew
         }
         uint256 roll = RareChance.roll(F.word, address(this), block.chainid, F.fightId, F.rolls);
         ++F.rolls;
@@ -344,20 +344,6 @@ library RareCombat {
             uint32 n = dm >> d;
             if (n > 0) _hurt(v, n);
         }
-    }
-
-    /// @dev a standing wall spot right next to the target that is nearer the shooter than the target is
-    function _inCover(Field memory F, int256 sx, int256 sy, int256 dx, int256 dy) private pure returns (bool) {
-        uint256 sd = _cheb(sx, sy, dx, dy);
-        for (uint256 w; w < F.whp.length; ++w) {
-            if (F.whp[w] == 0) continue;
-            for (int256 e; e < 2; ++e) {
-                int256 wx = F.wx[w] + (F.wv[w] ? int256(0) : e);
-                int256 wy = F.wy[w] + (F.wv[w] ? e : int256(0));
-                if (_cheb(wx, wy, dx, dy) == 1 && _cheb(sx, sy, wx, wy) < sd) return true;
-            }
-        }
-        return false;
     }
 
     function _wallAt(Field memory F, int256 x, int256 y) private pure returns (uint256) {

@@ -30,7 +30,7 @@ const rpc=async(method,params)=>{const j=await(await fetch(RPC,{method:'POST',he
   require("./pagewatch.js").guard(prof);            // close it even if this check throws, or is killed
   const ch=spawn(CHROME,['--headless=new','--hide-scrollbars','--remote-debugging-port='+PORT,'--user-data-dir='+prof,'--window-size=1200,900','about:blank'],{stdio:'ignore'});
   let send, sock;
-  for(let i=0;i<40&&!send;i++){await sleep(250);try{
+  for(let i=0;i<160&&!send;i++){await sleep(250);try{
     const t=(await(await fetch(`http://127.0.0.1:${PORT}/json`)).json()).find(x=>x.type==='page');
     const ws=new WebSocket(t.webSocketDebuggerUrl);await new Promise((a,b)=>{ws.onopen=a;ws.onerror=b;});
     let id=0;const m=new Map();ws.onmessage=e=>{const o=JSON.parse(e.data);if(o.id&&m.has(o.id)){m.get(o.id)(o);m.delete(o.id);}};

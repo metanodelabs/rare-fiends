@@ -21,10 +21,20 @@
 //     an invented field is not. `splashFalloff` is exactly that case: DESIGN names it among the five
 //     proposed numbers and the struct has no field for it, so the schema declares it and this check
 //     reports the mismatch instead of hiding it.
-//  4. THE EXTRACTION LIST IS LIVE. `oneHome` names every piece of state that exists in two places today
-//     and the exact text of each copy. While a copy is still in its file the row must say so; once it
-//     is gone the row must be marked gone. So the list cannot go stale by being forgotten — it goes
-//     red, in whichever direction it went wrong.
+//  4. THE EXTRACTION LIST IS LIVE, COPY BY COPY. `oneHome` names every piece of state that existed in
+//     two places and the exact text of each copy. A live copy must still be in its file, or the row
+//     is stale; a copy marked gone must be ABSENT and the reader named in `nowReads` must be PRESENT,
+//     so a copy that creeps back and a reader that is deleted both go red. A live copy says what it
+//     waits on (M6, M12, M20 or the deployer) and the summary counts them by that.
+//  6. THE ONE HOME IS HELD TO THE SCHEMA. estate/values.js loads in node; every top-level key maps,
+//     through `values.keys`, to an entity or a field that exists; every building row has exactly the
+//     columns `values.kindRow` names, per-level arrays of one length, a footprint of [dx, dy] pairs,
+//     and a placement whose keys are EXACTLY placementRule's fields; and every reader `values.readers`
+//     names still reads the file. That last one is M3 items 1 and 3 as code: the page, the parity
+//     check, gencheck and hashcheck read values.js, and the page reads a kind's placement and footprint.
+//  7. M3 ITEM 2'S LIST IS THE WHOLE LIST, AS FAR AS A CHECK CAN SAY. `pieces` names every item of the
+//     list and the entities that hold it; each must exist. It cannot prove nothing is missing - it
+//     proves nothing on the list is.
 //  5. BINDING.md §12's EIGHT GAPS ARE ALL ACCOUNTED FOR, with `covered` said out loud per gap rather
 //     than implied by a page of prose. The dispute process is `covered: false` and this check prints
 //     that as a headline, because a schema that silently looks complete is worse than one that says
@@ -35,10 +45,10 @@
 //    meaning passes every line.
 //  - Anything a compiler or a node would say. Nothing is compiled and nothing is executed; M20 writes
 //    the contracts and the parity check is what proves them.
-//  - The state index of the game as it ACTUALLY RUNS. Until index.html's ECON, KIND and defense() are
-//    extracted, this check proves the schema is consistent with itself and with two existing structs —
-//    not that the running game agrees with it. That comparison is the extraction, and the extraction is
-//    the contended half of M3.
+//  - The game as it ACTUALLY RUNS. ECON and KIND are extracted and this check holds values.js to the
+//    schema and proves the page's source reads it; it never opens the page. Whether the page draws what
+//    values.js says is the browser checks' (econcheck, deployercheck, towercheck and the rest). And the
+//    running state - the purse, the buildings standing, defense() - is still in-memory and waits on M6.
 //  - Whether the undecided fields are still undecided. It counts them; it cannot know that the deployer
 //    answered one yesterday.
 'use strict';
@@ -60,8 +70,10 @@ const ents = S.entities, names = Object.keys(ents);
 ok('the schema parses and names itself (' + S.schema + ' v' + S.version + ', ' + names.length + ' entities)',
   S.schema === 'rarefriends-state' && names.length > 0, JSON.stringify(S.schema));
 
-ok('there are exactly three homes, and they are DESIGN\'s three', HOMES.length === 3
-  && HOMES.join(',') === 'chain,map,client', HOMES.join(','));
+// Four since M3 item 5: the server, because fights resolve on our server and the chain holds the record.
+ok('there are exactly four homes - DESIGN\'s three and the server', HOMES.length === 4
+  && HOMES.join(',') === 'chain,map,client,server', HOMES.join(','));
+ok('and the `home` enum lists the same four, in the same order', S.enums.home.members.join(',') === HOMES.join(','), S.enums.home.members.join(','));
 
 const shapeBad = [];
 for (const n of names) {
@@ -137,8 +149,9 @@ function solEnum(file, name) {
 }
 
 const BUILT = [
-  ['rules', 'RareCombat.sol', 'Rules'],
-  ['duel',  'RareDuel.sol',   'Duel'],
+  ['rules',     'RareCombat.sol',   'Rules'],
+  ['duel',      'RareDuel.sol',     'Duel'],
+  ['fightHash', 'RareFightLog.sol', 'Record'],   // the chain's half of a fight: the mapping's value struct
 ];
 for (const [ent, file, struct] of BUILT) {
   const e = ents[ent];
@@ -155,10 +168,12 @@ for (const [ent, file, struct] of BUILT) {
   ok(struct + ' and the schema agree on the ORDER of the fields they share',
     shared.join(',') === declared.filter(f => shared.includes(f)).join(','),
     shared.join(',') + '   vs   ' + declared.join(','));
-  // a field the schema adds is allowed ONLY as a documented gap: it must carry `decided` and not be true
+  // a field the schema adds is allowed ONLY as a documented gap (it must carry `decided` and not be
+  // true) or as a mapping KEY the struct is stored under (`key: true`) - a struct inside a mapping does
+  // not carry its own indices, and the schema's row must
   const extra = schemaFields.filter(f => !declared.includes(f));
-  const undoc = extra.filter(f => e.fields[f].decided === undefined || e.fields[f].decided === true);
-  ok('what the schema adds to ' + struct + ' is declared undecided, not invented ('
+  const undoc = extra.filter(f => e.fields[f].key !== true && (e.fields[f].decided === undefined || e.fields[f].decided === true));
+  ok('what the schema adds to ' + struct + ' is declared undecided or is the mapping\'s key, not invented ('
     + (extra.length ? extra.join(', ') : 'nothing added') + ')', !undoc.length, undoc.join(', '));
 }
 
@@ -175,25 +190,55 @@ ok('combat.js ORDERS and the schema\'s `order` enum are the same, in the same or
   !!cOrders && cOrders.split(',').map(s => s.trim().replace(/^'|'$/g, '')).join(',') === S.enums.order.members.join(','),
   String(cOrders));
 
+// THE SIX BEHAVIOURS are decision 8's closed list, and their ORDER is what power.amounts is indexed by -
+// so the members are read out of DESIGN.md's own table under 'Adding a power is data, not code' rather
+// than remembered here. A row's bold first cell is the name; 'Reach / travel means' is reach.
+const design = read('estate/DESIGN.md') || '';
+const bSect = design.slice(design.indexOf('#### Adding a power is data, not code'));
+const bRows = (bSect.slice(0, bSect.indexOf('\n#### ', 10) > 0 ? bSect.indexOf('\n#### ', 10) : undefined).match(/^\| \*\*([^*]+)\*\* \|/gm) || [])
+  .map(r => r.replace(/^\| \*\*|\*\* \|$/g, '').split('/')[0].trim().split(/\s+/).map((w, i) => i ? w[0].toUpperCase() + w.slice(1).toLowerCase() : w.toLowerCase()).join(''))
+  .filter(n => n !== 'behaviour');
+ok('the `behaviour` enum is DESIGN.md\'s six, in the table\'s order (' + bRows.join(', ') + ')',
+  bRows.length === 6 && bRows.join(',') === S.enums.behaviour.members.join(','),
+  'DESIGN: ' + bRows.join(',') + '   vs   schema: ' + S.enums.behaviour.members.join(','));
+// (c) of What has to be replaceable: an item points at a power row and carries no undecided number of its own
+ok('item.abilityId is a ref to `power` and item.power is gone', ents.item && ents.item.fields.abilityId && ents.item.fields.abilityId.type === 'ref'
+  && ents.item.fields.abilityId.ref === 'power' && !ents.item.fields.power && !!ents.power, JSON.stringify(ents.item && ents.item.fields.abilityId));
+ok('power carries the template\'s five fields and its identity', !!ents.power
+  && ['id', 'carrierTypeId', 'amounts', 'holders', 'usesPerDay', 'worth'].every(f => ents.power.fields[f]), Object.keys((ents.power || {}).fields || {}).join(','));
+
 // =================================================================================================
 // 4. The extraction list is live
 // =================================================================================================
-const homeBad = [], stale = [];
-let copies = 0, gone = 0;
+const homeBad = [], stale = [], back = [], unread = [], unsaid = [];
+let copies = 0, gone = 0, rowsDone = 0;
+const waits = {};
 for (const r of S.oneHome.rows) {
   if (!HOMES.includes(r.home)) homeBad.push(r.what + ': home "' + r.home + '"');
   if (!ents[r.entity]) homeBad.push(r.what + ': entity "' + r.entity + '" does not exist');
-  if (r.gone) { gone++; continue; }
+  if (r.todayAlso.every(c => c.gone)) rowsDone++;
   for (const c of r.todayAlso) {
-    copies++;
     const src = read(c.file);
     if (src == null) { stale.push(r.what + ': ' + c.file + ' is not there at all'); continue; }
-    if (!src.includes(c.stillThere)) stale.push(r.what + ': ' + c.file + ' no longer contains `' + c.stillThere + '` — the copy went, so mark the row gone');
+    if (c.gone) {
+      gone++;
+      // held both ways: the old text must be gone, and the reader that replaced it must be there
+      if (src.includes(c.stillThere)) back.push(r.what + ': `' + c.stillThere + '` is back in ' + c.file);
+      if (!c.nowReads) unread.push(r.what + ': marked gone and names no reader');
+      else { const rs = read(c.nowReads.file); if (rs == null || !rs.includes(c.nowReads.text)) unread.push(r.what + ': ' + c.nowReads.file + ' no longer reads `' + c.nowReads.text + '`'); }
+      continue;
+    }
+    copies++;
+    if (!c.waitsOn) unsaid.push(r.what + ': `' + c.stillThere + '` is live and does not say what it waits on');
+    else waits[c.waitsOn] = (waits[c.waitsOn] || 0) + 1;
+    if (!src.includes(c.stillThere)) stale.push(r.what + ': ' + c.file + ' no longer contains `' + c.stillThere + '` — the copy went, so mark it gone and name its reader');
   }
 }
 ok('every oneHome row names a real entity and a real home (' + S.oneHome.rows.length + ' rows)', !homeBad.length, homeBad.join('; '));
-ok('every copy the extraction list is still waiting on is still there (' + copies + ' copies, ' + gone + ' rows done)',
-  !stale.length, stale.join('; '));
+ok('every copy still waiting is still where the list says (' + copies + ' live copies)', !stale.length, stale.join('; '));
+ok('no copy marked gone has come back (' + gone + ' gone)', !back.length, back.join('; '));
+ok('every copy marked gone names a reader of the one home, and that reader is still there', !unread.length, unread.join('; '));
+ok('every live copy says what it waits on (' + Object.entries(waits).map(([k, n]) => n + ' on ' + k).join(', ') + ')', !unsaid.length, unsaid.join('; '));
 
 // =================================================================================================
 // 5. §12's eight gaps, said out loud
@@ -214,14 +259,73 @@ const open = gaps.filter(([, g]) => g.covered === false).map(([k]) => k);
 const partial = gaps.filter(([, g]) => g.covered !== false && g.covered !== true).map(([k]) => k);
 
 // =================================================================================================
+// 6. The one home, held to the schema
+// =================================================================================================
+// A field reference is 'entity' or 'entity.field'; both halves must exist. 'client' is allowed only
+// where the index says a column is display copy, and nothing else may say it.
+const resolves = (ref) => { if (ref === 'client') return true; const [e, f] = String(ref).split('.'); return !!ents[e] && (f === undefined || !!ents[e].fields[f]); };
+let V = null, vErr = '';
+try { V = require(path.join(ROOT, S.values.file)); } catch (e) { vErr = e.message; }
+ok('the one home, ' + S.values.file + ', loads in node with no browser', !!V && typeof V === 'object', vErr);
+if (V) {
+  const vk = Object.keys(V), ik = Object.keys(S.values.keys);
+  const unmapped = vk.filter(k => !ik.includes(k)), unheld = ik.filter(k => !vk.includes(k));
+  ok('every value in it is indexed to the schema, and the index names nothing it does not hold (' + vk.length + ' keys)',
+    !unmapped.length && !unheld.length, (unmapped.length ? 'not in the index: ' + unmapped.join(', ') : '') + (unheld.length ? ' not in the file: ' + unheld.join(', ') : ''));
+  const dangling = Object.entries(S.values.keys).filter(([, ref]) => !resolves(ref) || ref === 'client').map(([k, ref]) => k + ' -> ' + ref);
+  ok('every index entry resolves to an entity or a field that exists', !dangling.length, dangling.join('; '));
+  // the registry: one row a kind, the kinds the enum names, the columns the index names
+  const kinds = Object.keys(V.kinds || {}), members = S.enums.buildingKind.members;
+  ok('`kinds` holds exactly the buildingKind enum\'s members, in its order (' + kinds.length + ')',
+    kinds.join(',') === members.join(','), kinds.join(',') + '   vs   ' + members.join(','));
+  const cols = Object.keys(S.values.kindRow), colBad = [];
+  const colRef = Object.entries(S.values.kindRow).filter(([, ref]) => !resolves(ref)).map(([c, ref]) => c + ' -> ' + ref);
+  ok('every kind-row column is indexed to buildingType, or declared display copy', !colRef.length, colRef.join('; '));
+  const placeFields = Object.keys(ents.placementRule.fields);
+  for (const k of kinds) {
+    const r = V.kinds[k], extra = Object.keys(r).filter(c => !cols.includes(c));
+    if (extra.length) colBad.push(k + ' has columns the index does not name: ' + extra.join(', '));
+    for (const c of ['tiers', 'cost', 'wood', 'footprint', 'placement']) if (!(c in r)) colBad.push(k + ' has no ' + c);
+    const L = (r.tiers || []).length;
+    for (const c of ['cost', 'wood', 'capacity', 'reach', 'strength', 'energy', 'supply', 'release', 'leak']) if (r[c] && r[c].length !== L) colBad.push(k + '.' + c + ' has ' + r[c].length + ' levels, tiers has ' + L);
+    for (const c of ['strength', 'energy']) if (!(c in r)) colBad.push(k + ' has no ' + c + ' (M8 items 5 and 10: every row carries both)');
+    if (!Array.isArray(r.footprint) || !r.footprint.length || !r.footprint.every(p => Array.isArray(p) && p.length === 2 && p.every(Number.isInteger)))
+      colBad.push(k + '.footprint is not a list of [dx, dy] integer pairs');
+    const pk = Object.keys(r.placement || {});
+    if (pk.join(',') !== placeFields.join(',')) colBad.push(k + '.placement keys are ' + pk.join(',') + ', placementRule\'s fields are ' + placeFields.join(','));
+    if (r.placement && r.placement.scienceGen.length !== L) colBad.push(k + '.placement.scienceGen has ' + r.placement.scienceGen.length + ' levels, tiers has ' + L);
+  }
+  ok('every kind row has the indexed columns, per-level arrays of one length, a footprint of [dx, dy] pairs, and a placement keyed EXACTLY to placementRule\'s fields',
+    !colBad.length, colBad.slice(0, 6).join('; '));
+  // the fight's tables, the shape rulesFrom reads
+  const gens = Object.keys(V.hp || {}).join(',');
+  ok('`hp` and `weapons` are keyed by generations 1 to 6 and every weapon names a melee class the combat table knows',
+    gens === '1,2,3,4,5,6' && Object.keys(V.weapons || {}).sort().join(',') === '1,2,3,4,5,6'
+      && Object.values(V.weapons || {}).every(w => typeof w.k === 'string') && (V.combat.melee || []).every(m => Object.values(V.weapons).some(w => w.k === m)),
+    'hp ' + gens + '; weapons ' + Object.keys(V.weapons || {}).join(',') + '; melee ' + String(V.combat && V.combat.melee));
+  // the readers
+  const noRead = Object.entries(S.values.readers).filter(([, r]) => { const s = read(r.file); return s == null || !s.includes(r.text); }).map(([what, r]) => what + ' (' + r.file + ' lacks `' + r.text + '`)');
+  ok('every reader of the one home still reads it: ' + Object.keys(S.values.readers).length + ' named', !noRead.length, noRead.join('; '));
+}
+
+// =================================================================================================
+// 7. M3 item 2's list, item by item
+// =================================================================================================
+const pieces = Object.entries(S.pieces).filter(([k]) => k !== 'note');
+const pieceBad = pieces.filter(([, es]) => !Array.isArray(es) || !es.length || es.some(e => !ents[e])).map(([k, es]) => k + ' -> ' + JSON.stringify(es));
+ok('every piece on M3 item 2\'s list names an entity that exists (' + pieces.length + ' pieces)', !pieceBad.length, pieceBad.join('; '));
+
+// =================================================================================================
 console.log('');
 console.log('  ' + nFields + ' fields over ' + names.length + ' entities. '
   + nUndecided + ' carry no decided value; ' + nDerived + ' are derived and stored nowhere.');
 console.log('  §12 gaps: ' + gaps.filter(([, g]) => g.covered === true).length + ' given a home, '
-  + partial.length + ' shape only (' + partial.join(', ') + '), ' + open.length + ' NOT COVERED ('
+  + partial.length + ' partly - shape only, or declined by a ruling (' + partial.map(k => k + ': ' + S.gaps.rows[k].covered).join(', ') + '), ' + open.length + ' NOT COVERED ('
   + open.join(', ') + ').');
 console.log('  ' + S.needsDeployer.length + ' things need the deployer, not the schema.');
-console.log('  ' + copies + ' copies of state still sit outside their one home; ' + gone + ' rows are done.');
+console.log('  ' + (copies + gone) + ' copies on the extraction list: ' + gone + ' gone into ' + S.values.file + ', ' + copies
+  + ' still outside their one home (' + Object.entries(waits).map(([k, n]) => n + ' wait on ' + k).join(', ') + '); '
+  + rowsDone + ' of ' + S.oneHome.rows.length + ' rows done.');
 console.log(bad ? '\n' + bad + ' thing(s) wrong with the schema'
   : '\nthe schema is consistent with itself, with the Solidity that exists, and with the files it says it must replace');
 process.exit(bad ? 1 : 0);

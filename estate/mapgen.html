@@ -118,6 +118,7 @@ ol b { color: #fff; font-weight: 500; }
   </aside>
 </div>
 <iframe id="econProbe" src="base.html?econ=1" style="position:absolute;width:1px;height:1px;left:-10px;top:-10px;border:0;visibility:hidden" tabindex="-1" aria-hidden="true" title=""></iframe>
+<script src="values.js"></script><!-- the chain's table: what a tree is worth and how long a seam's cycle is come from here, never from the generator -->
 <script src="mapgen.js"></script>
 <script>
 (() => {
@@ -652,7 +653,7 @@ ol b { color: #fff; font-weight: 500; }
       row('Crystal seams', s.homeSeams + ' at bases + ' + s.wildSeams + ' wild', s.homeSeams === M.players * M.econ.homeSeams && s.wildSeams === M.players * M.econ.wildSeams) +
       row('Crystals at most', Math.round(s.crystalsPerHour).toLocaleString('en-US') + ' / hour (home seams, by hand)') +
       row('Trees', s.trees.toLocaleString('en-US') + ' (' + s.groveTrees.toLocaleString('en-US') + ' in base groves)', s.groveTrees === M.players * M.econ.groves * M.econ.treesPerGrove) +
-      row('Wood standing', s.wood.toLocaleString('en-US') + ' · regrows in ' + (M.econ.regrowMs / 1000) + ' s') +
+      row('Wood standing', (s.wood / M.econ.crystalUnit).toLocaleString('en-US') + ' logs · ' + (M.econ.treeWood / M.econ.crystalUnit) + ' a tree · regrows in ' + (M.econ.regrowMs / 1000) + ' s') +
       row('Stairs cut', s.stairs) + row('Unreachable high ground', s.stranded ? s.stranded + ' tiles' : 'none', !s.stranded) +
       row('Made in', Math.round(s.ms) + ' ms');
   }
@@ -670,12 +671,15 @@ ol b { color: #fff; font-weight: 500; }
         falls: () => { let n = 0; for (let i = 0; i < M.W * M.H; i++) { const x = i % M.W, y = (i / M.W) | 0; for (let k = 0; k < 4; k++) { const j = neighbour(x, y, k); if (j >= 0 && pours(i, j, zOf(i), zOf(j))) n++; } } return n; } };
     }, 30);
   }
-  // what an estate starts with, read from the game (base.ECON); if the game can't be read, the generator's defaults (the same numbers)
+  // how much ground an estate starts with - its seams and groves, counted off the game's own plan
+  // (base.ECON); if the game can't be read, the generator's defaults (the same counts). ONLY the
+  // counts: what a tree is worth and how long a seam's cycle is are values.js's, and the generator
+  // reads them there itself - passing them here is refused by generate().
   let ECON = null, econFrom = 'the generator\'s defaults';
   function readEcon() {
     try { const E = $('econProbe').contentWindow.base.ECON;
       if (E) { ECON = { homeSeams: E.seams.filter(q => !q.wild).length, wildSeams: E.seams.filter(q => q.wild).length, groves: E.groves,
-        treesPerGrove: E.treesPerGrove, treeWood: E.treeWood, growMs: E.growMs, regrowMs: E.regrowMs }; econFrom = 'the game (base.ECON)'; } } catch (e) { /* opened from a file */ }
+        treesPerGrove: E.treesPerGrove }; econFrom = 'the game (base.ECON)'; } } catch (e) { /* opened from a file */ }
     return !!ECON;
   }
   const newSeed = () => { const a = new Uint32Array(1); crypto.getRandomValues(a); return a[0] % 1000000000; };

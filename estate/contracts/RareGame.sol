@@ -28,10 +28,10 @@ import { IRareRoles } from "./RareRoles.sol";
 ///     `requireMayJoin` on the game's own frozen bit, and `requireFreeInDemoMode` on the entry
 ///
 /// **Settlement.** DESIGN says the end is "when the winners are selected" and that fights and the scoreboard
-/// settle on our server (v1). It does not name who writes the placings on chain. SPEC LINE, written here as
-/// a named power: `declare` is accepted from a holder of `DECLARE_PLACINGS` (grantable by root through
-/// `RareRoles.grantPower`) or of `RECORD_SYNC` (the server's sync key), and root holds both. That is a
-/// chain engineer's line awaiting the deployer's yes, not a decision the design has made.
+/// settle on our server (v1). DEPLOYER RULING (2026-10-01): declaring the placings belongs to the deployer or
+/// the game master, and to no one else. So `declare` is accepted from a holder of `DECLARE_PLACINGS` ONLY -
+/// the deployer holds it as root and may grant it to the game master through `RareRoles.grantPower`. The
+/// server's sync key (`RECORD_SYNC`) used to be accepted here as a chain engineer's line; it is not any more.
 ///
 /// Demo mode gates entry (`create`, `join`) and never exit (`start`, `declare`, `abandon`) - BINDING §26.
 contract RareGame is ReentrancyGuard {
@@ -66,8 +66,8 @@ contract RareGame is ReentrancyGuard {
 
     bytes32 public constant ROOT_POWER = keccak256("rarefriends.power.manageRoles");      // root-only in RareRoles
     bytes32 public constant SET_GAME_PARAMS = keccak256("rarefriends.power.setGameParams"); // grantable: the gamemaster may set the length (DESIGN)
+    /// @notice declare the placings. Root's, grantable to the game master; the only power `declare` asks for
     bytes32 public constant DECLARE_PLACINGS = keccak256("rarefriends.power.declarePlacings");
-    bytes32 public constant RECORD_SYNC = keccak256("rarefriends.power.recordSync");
 
     IRareRoles public immutable roles;
     IERC20 public immutable rf;
@@ -83,6 +83,10 @@ contract RareGame is ReentrancyGuard {
     bytes32 public currentRulesId;
 
     uint256 public gameCount;
+    /// @notice how many games are Started and not yet declared - what `RareRoles.requireNoGameRunning` reads
+    /// through `IRunningGames`, so a number's setter anywhere (here, `RareDuel`) is refused while one runs.
+    /// Raised by `start`, lowered by `declare`; `abandon` only leaves Open, so it never touches it.
+    uint256 public runningGames;
     mapping(uint256 => Game) private _games;
     mapping(uint256 => mapping(address => bool)) public inGame;
     mapping(uint256 => mapping(address => uint8)) public placeOf;   // 1-based; 0 is unplaced
@@ -119,6 +123,8 @@ contract RareGame is ReentrancyGuard {
     error ZeroAddress();
     error ZeroLength();
     error NoRules();
+    /// @notice "number should NOT be changeable during a running game. period." - this many are running
+    error GameRunning(uint256 running);
 
     constructor(address roles_, address rf_, address feeTo_, uint64 length_, uint64 joinWindow_, uint64 startDelay_,
                 uint16 cutBps_, uint8 places_, uint8 minPlayers_, bytes32 rulesId_) {
@@ -189,6 +195,7 @@ contract RareGame is ReentrancyGuard {
         if (block.timestamp < g.startsAt) revert TooEarly(id, g.startsAt);
         if (g.players.length < g.minPlayers) revert NotEnoughPlayers(id, g.players.length, g.minPlayers);
         g.state = State.Started;
+        runningGames += 1;
         uint128 cut = uint128((uint256(g.pot) * g.cutBps) / 10_000);
         g.cut = cut;
         if (cut != 0) rf.safeTransfer(feeTo, cut);
@@ -228,7 +235,7 @@ contract RareGame is ReentrancyGuard {
     /// paid: first 50%, second 30%, the rest equally between the places after second - or between whoever
     /// exists (DESIGN L698: two places split 60 / 40). Integer dust (wei left by the equal split) goes to first place; see the contract note.
     function declare(uint256 id, address[] calldata placings) external nonReentrant {
-        if (!roles.hasPower(msg.sender, DECLARE_PLACINGS) && !roles.hasPower(msg.sender, RECORD_SYNC)) revert PowerNotHeld(msg.sender, DECLARE_PLACINGS);
+        roles.requirePower(msg.sender, DECLARE_PLACINGS);   // the deployer or the game master, and no one else (ruling, 2026-10-01)
         Game storage g = _game(id);
         if (g.state != State.Started) revert WrongState(id, g.state);
         uint256 n = placings.length;
@@ -239,6 +246,7 @@ contract RareGame is ReentrancyGuard {
             placeOf[id][placings[i]] = uint8(i + 1);
         }
         g.state = State.Settled;
+        runningGames -= 1;
         uint256 prize = uint256(g.pot) - g.cut;
         uint256[] memory pay = split(prize, n);
         for (uint256 i = 0; i < n; ++i) {
@@ -266,8 +274,11 @@ contract RareGame is ReentrancyGuard {
     // ---------- the deployer's setters, every one guarded on chain ----------
 
     /// @notice the three clocks. Grantable (SET_GAME_PARAMS): DESIGN says the gamemaster may set the length.
+    /// Refused while a game runs, like every number's setter: these are what the NEXT game is created with,
+    /// and DESIGN's rule is that the next game's numbers do not move either while one is in progress.
     function setClocks(uint64 length_, uint64 joinWindow_, uint64 startDelay_) external {
         roles.requirePower(msg.sender, SET_GAME_PARAMS);
+        if (runningGames != 0) revert GameRunning(runningGames);
         if (length_ == 0 || joinWindow_ == 0) revert ZeroLength();
         defaultLength = length_; joinWindow = joinWindow_; startDelay = startDelay_;
         emit ClocksSet(length_, joinWindow_, startDelay_, msg.sender);
@@ -276,6 +287,7 @@ contract RareGame is ReentrancyGuard {
     /// @notice what the next game is created with. Root only: the cut, places and the rules table are money.
     function setDefaults(uint16 cutBps_, uint8 places_, uint8 minPlayers_, bytes32 rulesId_) external {
         roles.requirePower(msg.sender, ROOT_POWER);
+        if (runningGames != 0) revert GameRunning(runningGames);
         if (cutBps_ < MIN_CUT_BPS || cutBps_ > MAX_CUT_BPS) revert CutOutOfBounds(cutBps_);
         if (places_ == 0 || places_ > MAX_PLACES) revert TooManyPlaces(places_);
         defaultCutBps = cutBps_; defaultPlaces = places_; minPlayers = minPlayers_; currentRulesId = rulesId_;

@@ -60,11 +60,21 @@ contract RareRoles {
     /// rather than the same power (deployer ruling, 2026-09-30): the server key gets its own narrow role, and
     /// the two writes can be split across keys later without a redeploy.
     bytes32 public constant RECORD_SYNC = keccak256("rarefriends.power.recordSync");
+    /// @notice seal a base's standing orders in `RareOrders.commit` (M20 item 10). GRANTABLE, the THIRD sibling under
+    /// ruling 18's pattern: the session write's key seals the word, each write is its own narrow power, and which
+    /// role holds it is the deployer's at M20 item 9. Opening the box needs no power at all - see `RareOrders`.
+    bytes32 public constant RECORD_ORDERS = keccak256("rarefriends.power.recordOrders");
 
     /// @notice how long a role or power change waits before it lands. ZERO for v1 (deployer ruling,
     /// 2026-09-30) and a settable value rather than `immutable`, because it is meant to be read from the
-    /// deployer page and changed later. Nothing reads it yet; storing it now is what lets it be read later
-    /// without a redeploy.
+    /// deployer page and changed later. READ by `setRoleMember` and `grantPower` (M4 item 16, M20 item 4):
+    /// an address ADDED to a role, or a power GRANTED to one, counts only from `block.timestamp + delay`;
+    /// until then `inRole`, `roleHasPower` and `hasPower` answer as if nothing had been written, and the
+    /// pending time is readable through `memberFrom` / `grantFrom`. A REMOVAL and a REVOCATION land at
+    /// once whatever the delay says: a wait on taking a power back is a window in which a leaked key keeps
+    /// it, and the delay's stated purpose - a change a player can see coming - is served by the grant
+    /// waiting, never by the revoke waiting. At zero, every answer and every log line is what it was before
+    /// the read existed: the pending time is `now`, and the two `..Scheduled` events are not emitted.
     uint64 public roleChangeDelay;
 
     /// @notice how many roles there can ever be, so `hasPower`'s loop is bounded and a role list cannot
@@ -75,10 +85,13 @@ contract RareRoles {
 
     bytes32[] private _roles;                                       // every role that exists, for hasPower
     mapping(bytes32 => bool) private _isRole;
-    mapping(bytes32 => mapping(address => bool)) private _member;   // role  -> address -> in it
-    mapping(bytes32 => mapping(bytes32 => bool)) private _granted;  // power -> role    -> granted to it
+    // role -> address -> the timestamp from which the membership COUNTS; 0 is "not a member". A bool became a
+    // time when the delay was read (M20 item 4): a member written under a delay is in the role from then on.
+    mapping(bytes32 => mapping(address => uint64)) private _memberFrom;
+    // power -> role -> the timestamp from which the grant COUNTS; 0 is "not granted". Same reason.
+    mapping(bytes32 => mapping(bytes32 => uint64)) private _grantFrom;
     mapping(bytes32 => bool) private _rootOnly;                     // power -> may never be granted
-    uint256 private _deployers;                                     // how many addresses hold root
+    uint256 private _deployers;                                     // how many addresses hold root, pending ones included
 
     /// @notice is the game shut to everyone but the allowlist, and every game forced free
     bool public demoMode;
@@ -95,6 +108,16 @@ contract RareRoles {
     mapping(address => bool) public whitelisted;
     bool public whitelistOpen;
 
+    /// @notice THE GAMES CONTRACT, so a setter in any contract can ask "is a game running" and refuse
+    /// (DESIGN, *No number changes under a running game*: "a guarded setter refuses it too - the page is a
+    /// convenience and the guard is on chain"; M20 item 11). A settable pointer HERE and not a constructor
+    /// argument anywhere, for the reason `RareGame.sol`'s header gives: `RareGame` deploys LAST, after the
+    /// contracts that ask (`RareDuel`), so at their birth there is nothing to point at. Zero means "no games
+    /// contract yet", which is the state of the first five deploys and the honest answer then: nothing is
+    /// running. Once set it can only move to another contract, never back to zero - unsetting it would
+    /// switch the rule off without a word in the log that says so.
+    address public game;
+
     // ---------- events ----------
     // Every change is recorded, each with its own event, and `by` is on all four so a log answers "who".
 
@@ -106,8 +129,16 @@ contract RareRoles {
     event PowerGranted(bytes32 indexed power, bytes32 indexed role, bool granted, address indexed by);
     event RoleAdded(bytes32 indexed role, address indexed by);
     event RoleChangeDelaySet(uint64 delay, address indexed by);
+    /// @notice a membership written under a non-zero delay: it counts from `effectiveAt`. Emitted BESIDE
+    /// `RoleMemberSet`, never instead of it, and only when the delay is non-zero - so at the decided zero
+    /// the log is byte for byte what it was before the delay was read.
+    event RoleChangeScheduled(bytes32 indexed role, address indexed who, uint64 effectiveAt);
+    /// @notice the same for a grant, beside `PowerGranted`
+    event PowerGrantScheduled(bytes32 indexed power, bytes32 indexed role, uint64 effectiveAt);
     /// @notice a power another contract names was made root-only, for good
     event RootPowerRegistered(bytes32 indexed power, address indexed by);
+    /// @notice the games contract every running-game guard now reads
+    event GameSet(address game, address indexed by);
 
     // ---------- errors ----------
     // Named, because an unnamed revert in an explorer teaches a player nothing and an explorer does show
@@ -141,6 +172,10 @@ contract RareRoles {
     error LastDeployer();
     error RootPowerExists(bytes32 power);
     error PowerAlreadyGranted(bytes32 power, bytes32 role);
+    /// @notice a number may not change while a game is running - this many are (DESIGN, the rule of
+    /// 2026-09-30: "number should NOT be changeable during a running game. period.")
+    error GameRunning(uint256 running);
+    error NotAContract(address who);
 
     /// @param deployer_ the one address under the DEPLOYER role at launch. More may be added later
     /// without a redeploy, which is the whole reason this contract exists.
@@ -158,7 +193,7 @@ contract RareRoles {
         _rootOnly[SET_DEMO_MODE] = true;
         _rootOnly[MANAGE_ROLES] = true;
         _rootOnly[MANAGE_POWERS] = true;
-        _member[DEPLOYER][deployer_] = true;
+        _memberFrom[DEPLOYER][deployer_] = uint64(block.timestamp);   // root from the first block: no delay exists yet to wait out
         _deployers = 1;
         demoMode = true;
         // the deployer is whitelisted from the first block so day one needs no second transaction; the
@@ -172,15 +207,32 @@ contract RareRoles {
 
     // ---------- what everyone reads ----------
 
-    /// @notice is this address in this role
+    /// @notice is this address in this role - NOW. A member added under a delay is not, until its time
     function inRole(bytes32 role, address who) external view returns (bool) {
-        return _member[role][who];
+        return _live(_memberFrom[role][who]);
     }
 
-    /// @notice has this role been granted this power. Says nothing about the deployer, which holds every
-    /// power without a grant.
+    /// @notice has this role been granted this power - NOW. Says nothing about the deployer, which holds
+    /// every power without a grant.
     function roleHasPower(bytes32 power, bytes32 role) external view returns (bool) {
-        return _granted[power][role];
+        return _live(_grantFrom[power][role]);
+    }
+
+    /// @notice when this membership counts from: 0 for "not a member", a time in the future for one that is
+    /// written and waiting out the delay, a time now or past for one that counts. The page reads this to say
+    /// PENDING beside an address rather than nothing.
+    function memberFrom(bytes32 role, address who) external view returns (uint64) {
+        return _memberFrom[role][who];
+    }
+
+    /// @notice the same for a grant
+    function grantFrom(bytes32 power, bytes32 role) external view returns (uint64) {
+        return _grantFrom[power][role];
+    }
+
+    /// @dev a membership or a grant counts once its time has come; zero is "none"
+    function _live(uint64 from) private view returns (bool) {
+        return from != 0 && from <= block.timestamp;
     }
 
     /// @notice may this power never be granted to anybody
@@ -201,11 +253,11 @@ contract RareRoles {
     /// @notice may this address use this power. Root holds everything; anyone else holds a power only
     /// through a role it was granted to, and never a root-only one.
     function hasPower(address who, bytes32 power) public view returns (bool) {
-        if (_member[DEPLOYER][who]) return true;
+        if (_live(_memberFrom[DEPLOYER][who])) return true;
         if (_rootOnly[power]) return false;
         bytes32[] memory rs = _roles;
         for (uint256 i = 0; i < rs.length; ++i) {
-            if (rs[i] != DEPLOYER && _granted[power][rs[i]] && _member[rs[i]][who]) return true;
+            if (rs[i] != DEPLOYER && _live(_grantFrom[power][rs[i]]) && _live(_memberFrom[rs[i]][who])) return true;
         }
         return false;
     }
@@ -300,19 +352,26 @@ contract RareRoles {
         emit AllowedSet(who, ok, msg.sender);
     }
 
-    /// @notice add or remove an address from a role. Root only.
+    /// @notice add or remove an address from a role. Root only. An ADD counts from `now + roleChangeDelay`
+    /// and is pending until then (`inRole` false, `memberFrom` the time); a REMOVE lands at once. A member
+    /// written and still pending is a member for the unchanged check, so it is removed, not re-added.
+    /// @dev `_deployers` counts pending root holders too, so `LastDeployer` keeps the LAST WRITTEN root, not
+    /// the last live one: under a non-zero delay, adding B to root and then removing A leaves nobody live
+    /// for `delay` seconds, then B. That window is bounded by the delay itself and is not a brick.
     function setRoleMember(bytes32 role, address who, bool member) external {
         if (!hasPower(msg.sender, MANAGE_ROLES)) revert PowerNotHeld(msg.sender, MANAGE_ROLES);
         if (!_isRole[role]) revert UnknownRole(role);
         if (who == address(0)) revert ZeroAddress();
-        if (_member[role][who] == member) revert RoleMemberUnchanged(role, who);
+        if ((_memberFrom[role][who] != 0) == member) revert RoleMemberUnchanged(role, who);
         if (role == DEPLOYER) {
             if (member) _deployers += 1;
             else if (_deployers == 1) revert LastDeployer();
             else _deployers -= 1;
         }
-        _member[role][who] = member;
+        uint64 from = member ? uint64(block.timestamp) + roleChangeDelay : 0;
+        _memberFrom[role][who] = from;
         emit RoleMemberSet(role, who, member, msg.sender);
+        if (member && roleChangeDelay != 0) emit RoleChangeScheduled(role, who, from);
     }
 
     /// @notice grant a named power to a role, or take it back. Root only, and a root-only power is
@@ -325,9 +384,12 @@ contract RareRoles {
         // early for it and skips it when it walks the role list - so a grant there would be a write that
         // changed nothing while reading, in a log, like an appointment.
         if (_rootOnly[power] || role == DEPLOYER) revert PowerNotGrantable(power);
-        if (_granted[power][role] == on) revert PowerUnchanged(power, role);
-        _granted[power][role] = on;
+        if ((_grantFrom[power][role] != 0) == on) revert PowerUnchanged(power, role);
+        // a GRANT counts from now + roleChangeDelay (M20 item 4: the read this setter owed); a REVOKE at once
+        uint64 from = on ? uint64(block.timestamp) + roleChangeDelay : 0;
+        _grantFrom[power][role] = from;
         emit PowerGranted(power, role, on, msg.sender);
+        if (on && roleChangeDelay != 0) emit PowerGrantScheduled(power, role, from);
     }
 
     /// @notice mark a power root-only. Root only (MANAGE_POWERS, itself root-only), and IRREVERSIBLE: there is
@@ -340,7 +402,7 @@ contract RareRoles {
         if (power == bytes32(0)) revert PowerNotGrantable(power);
         if (_rootOnly[power]) revert RootPowerExists(power);
         bytes32[] memory rs = _roles;
-        for (uint256 i = 0; i < rs.length; ++i) if (_granted[power][rs[i]]) revert PowerAlreadyGranted(power, rs[i]);
+        for (uint256 i = 0; i < rs.length; ++i) if (_grantFrom[power][rs[i]] != 0) revert PowerAlreadyGranted(power, rs[i]);   // a pending grant counts
         _rootOnly[power] = true;
         emit RootPowerRegistered(power, msg.sender);
     }
@@ -386,6 +448,35 @@ contract RareRoles {
         roleChangeDelay = delay;
         emit RoleChangeDelaySet(delay, msg.sender);
     }
+
+    // ---------- the running-game rule ----------
+
+    /// @notice point the guards at the games contract. ROOT ONLY (MANAGE_ROLES). Refused for zero and for an
+    /// address with no code, so the rule cannot be switched off by pointing it at nothing.
+    function setGame(address game_) external {
+        if (!hasPower(msg.sender, MANAGE_ROLES)) revert PowerNotHeld(msg.sender, MANAGE_ROLES);
+        if (game_ == address(0)) revert ZeroAddress();
+        if (game_.code.length == 0) revert NotAContract(game_);
+        game = game_;
+        emit GameSet(game_, msg.sender);
+    }
+
+    /// @notice how many games are running right now - zero until a games contract is set
+    function runningGames() public view returns (uint256) {
+        return game == address(0) ? 0 : IRunningGames(game).runningGames();
+    }
+
+    /// @notice the line every number's setter puts after its power check: refused while a game runs
+    function requireNoGameRunning() external view {
+        uint256 n = runningGames();
+        if (n != 0) revert GameRunning(n);
+    }
+}
+
+/// @notice the one question `RareRoles` asks the games contract. `RareGame` answers it from a counter that
+/// `start` raises and `declare` lowers; anything else set as `game` has to answer it the same way.
+interface IRunningGames {
+    function runningGames() external view returns (uint256);
 }
 
 /// @notice the part of `RareRoles` a game contract reads. Declared beside it so there is one definition
@@ -404,4 +495,7 @@ interface IRareRoles {
     function hasPower(address who, bytes32 power) external view returns (bool);
     function requirePower(address who, bytes32 power) external view;
     function rootOnly(bytes32 power) external view returns (bool);
+    function game() external view returns (address);
+    function runningGames() external view returns (uint256);
+    function requireNoGameRunning() external view;
 }

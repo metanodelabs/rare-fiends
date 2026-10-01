@@ -115,6 +115,8 @@ h1 { font-family: var(--display); font-weight: 400; font-size: clamp(26px, 4vw, 
 [data-theme="invert"] :is(.q:hover, .qa[open] > .q) { color: var(--on-signal); }
 .qa .a { padding: 14px; }
 .a { margin: 0; color: var(--dim); }
+.a p { margin: 0 0 10px; }
+.a p:last-child { margin-bottom: 0; }
 .a b { color: var(--ink); font-weight: 600; }
 .a a { color: var(--signal-ink); }
 .steps { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 6px; }
@@ -321,7 +323,11 @@ h1 { font-family: var(--display); font-weight: 400; font-size: clamp(26px, 4vw, 
     ['What do I need to play?', 'Any Genesis or Generation. Each brings its own strengths and offensive skills. Doopies can play too; see below. And <b>$RF</b> for the pot, when you are ready.'],
     ['What is the $RF token for?', '$RF sets the pot. <b>Winner takes all</b>; we keep <b>5%</b> to cover the oracle calls that make the randomness real, since true entropy comes from outside the chain.'],
     ['Is this on-chain?', 'V1 is to test gaming dynamics; V2 will move on-chain.'],
-    ['How is randomness handled?', 'Pyth Entropy. Every roll is verifiable; no house RNG, no trust-me-bro.'],
+    ['How is randomness handled?',
+     '<p><b>Rock paper scissors rolls with Pyth Entropy, on chain.</b> Both picks are sealed before either is shown. Then one random word is requested from Pyth Entropy, outside the chain, and one roll off it decides. The contract keeps the word, the roll and the odds, so anyone can read them and recompute the result. <b>THE ALGORITHM</b> on the challenge page shows the sum.</p>' +
+     '<p><b>Blackjack, hold&rsquo;em and Friend or Fiend</b> deal every card off one word with that same roll, so the same word always deals the same game. They do not settle in a contract yet.</p>' +
+     '<p><b>Fights are resolved on our server in V1</b>, not by a contract. At the moment each fight happens we publish a hash of its inputs and its result on chain, written once and never rewritable. Take the moves we show you, hash them, and check they match what was published that day. That makes fights auditable, not trustless.</p>' +
+     '<p>V1 is to test gaming dynamics; V2 will move on-chain. <b>The goal of V2 is full verifiability</b>: every result, fights included, checked on chain rather than taken from us.</p>'],
     ['Where do I follow?', '<a href="https://x.com/rarefiends" target="_blank" rel="noopener">@rarefiends</a>. Everything else is noise.'],
   ];
   const VISITORS = [

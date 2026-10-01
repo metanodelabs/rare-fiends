@@ -41,10 +41,56 @@ contract RareRules {
         uint256[] wood;      // per level, hundredths
     }
 
+    /// @notice THE BUILDING REGISTRY (M20 item 3): the rest of `estate/schema.json`'s `buildingType` row, so
+    /// that "a new building is data rather than a release". A kind is a NUMBER, `kindId`, and never a Solidity
+    /// enum - adding one is `setKind` under a fresh `rulesId`, frozen, and `RareGame.setDefaults(.., rulesId)`
+    /// for the next game; no contract is redeployed. Adding a level is one more entry in every per-level
+    /// array. `kindId` 0 is reserved for "none" (the schema's `needsKind: .. or zero`), so kinds count from 1.
+    /// The ladders above are the row's `crystalCost[]` / `woodCost[]`, kept as they were; where both exist
+    /// under one id they must agree on the number of levels. **No number lives here**: every value arrives by
+    /// `setKind`, and the proof reads them off `index.html` (`KIND`, `SILO_CAP`, `CELL_REACH`, `WALL_CAP`,
+    /// `WALL_HP`, `BUILD_MS`, `lockReason`). A field the page has no number for is written as zero, and said so.
+    struct Placement {
+        bool needsKeep;          // nothing can stand until the keep does
+        bool isKeep;             // one to a base, and what every other row waits on
+        bool cappedByKeepLevel;  // no building raised past the keep's own tier
+        bool onWater;            // a generator needs running water
+        bool onBaseEdge;         // a wall stands on an edge, not in a tile (ruling 27)
+        bool onClaimedGround;    // a cell may stand on claimed ground to push further
+        uint16 maxPerBase;       // 0 = no limit
+        uint16 needsKind;        // a kindId this one requires, or 0
+        uint16 nextToKind;       // THE FOURTH PLACEMENT RULE (M10, Energy): a kindId this one must stand TOUCHING, or 0.
+                                 // The capacitor names the generator, and touching is also what binds the store to it
+        uint8[] scienceGen;      // per level: the worst generation that can run it, 0 = no posted Friend needed
+    }
+
+    struct Kind {
+        bytes32 codeName;        // keep, hut, silo, tower, wall, cell, generator, collectionDepot, capacitor - the settled names
+        bytes32[] levelName;     // per level; its length IS `levels`
+        uint32[] buildMs;        // per level
+        uint32[] strength;       // per level; a wall's is the one the fight reads
+        // M8 item 10 and M10's energy columns (schema.json buildingType.energy/supply/release/leak), per level.
+        // Every value arrives by setKind like the rest; the economist's figures are PROPOSED and values.js
+        // writes 0 where nothing is decided, so a row here can carry the column without inventing the number.
+        uint32[] energy;         // per level, in P: what the building DRAWS while it runs
+        uint32[] supply;         // per level, in P: what it MAKES (the generator's column)
+        uint32[] release;        // per level, in P: the most a STORE lets out when its generator is offline (the capacitor's)
+        uint8[] leak;            // per level, percent of the store lost a day (the capacitor's: DECIDED 10 / 5 / 3 / 0)
+        uint32[] capacity;       // per level: a silo's crystals (hundredths), a wall's crew, a depot's harvesters, a store's P.h
+        uint32[] reach;          // per level, in tiles; 0 for a kind that reaches nowhere
+        int16[] footprint;       // relative tile offsets, x,y pairs; a one-tile building is [0, 0]
+        Placement placement;
+        uint16 abilityId;        // 0 = none. A pointer to behaviour at an address this contract does not know -
+                                 // an ability table does not exist yet, and the id is stored so the row has the slot
+        uint64 addedInGame;      // the game from which this row exists
+    }
+
     mapping(bytes32 => mapping(uint16 => Ladder)) private _ladder;
+    mapping(bytes32 => mapping(uint16 => Kind)) private _kind;
     mapping(bytes32 => bool) public frozen;
 
     event LadderSet(bytes32 indexed rulesId, uint16 indexed kindId, uint256[] crystal, uint256[] wood, address by);
+    event KindSet(bytes32 indexed rulesId, uint16 indexed kindId, bytes32 codeName, uint256 levels, address by);
     event RulesFrozen(bytes32 indexed rulesId, address by);
 
     error RulesAreFrozen(bytes32 rulesId);
@@ -55,8 +101,16 @@ contract RareRules {
     error ZeroAddress();
     error RulesNotFrozen(bytes32 rulesId);
     error SetRulesNotRootOnly();
+    /// @notice kindId 0 is "none" and cannot be a kind
+    error KindZero();
+    /// @notice a per-level array is not `levels` long, the footprint is not x,y pairs, or the name is empty
+    error KindShape(string field);
+    /// @notice the ladder and the row under one id disagree on how many levels the kind has
+    error LevelsDisagree(uint256 ladderRungs, uint256 rowLevels);
+    error NoSuchKind(bytes32 rulesId, uint16 kindId);
 
     mapping(bytes32 => uint256) public kindsSet;   // how many kinds have a ladder under this id
+    mapping(bytes32 => uint256) public rowsSet;    // how many kinds have a registry row under this id
 
     constructor(address roles_) {
         if (roles_ == address(0)) revert ZeroAddress();
@@ -69,7 +123,10 @@ contract RareRules {
     function setLadder(bytes32 rulesId, uint16 kindId, uint256[] calldata crystal, uint256[] calldata wood) external {
         roles.requirePower(msg.sender, SET_RULES);
         if (frozen[rulesId]) revert RulesAreFrozen(rulesId);
+        if (kindId == 0) revert KindZero();
         if (crystal.length == 0 || crystal.length != wood.length) revert LadderShape(crystal.length, wood.length);
+        uint256 rowLevels = _kind[rulesId][kindId].levelName.length;
+        if (rowLevels != 0 && rowLevels != crystal.length) revert LevelsDisagree(crystal.length, rowLevels);
         Ladder storage l = _ladder[rulesId][kindId];
         if (l.crystal.length == 0) kindsSet[rulesId] += 1;
         l.crystal = crystal;
@@ -93,6 +150,72 @@ contract RareRules {
         Ladder storage l = _ladder[rulesId][kindId];
         if (l.crystal.length == 0) revert NoSuchLadder(rulesId, kindId);
         return (l.crystal, l.wood);
+    }
+
+    /// @notice write one kind's registry row under a rules id. Root only; refused once the id is frozen; kind 0
+    /// refused; every per-level array must be exactly `levelName.length` long, the footprint must be x,y pairs
+    /// with at least one, and the name non-empty. If the kind already has a ladder under this id the row must
+    /// have as many levels as the ladder has rungs. A second `setKind` before the freeze replaces the row.
+    function setKind(bytes32 rulesId, uint16 kindId, Kind calldata k) external {
+        roles.requirePower(msg.sender, SET_RULES);
+        if (frozen[rulesId]) revert RulesAreFrozen(rulesId);
+        if (kindId == 0) revert KindZero();
+        uint256 n = k.levelName.length;
+        if (n == 0) revert KindShape("levelName");
+        if (k.codeName == bytes32(0)) revert KindShape("codeName");
+        if (k.buildMs.length != n) revert KindShape("buildMs");
+        if (k.strength.length != n) revert KindShape("strength");
+        if (k.energy.length != n) revert KindShape("energy");
+        if (k.supply.length != n) revert KindShape("supply");
+        if (k.release.length != n) revert KindShape("release");
+        if (k.leak.length != n) revert KindShape("leak");
+        if (k.capacity.length != n) revert KindShape("capacity");
+        if (k.reach.length != n) revert KindShape("reach");
+        if (k.placement.scienceGen.length != n) revert KindShape("scienceGen");
+        if (k.footprint.length == 0 || k.footprint.length % 2 != 0) revert KindShape("footprint");
+        uint256 rungs = _ladder[rulesId][kindId].crystal.length;
+        if (rungs != 0 && rungs != n) revert LevelsDisagree(rungs, n);
+        Kind storage s = _kind[rulesId][kindId];
+        if (s.levelName.length == 0) rowsSet[rulesId] += 1;
+        s.codeName = k.codeName;
+        s.levelName = k.levelName;
+        s.buildMs = k.buildMs;
+        s.strength = k.strength;
+        s.energy = k.energy;
+        s.supply = k.supply;
+        s.release = k.release;
+        s.leak = k.leak;
+        s.capacity = k.capacity;
+        s.reach = k.reach;
+        s.footprint = k.footprint;
+        // field by field: a calldata struct holding a dynamic array cannot be assigned to storage whole
+        Placement storage p = s.placement;
+        p.needsKeep = k.placement.needsKeep;
+        p.isKeep = k.placement.isKeep;
+        p.cappedByKeepLevel = k.placement.cappedByKeepLevel;
+        p.onWater = k.placement.onWater;
+        p.onBaseEdge = k.placement.onBaseEdge;
+        p.onClaimedGround = k.placement.onClaimedGround;
+        p.maxPerBase = k.placement.maxPerBase;
+        p.needsKind = k.placement.needsKind;
+        p.nextToKind = k.placement.nextToKind;
+        p.scienceGen = k.placement.scienceGen;
+        s.abilityId = k.abilityId;
+        s.addedInGame = k.addedInGame;
+        emit KindSet(rulesId, kindId, k.codeName, n, msg.sender);
+    }
+
+    /// @notice the row. Reverts for a kind that has none, like `ladderOf`.
+    function kindOf(bytes32 rulesId, uint16 kindId) external view returns (Kind memory) {
+        Kind storage s = _kind[rulesId][kindId];
+        if (s.levelName.length == 0) revert NoSuchKind(rulesId, kindId);
+        return s;
+    }
+
+    /// @notice how many levels a kind has under an id: the row's if there is one, else the ladder's, else 0
+    function levelsOf(bytes32 rulesId, uint16 kindId) external view returns (uint256) {
+        uint256 n = _kind[rulesId][kindId].levelName.length;
+        return n != 0 ? n : _ladder[rulesId][kindId].crystal.length;
     }
 
     /// @notice what a demolition would credit, BOTH legs in hundredths: `RareRefund` over the frozen crystal

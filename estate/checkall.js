@@ -89,16 +89,19 @@ const CHECKS = [
                         + 'back from the game rather than judged; and the projection\'s weights are not '
                         + 'exposed, so the expected fifth is derived in a comment, not recomputed'],
   ['propcheck',         'no drawing of ours duplicates one of the toolkit\'s eighteen props (M22 item 12): '
-                        + 'the eighteen and their footprints, CARRIED here because the toolkit is not '
-                        + 'vendored and a fetching check would report the weather; every asset of ours named '
-                        + 'after a prop held to the toolkit\'s own bytes by hash, so a hand-edit makes it '
-                        + 'ours and turns red; both toolkit files still drawn by a page; every prop name '
+                        + 'the eighteen and their footprints, CARRIED here because no toolkit file gives the list and a '
+                        + 'fetching check would report the weather; the toolkit vendored ONLY BY MACHINE (three .ts '
+                        + 'sources -> sprites/friendsdk.js by friendsdk-vendor.mjs, generated header, licence beside it, '
+                        + 'no hand copy, no package dependency); every asset of ours named after a prop, and the bundle, '
+                        + 'held to the toolkit\'s own bytes by hash (19 files), so a hand-edit makes it ours and turns red; '
+                        + 'every one still loaded by a page; every prop name '
                         + 'appearing in our source accounted for with a reason, and no stale excuses',
                         'A NINETEENTH PROP - the list is carried, so if the toolkit adds one nothing here '
                         + 'will know; that is the price of not being weather-dependent, and what softens it '
                         + 'is holding the count against TOOLKIT.md\'s own sentence. Also: the footprints are '
                         + 'recorded and nothing uses them, so nothing checks a footprint is honoured; and a '
-                        + 'duplicate drawn under a DIFFERENT name (our own bench called a "seat") is invisible'],
+                        + 'duplicate drawn under a DIFFERENT name (our own bench called a "seat") is invisible; and the bundle '
+                        + 'is held by hash, not REBUILT - friendsdk-vendor.mjs --check needs the network and is not run'],
   ['pdfcheck',          'the PDF in "game plan/" is whole (header, trailer, a startxref inside the file), its '
                         + 'page tree agrees with its page objects, every stream inflates and there is at '
                         + 'least one a page, its length and weight are believable AS RATIOS to DESIGN.md\'s '
@@ -111,7 +114,7 @@ const CHECKS = [
                         + 'rendering it garbled, passes every line. The size bounds are judgement'],
   ['armourycheck',      'six weapons fire and roll; tower range, stone drops, wall damage, GIF export; and '
                         + 'WATCHES THE PAGE (pagewatch.js): nothing 404s, nothing is logged as an error',
-                        'the meme attack, which shares the stage and nothing asserts; and, of what it now '
+                        'the meme attack, which shares the stage (memecheck throws it); and, of what it now '
                         + 'watches, a request made and answered before the debugger attached that the page '
                         + 'logged nothing about, a warning rather than an error, and a 200 carrying the '
                         + 'wrong thing'],
@@ -136,9 +139,14 @@ const CHECKS = [
                         + 'checks TILES.at before walls, so a wall tapped onto a building\'s tile opens that '
                         + 'building instead); that the face-tap test depends on WALLS at all (it stays green with '
                         + 'the WALLS dispatch removed - the tap scans buildings); only seeds 7 and 31'],
-  ['combatcheck',       'the fight page matches combat.js: orders, generations, replay from a word',
-                        'an attack started from the map - the map cannot start one yet'],
-  ['hashcheck',         "the fight's hash (combat.js fightHash) in node, on index.html's own tables: the same "
+  ['combatcheck',       'the fight page matches combat.js: orders, generations, replay from a word; NO CLOCK (ruling 47) - '
+                        + 'a lone catapult out of reach wipes a HOLDing base and is repelled by ENGAGE, neither "held"; '
+                        + 'the one stand-still is a spared intruder walled in and out of reach ("held", no shot), which '
+                        + 'as an ordinary attack breaks out; COVER (ruling 45) is ON a standing wall at 1/coverDiv, '
+                        + 'and nothing behind one',
+                        'an attack started from the map - the map cannot start one yet; cover once the wall FALLS (its crew '
+                        + 'losing it mid-fight) is not driven; DEFEND and FALL BACK outcomes are not asserted'],
+  ['hashcheck',         "the fight's hash (combat.js fightHash) in node, on values.js's own tables (index.html's until M3): the same "
                         + 'fight hashes equal; an attacker generation, the winner, the reason, a rule, the '
                         + 'fightId and the gameId each change it; a negative entry spot encodes with its sign',
                         'that RareFightLog on chain computes the same word - no Solidity hashes a fight yet, so '
@@ -194,11 +202,22 @@ const CHECKS = [
                         + 'DEPLOYED, which are three different sentences; every change is SHOWN - field, from, '
                         + 'to, and whether it is a transaction or a game change - before anything is signed, and '
                         + 'the setters refuse a list that was not on the screen; and WATCHES THE PAGE '
-                        + '(pagewatch.js) over itself and the two estates it probes',
-                        'ALMOST EVERYTHING THE CONTRACTS WOULD PROVE, and that is the state of the project '
-                        + 'rather than a gap in the check: 38 of the 61 numbers have the chain as their home, '
-                        + 'ONE of them (the demo-mode flag) has a getter in a contract that exists, and NOTHING '
-                        + 'IS DEPLOYED - so the chain read-back, the transaction and the role lookup are all '
+                        + '(pagewatch.js) over itself and the two estates it probes. And M4 items 3, 7 and 9: the '
+                        + 'land share, players and tiles per player read 52, 100 and 170 off the generator the '
+                        + 'game loaded; the Generator version card AGREES, and says DISAGREES when '
+                        + 'MAP_DEFAULT.landShare is set to 0.5 in the probe with VERSION unchanged; ?fresh=0 starts '
+                        + 'with buildings and ?fresh=1 with none; ?world=1 generates with MAP_DEFAULT.players',
+                        'OF M4 ITEMS 3, 7 AND 9: the map cards\' AGREES compares the game with a field that starts '
+                        + 'at the game\'s own value, so it is the NUMBER (and the sweep line) that is asserted, not '
+                        + 'the word; the version card is proved to catch ONE parameter (landShare) and not every '
+                        + 'one the fingerprint hashes; a bumped VERSION with a new DRAWS row is not exercised; the '
+                        + 'doopies and seams switches\' one rule is not asserted here (seams is, by delivery). '
+                        + 'ALMOST EVERYTHING THE CONTRACTS WOULD PROVE, and that is the state of the project '
+                        + 'rather than a gap in the check: at 84007a9, 51 of the 68 numbers have the chain as '
+                        + 'their home, 15 of those have a getter in a contract that is written (the demo-mode flag, '
+                        + 'and since M4 RareGame\'s eight) and 36 have none, and NOTHING IS DEPLOYED - the check '
+                        + 'reads that census off the page at run time, so these figures are a snapshot and not '
+                        + 'what it asserts - so the chain read-back, the transaction and the role lookup are all '
                         + 'driven against a STUB WALLET AND A STUB CHAIN this check installs. What that proves '
                         + 'is the page\'s own logic - recover, ask the role, refuse; show, then sign; read back '
                         + 'and report - and NOT that any of it works against a real node, a real wallet or a '
@@ -206,6 +225,24 @@ const CHECKS = [
                         + 'deployed, and the deployer has said so. Also not covered: that the gate STOPS anybody '
                         + '- it is a page, the source is public and the browser is the reader\'s; and the record, '
                         + 'which lives in one browser tab'],
+  ['registrycheck',     'M8 and M10 as the game runs them, every rule proved by CHANGING ITS ROW at run time and '
+                        + 'watching the page follow: nine registry rows, the capacitor the ninth; the capacitor locked '
+                        + 'on its `unlocks` row until one game year after the water mill (waited on the game clock, '
+                        + '?length=0.01); `needsKind` locking and clearing; `nextToKind` by tile (edge yes, diagonal and '
+                        + 'three tiles no); the keep cap read off `cappedByKeepLevel` (cell exempt by data, flipped and '
+                        + 'capped); the HUD wall-crew denominator summed from each wall\'s `capacity` by level and the '
+                        + 'panel agreeing (Q23); towerDef and wallSlot gone; a strength per level, the wall\'s = wallHp; '
+                        + 'energy supply/demand/ratio/stall, a starved building\'s charge, the power bar drawing CHARGE '
+                        + 'not level, a capacitor\'s fill as its charge, its leak at 10% a day as a RATE within 20% and '
+                        + 'none at level IV; and WATCHES THE PAGE (pagewatch.js). Seven breakages of index.html each '
+                        + 'turned it red',
+                        'ANY NUMBER BEING RIGHT - strength is 0 off the wall and every draw and supply is 0, so the '
+                        + 'check sets its own (10, 4, 20) to drive the loop: it proves the loop reads the rows, not '
+                        + 'that they are tuned; a capacitor built or placed through the UI (it is pushed onto '
+                        + 'base.buildings, siteReason is called, not tapped); `unlocks` on any kind but the capacitor '
+                        + 'and `needsKind` on any kind but the tower; a wall above level 2; Capacitor II and III\'s '
+                        + 'leak; energy over a whole game day; anything on chain; and it runs a SHORTENED game '
+                        + '(?length=0.01), not the stock length'],
   ['mapcheck',          '100 bases, seed reproducibility, the mini map, turning under 60ms',
                         'a map that starts EMPTY, which is what the design decided'],
   ['stepcheck',         'stepped access 0-1-2-3, and nothing out of reach on 12 maps',
@@ -218,9 +255,9 @@ const CHECKS = [
                         + 'generations (and acquires no `generation(` or ownership lookup of its own), no '
                         + 'deployable contract commits state or moves tokens on a generation it was handed '
                         + 'unless it reads `generation(` and checks ownership itself, a combat `tokenId` must be '
-                        + "looked up, and the HP table has one source - index.html's, read through "
-                        + "paritycheck's own `readConst` and compared with the table paritycheck holds the "
-                        + 'Solidity to',
+                        + "looked up, and the HP table has one source - values.js's (M3 item 1 moved it out of "
+                        + "index.html), read through paritycheck's own `readConst` and compared with the table "
+                        + 'paritycheck holds the Solidity to',
                         'ANYTHING A COMPILER OR A NODE WOULD SAY - it reads every contracts/*.sol plus test/Mocks.sol as text, compiles '
                         + 'nothing and runs nothing, so a contract that satisfies every line here can still be '
                         + 'wrong the moment it executes; its third part is VACUOUS TODAY and says so in its own '
@@ -268,30 +305,88 @@ const CHECKS = [
                         + 'the item numbers WITHIN a milestone table are still not checked to be 1..N in order '
                         + "- M23's read 1,2,3,4,5,6,8,7,9"],
   ['schemacheck',       "M3's schema (estate/schema.json) read as data rather than prose: every entity has one "
-                        + 'of three homes and every field a type from a closed list, NO JSON NUMBER appears '
+                        + 'of four homes (chain, map, client, server) and every field a type from a closed list, NO JSON NUMBER appears '
                         + 'anywhere in it (values are the economist\'s, and a number in the schema is a second '
                         + 'home for it), the two structs that already exist - RareCombat.Rules and RareDuel.Duel '
                         + '- are in it field for field and IN ORDER with anything added marked undecided, '
                         + "combat.js's ORDERS match the schema's order enum index for index, and the extraction "
                         + 'list names the exact text of every copy of state still sitting outside its one home, '
-                        + 'so a copy that leaves index.html turns the row red instead of being forgotten',
+                        + 'so a copy that moves turns the row red instead of being forgotten, and a copy marked gone '
+                        + 'goes red if it creeps back or its named reader disappears; AND THE ONE HOME, estate/values.js, '
+                        + 'loaded in node and held to the schema - every key maps to an entity, every building row has '
+                        + 'exactly the columns named, a footprint of [dx, dy] pairs and a placement keyed exactly as '
+                        + 'placementRule - and every reader it names (the page, paritycheck, gencheck, hashcheck, combatcheck, '
+                        + 'capturecheck) still reads values.js',
    'WHETHER ANY OF IT IS RIGHT - it reads names and types, and a field with a sensible type and a wrong '
                         + 'meaning passes every line; anything a compiler or a node would say, since nothing '
-                        + 'is compiled and nothing is executed; and THE RUNNING GAME - until ECON, KIND and '
-                        + 'defense() come out of index.html this proves the schema agrees with itself and with '
-                        + 'two existing structs, never that the game agrees with the schema'],
+                        + 'is compiled and nothing is executed; and THE RUNNING GAME - it never opens a page, so it '
+                        + 'proves index.html\'s SOURCE reads values.js, not that the page draws what values.js says '
+                        + '(that is the browser checks\'), and the running state - the purse, buildings standing, '
+                        + 'defense() - is still in index.html\'s memory and waits on M6'],
   ['artcheck',          'the Friend art in base-data.json is the chain\'s: every non-drawn idle/walk clip of every '
                         + 'spriteSets and friendRoster entry equals the registry\'s frames(family, seed), and every '
                         + 'Genesis px equals tokenURI\'s pixels (sprites/chain-art.mjs --check); no RPC is `skip`, not a pass',
                         '`friendSprites` (no token recorded, origin unknown) and the 8 drawn family-6 clips (drawnFacings, '
                         + 'skipped by design); anything about how the art RENDERS - no browser is opened'],
+  ['recordcheck',       "M6, state that survives: record.js's one rule for taking a session's write, refusal by refusal "
+                        + '(Replayed, StaleParent from two sessions off one head and from a batch out of order, Invalid '
+                        + 'for a move out of sequence or one the rules refuse, Forged, NoRecord), the abandoned draft that '
+                        + "takes and the one that does not, and the fight's view off the record where a vertical wall's "
+                        + 'crew spreads in y; then in a browser: real taps walk, post and order a Friend, demolish, bank '
+                        + 'and a chop timed on the game\'s clock, a RELOAD brings every one of them back at the same head '
+                        + 'with every token distinct and in the sprites\' pool, two tabs driven out of step see the '
+                        + "second's write refused and its draft dropped, and a CRASHED tab's draft is taken on the next open",
+                        'serve.py holding the record (the store is the browser\'s localStorage, a stand-in for the '
+                        + "server's); a harvester's own haul arriving (harvcheck); a Friend's job surviving a reload (jobs "
+                        + 'are not recorded); an island\'s two bases (persistence is off under ?world=1); two players (M7); '
+                        + 'and the chain half of items 5 and 7, which is a spec here and not code'],
+  ['memecheck',         'M19 item 5, a meme attack is a row and a drawing: the MEMES rows are READ OUT OF '
+                        + 'index.html\'s source (so a third row is driven with no edit here), each is whole and has '
+                        + 'its own MEME_ART entry; each is thrown on the armoury stage (?armoury=1&meme=<key>&intro=1) '
+                        + 'until the coin goes both ways, on the game\'s clock; every throw connects with the row\'s '
+                        + 'comic word; its effect is exactly the row\'s take of the strength left or backfire of the '
+                        + 'thrower\'s purse, against the frame before; every outcome word on the canvas (fillText) is '
+                        + 'the row\'s and no string that belongs only to another row is drawn; the caption and the '
+                        + 'reveal card carry the row\'s name; two rows draw differently; and WATCHES THE PAGE (pagewatch.js)',
+                        'WHAT A DRAWING LOOKS LIKE - the drawings are told apart by the path operations a frame costs '
+                        + 'while the meme is spun (arc, ellipse, curves), so it proves two rows draw DIFFERENTLY and not '
+                        + 'that either is a pizza or an afro; the glitch, the flight and the release are not measured; '
+                        + 'the row\'s `gets` field, which NOTHING READS - the reveal card says "FRIEND #N GETS THE" and '
+                        + 'the row\'s name; a meme in a real fight (combat.js has none) or held and spent by a player '
+                        + '(M19 items 5 and 7 are the stage only); the GIF export of a meme; and the armoury opened in '
+                        + 'a browser that ALREADY HOLDS A RECORD - each meme is thrown on cleared storage, because '
+                        + 'openRecord() restores the game\'s clock AFTER ?armoury= has started the stage, which skips the '
+                        + 'reveal and starts the throws part way through the count (a finding, the game engineer\'s)'],
+  ['buildreloadcheck',  'M9 item 7, a build in progress survives a reload: in a fresh profile a building is raised '
+                        + 'through its own panel\'s RAISE button out of the starting purse, let 45% of the way up on the '
+                        + 'game\'s clock, and the page RELOADED; the same building (by id) is still going up from the '
+                        + 'same start time at the same level, the record\'s row agrees and parity holds, the clock '
+                        + 'resumed rather than restarted, and it stands up buildMs after the recorded start (within '
+                        + 'two frames) with nothing refused; and WATCHES THE PAGE (pagewatch.js) over the open and the reload',
+                        'a NEW building going up from bare ground (a `build` move) - the base starts with no wood, so '
+                        + 'only a `raise` is driven, and the restore path is the same line for both but that is read, '
+                        + 'not run; REPLAY CONSTRUCTION (a same-level raise); a reload of a build that has already '
+                        + 'finished; more than one build at once; a crashed tab rather than a clean close (recordcheck '
+                        + 'drives the draft path, not with a build in it); serve.py holding the record - the store is '
+                        + 'the browser\'s localStorage; and the tap that opens the panel - the panel is opened by '
+                        + 'base.openPanel, the function a tap calls, and only the button is pressed'],
+  ['twoplayercheck',    "M7, two players in one game: its own serve.py holds the record and takes a write by record.js's apply() (Replayed, StaleParent keeping the first, NoRecord, a batch on another base's route refused); seat 0 and seat 1 in isolated contexts each read the other's record, a walk on one is drawn on the other and read by its defense() within two polls, a chop on one raises the other's view of its wood; a third client on one seat has its stale write REFUSED (StaleParent), is told and put back on the record while the writer loses nothing; and every record survives a server restart", 'two machines on a network (one Chrome, two contexts, localhost); an absent player\'s base (M7 item 4); the chain\'s hourly sync; a build, raise or demolish seen across seats; the island HUD\'s crystal figure (it shows the last base to bank); tap() on another player\'s Friend'],
+  ['walkcheck',         'M11 item 6, FRIENDS WALK WITH THE TOOLKIT on the real base page: base.nav.mode is toolkit (not '
+                        + 'the tile fallback), FriendSDK.commit is the commit TOOLKIT.md pins, every tree is in the walking '
+                        + 'world as the toolkit\'s tree prop, placeProp puts four toolkit props across a Friend\'s way, and '
+                        + 'the Friend arrives, leaves the straight line to get round them and in no walking frame stands '
+                        + 'inside a footprint; and WATCHES THE PAGE (pagewatch.js)',
+                        'one Friend, one walk, one line of props, one window size: no crowd, no two Friends crossing, no '
+                        + 'prop placed on a Friend, removeProp, a phone, the tile fallback\'s own walking, or cliffs; not '
+                        + 'that the path is the shortest; the two straight steps into and out of a footprint; and '
+                        + 'friendsdk-vendor.mjs --check, which needs the network (the bundle\'s bytes are propcheck\'s)'],
 ];
 const PARITY = ['paritycheck', 'the Solidity and the JavaScript settle the same roll, fight and duel - on the '
                 + "game's OWN four tables, HP, the wall, every weapon and the combat timings, all read out of "
-                + 'index.html rather than typed here a second time',
+                + 'values.js (index.html until M3 item 1) rather than typed here a second time',
                 'gas on a real node, an upgrade path, and anything not yet in the schema; and, of the numbers '
                 + 'it reads, only those four - the rest of ECON (the dummy, build times, the cell ladder) is '
-                + 'still nowhere in it, and a table the page computed at runtime instead of declaring would '
+                + 'still nowhere in it, and a table values.js computed instead of declaring as a literal would '
                 + 'not be found at all'];
 
 const args = process.argv.slice(2);

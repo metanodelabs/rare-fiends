@@ -34,6 +34,7 @@ h1 { font-family: var(--display); font-weight: 400; font-size: clamp(35px, 5vw, 
 .tag.chain { background: var(--signal); color: #000; }
 .tag.map { border: 1px solid var(--signal); color: var(--signal); }
 .tag.client { border: 1px dashed rgba(255,255,255,.7); color: #fff; }
+.tag.server { border: 1px solid rgba(255,255,255,.7); color: #fff; }
 .tag.nohome { border: 1px dashed var(--faint); color: var(--dim); }
 .tag.dec { border: 1px solid rgba(255,255,255,.7); color: #fff; }
 .tag.ph { border: 1px dashed var(--signal); color: var(--signal); }
@@ -157,6 +158,7 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
     <span><span class="tag chain">ON CHAIN</span> the contract is the truth</span>
     <span><span class="tag map">IN A SEED</span> frozen into a map, reproducible from it</span>
     <span><span class="tag client">CLIENT BELIEF</span> the game believes it; nothing enforces it</span>
+    <span><span class="tag server">OUR SERVER</span> the game as it is played, held on our server; the chain keeps its record, not its state</span>
     <span><span class="tag nohome">NO HOME</span> not in <code>schema.json</code> at all</span>
   </div>
   <div class="legend">
@@ -215,6 +217,7 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
     mktFee:       { v: 1.5, u: '%', src: 'The marketplace fee, "1.5% to start". It does not get the cut\'s freeze - the deployer\'s words were "no need".' },
     roleDelay:    { v: 0,   u: 'h', src: 'DECIDED 2026-09-30: the role-change delay is ZERO for v1, and it is a deployer-page setting so it can change later without a redeploy.' },
     maxFeeBps:    { v: 10,  u: '%', src: 'Ruling 1 (2026-09-30): the marketplace fee\'s ceiling is 10% (1000 basis points). A constructor argument, immutable once deployed.' },
+    minPlayers:   { v: 2,   u: 'players', src: 'DECIDED: "It is 2 and it is decided" - the fewest players a game needs to start.' },
     partnerWait:  { v: 24,  u: 'h', src: 'Set the waiting period - how long a paused partnership has to agree new terms before it ends by itself. "24 hours to start".' },
   };
   // The two thresholds behind the game-length warning. M4 item 13, and both are decided.
@@ -250,12 +253,67 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
   //   era           the lifecycle: the join window, the gap, the fewest players
   // ---------------------------------------------------------------------------
   const MG = window.MapGen || null;
+  // The map's numbers are read from the generator THE GAME loaded, in the probe's window - not from this
+  // page's own copy of mapgen.js - because that is where the game reads them (M4 item 11).
+  const GMG = () => { try { const w = $('pBase').contentWindow; return (w && w.MapGen && w.base) ? w.MapGen : null; } catch (e) { return null; } };
+
+  // ---------------------------------------------------------------------------
+  // M4 ITEM 9: A CHANGE TO ANY GENERATION PARAMETER BUMPS THE GENERATOR'S VERSION.
+  // A game stores its seed and MapGen.VERSION and nothing else about its map, so the
+  // version is only worth anything if the same version always draws the same island.
+  // This is that rule, enforced: the game's own generator draws seed DRAWN_SEED at its
+  // own defaults, the ground it draws is fingerprinted, and the fingerprint is compared
+  // with what DRAWS records for the version it claims. What is hashed is the ground -
+  // heights, water, forest, ruins, plots, trees, seams and their depths - and NONE of
+  // the chain's numbers (treeWood, growMs, ...), which values.js may change between
+  // games without redrawing anybody's map. Proved both ways when this was written:
+  // changing a chain number leaves the fingerprint alone; changing landShare or the
+  // groves a base gets moves it.
+  //
+  // A generator change therefore needs two lines: VERSION + 1 in mapgen.js, and its
+  // fingerprint as a new row here. One without the other is a DISAGREES on this page.
+  // The fingerprint was measured identical at d35044f, 49d9212, 21d3cf1 and HEAD for
+  // the ground; seam depths arrived at 01dee26 under version 1, before any game had
+  // recorded a map, so version 1 is recorded as it draws today.
+  // ---------------------------------------------------------------------------
+  const DRAWN_SEED = 1;
+  const DRAWS = { 1: '0xcadcba1bc2950b277e6a428d38342f0a240b0392377345d9a9b5547c8bcccd1f' };
+  const DRAWN_FIELDS = ['level', 'water', 'forest', 'ruin', 'plotAt', 'flowDir', 'trees', 'seamDepth'];
+  let drawnMemo = null;                                  // per game window: generating is ~100 ms, once
+  function drawnBy(gmg) {
+    if (drawnMemo && drawnMemo.gmg === gmg) return drawnMemo.r;
+    let r;
+    try {
+      const M = gmg.generate({ seed: DRAWN_SEED });
+      const out = [M.W, M.H];
+      DRAWN_FIELDS.forEach((k) => { const a = M[k]; out.push(a ? a.length : -1); if (a) for (let i = 0; i < a.length; i++) out.push(a[i] | 0); });
+      (M.plots || []).forEach((p) => out.push(p.x | 0, p.y | 0));
+      (M.seams || []).forEach((s) => out.push(Math.round(s.x * 2), Math.round(s.y * 2), s.wild ? 1 : 0));
+      const b = new Uint8Array(out.length * 4), dv = new DataView(b.buffer);
+      out.forEach((v, i) => dv.setInt32(i * 4, v));
+      r = { version: gmg.VERSION, fp: window.Chance.hex(window.Chance.keccak256(b)), players: M.players, side: M.W };
+    } catch (e) { r = { version: gmg.VERSION, fp: null, err: String(e && e.message || e) }; }
+    drawnMemo = { gmg, r };
+    return r;
+  }
+  function versionCheck() {
+    const g = GMG(); if (!g) return null;
+    const d = drawnBy(g), rec = DRAWS[d.version];
+    if (!d.fp) return { c: 'no', t: 'DISAGREES — THE GENERATOR COULD NOT DRAW SEED ' + DRAWN_SEED + ': ' + d.err };
+    if (!rec) return { c: 'no', t: 'DISAGREES — VERSION ' + d.version + ' HAS NO RECORDED MAP. Record its fingerprint here, ' + d.fp.slice(0, 18) + '…, before a game is created with it.' };
+    return rec === d.fp
+      ? { c: 'ag', t: 'AGREES — VERSION ' + d.version + ' DRAWS SEED ' + DRAWN_SEED + ' AS RECORDED (' + d.players + ' players, ' + d.side + '×' + d.side + ', ' + d.fp.slice(0, 10) + '…)' }
+      : { c: 'no', t: 'DISAGREES — VERSION ' + d.version + ' NOW DRAWS A DIFFERENT MAP FROM SEED ' + DRAWN_SEED + ' (' + d.fp.slice(0, 10) + '… where ' + rec.slice(0, 10) + '… is recorded). A generation parameter changed and the version did not: raise VERSION in mapgen.js and record the new fingerprint here.' };
+  }
   const gameWin = () => { try { const w = $('pBase').contentWindow.base; return (w && w.ECON) ? w : null; } catch (e) { return null; } };
   const G = () => { const w = gameWin(); return w ? w.ECON : null; };
   // the fight's rules as combat.js builds them from the game's tables with NO proposal passed - the defaults the fight runs on today
   const CR = () => { const E = G(); if (!E || typeof Combat === 'undefined' || !Combat.rulesFrom) return null; try { return Combat.rulesFrom(E, {}); } catch (e) { return null; } };
   const eraWin = () => { try { const e = $('pEra').contentWindow.era; return (e && e.S) ? e : null; } catch (e) { return null; } };
 
+  // amounts are stored in hundredths; the divisor is the game's own crystalUnit, read and never typed. No unit, no number.
+  const cu = () => { const g = G(); return g && g.crystalUnit > 0 ? g.crystalUnit : null; };
+  const hund = (n) => { const u = cu(); return (u && typeof n === 'number') ? n / u : undefined; };
   const secs = (ms) => (ms / 1000).toLocaleString('en-US', { maximumFractionDigits: 2 }) + ' s';
   const list = (o) => Array.isArray(o) ? o.join(', ') : Object.entries(o).map(([k, v]) => k + ' ' + v).join(', ');
 
@@ -270,55 +328,86 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
   const R = [
     // ---- the map: M4 item 3 -------------------------------------------------
     { g: 'map', id: 'groves', k: 'Groves of trees on a map', e: 'map', f: 'groves', u: 'groves',
-      read: () => MG && MG.ECON_DEFAULT.groves, where: 'MapGen.ECON_DEFAULT.groves' },
+      read: () => { const g = GMG(); return g ? g.ECON_DEFAULT.groves : undefined; }, where: 'the game\'s MapGen.ECON_DEFAULT.groves' },
     { g: 'map', id: 'treesPerGrove', k: 'Trees in a grove', e: 'map', f: 'groves', u: 'trees',
-      read: () => MG && MG.ECON_DEFAULT.treesPerGrove, where: 'MapGen.ECON_DEFAULT.treesPerGrove' },
+      read: () => { const g = GMG(); return g ? g.ECON_DEFAULT.treesPerGrove : undefined; }, where: 'the game\'s MapGen.ECON_DEFAULT.treesPerGrove' },
     { g: 'map', id: 'homeSeams', k: 'Crystal seams inside a base', e: 'map', f: 'seams', u: 'seams',
-      read: () => MG && MG.ECON_DEFAULT.homeSeams, where: 'MapGen.ECON_DEFAULT.homeSeams' },
+      read: () => { const g = GMG(); return g ? g.ECON_DEFAULT.homeSeams : undefined; }, where: 'the game\'s MapGen.ECON_DEFAULT.homeSeams' },
     { g: 'map', id: 'wildSeams', k: 'Crystal seams out in the frontier', e: 'map', f: 'seams', u: 'seams',
-      read: () => MG && MG.ECON_DEFAULT.wildSeams, where: 'MapGen.ECON_DEFAULT.wildSeams' },
+      read: () => { const g = GMG(); return g ? g.ECON_DEFAULT.wildSeams : undefined; }, where: 'the game\'s MapGen.ECON_DEFAULT.wildSeams' },
     { g: 'map', id: 'creeks', k: 'Creek density', e: 'map', f: 'baseSites', u: 'creeks per base', open: true,
       read: () => undefined, where: 'nothing',
-      s: 'The generator gives every base exactly one creek and takes no option for it. There is no number to set until it does.' },
-    { g: 'map', id: 'landShare', k: 'How much of the square is land', e: 'map', f: 'width', u: '%', open: true,
-      read: () => undefined, where: 'nothing',
-      s: '<code>LAND_SHARE</code> is a constant inside <code>generate()</code> - not an option and not exported. The generator has to expose it before this page can read it or set it.' },
-    { g: 'map', id: 'players', k: 'Players on one map', e: 'map', f: 'baseSites', u: 'players', open: true,
-      read: () => undefined, where: 'nothing',
-      s: '<code>generate()</code> takes it as an argument with a default in its own signature. Nothing exports that default, so there is nothing to read back.' },
-    { g: 'map', id: 'tilesPerPlayer', k: 'Tiles per player', e: 'map', f: 'width', u: 'tiles', open: true,
-      read: () => undefined, where: 'nothing',
-      s: 'The same: an argument default, not an exported number.' },
-    { g: 'map', id: 'generatorVersion', k: 'Generator version', e: 'map', f: 'generatorVersion', u: '', ro: true,
-      read: () => MG && MG.VERSION, where: 'MapGen.VERSION',
-      s: 'Read only, and on this page for one reason: <b>a change to any number above has to bump it</b>, or an old map stops being reproducible from its seed.' },
+      s: 'The generator gives every base exactly one creek and takes no option for it. There is no number to set until it does — and the economist proposes none (sweep row 38: <i>a field with one legal value is a field that lies</i>).' },
+    // MapGen.MAP_DEFAULT is exported since M12's merge (c9bf0a0), so the last three are READ rather than NOT DECIDED.
+    // Their home is the map: they are frozen into a map when it is generated, so an edit here is a change to the NEXT
+    // map with no setter - and changing a default in mapgen.js is a generation change, which item 9 below catches.
+    { g: 'map', id: 'landShare', k: 'How much of the square is land', e: 'map', f: 'width', u: '%',
+      read: () => { const g = GMG(); return g ? Math.round(g.MAP_DEFAULT.landShare * 1000) / 10 : undefined; }, where: 'the game\'s MapGen.MAP_DEFAULT.landShare, as a percentage',
+      sweep: { row: 36, t: 'keep 52%, and export it', v: 52 },
+      s: '<code>generate()</code> reads it from <code>MAP_DEFAULT</code> and <b>takes no option for it</b>, so no map can be generated with another share without editing the generator — which bumps its version.' },
+    { g: 'map', id: 'players', k: 'Players on one map', e: 'map', f: 'baseSites', u: 'players',
+      read: () => { const g = GMG(); return g ? g.MAP_DEFAULT.players : undefined; }, where: 'the game\'s MapGen.MAP_DEFAULT.players - what the game generates its map with when the address names no count',
+      sweep: { row: 37, t: 'keep 100 (2 to 200)', v: 100 },
+      s: 'The generator holds any count between <b>2 and 200</b>. The game used to write its own 40 over this default; it now reads it. <code>?players=</code> still reaches only the two-base test map, which is M12 item 8\'s.' },
+    { g: 'map', id: 'tilesPerPlayer', k: 'Tiles per player', e: 'map', f: 'width', u: 'tiles',
+      read: () => { const g = GMG(); return g ? g.MAP_DEFAULT.tilesPerPlayer : undefined; }, where: 'the game\'s MapGen.MAP_DEFAULT.tilesPerPlayer',
+      sweep: { row: 37, t: 'keep 170', v: 170 },
+      s: 'With the land share it sets the island\'s side: 100 players make a 181 × 181 map.' },
+    { g: 'map', id: 'generatorVersion', k: 'Generator version', e: 'map', f: 'generatorVersion', u: '', ro: true, verify: versionCheck,
+      read: () => { const g = GMG(); return g ? g.VERSION : undefined; }, where: 'the game\'s MapGen.VERSION',
+      s: 'Read only, and on this page for one reason: <b>a change to any number above has to bump it</b>, or an old map stops being reproducible from its seed. <b>Enforced, not trusted</b>: the game\'s generator draws seed ' + DRAWN_SEED + ' and the ground it draws is compared with what this page records for the version — the line below.' },
 
     // ---- the economy: M4 item 4 --------------------------------------------
-    { g: 'econ', id: 'startPurse', k: 'Crystals a player starts with', e: 'base', f: 'crystals', u: 'crystals', put: 'url',
-      read: () => { const w = gameWin(); return w ? w.crystals : undefined; }, where: 'base.crystals, the purse the game is playing with' },
-    { g: 'econ', id: 'startWood', k: 'Wood a player starts with', e: 'base', f: 'wood', u: 'logs',
-      read: () => { const g = G(); return g && g.startWood; }, where: 'base.ECON.startWood' },
-    { g: 'econ', id: 'treeWood', k: 'Wood a tree gives', u: 'logs',
-      read: () => { const g = G(); return g && g.treeWood; }, where: 'base.ECON.treeWood' },
-    { g: 'econ', id: 'chopMs', k: 'Time to cut one log', u: 's', scale: 1000,
-      read: () => { const g = G(); return g && g.chopMs / 1000; }, where: 'base.ECON.chopMs' },
-    { g: 'econ', id: 'regrowMs', k: 'Time for a tree to grow back', u: 's', scale: 1000,
-      read: () => { const g = G(); return g && g.regrowMs / 1000; }, where: 'base.ECON.regrowMs' },
-    { g: 'econ', id: 'handYield', k: 'What a harvester brings back in a load', u: 'crystals',
+    // Every one of these has a home in schema.json's `economy` entity (chain), and every amount the game holds is
+    // in HUNDREDTHS (values.js crystalUnit). The page used to print the raw word - "a harvester costs 2000
+    // crystals", "a tree gives 300 logs" - which is a hundred times what the game charges and pays. Each read
+    // below divides by the game's own crystalUnit (cu()), read out of base.ECON and never typed here.
+    { g: 'econ', id: 'startPurse', k: 'Crystals a player starts with', e: 'economy', f: 'startPurse', u: 'crystals', put: 'url', q: 'purse',
+      read: () => { const w = gameWin(); return w ? hund(w.crystals) : undefined; },
+      where: 'base.crystals ÷ base.ECON.crystalUnit - the purse the game is playing with, in whole crystals',
+      sweep: { row: 9, t: 'keep 240.00', v: 240 },
+      s: 'Delivered as <code>?purse=</code>, the web address the game reads in whole crystals. It went out as <code>?startPurse=</code> until now, which the game never read, so the change never arrived.' },
+    { g: 'econ', id: 'startWood', k: 'Wood a player starts with', e: 'economy', f: 'startWood', u: 'logs',
+      read: () => { const g = G(); return g ? hund(g.startWood) : undefined; }, where: 'base.ECON.startWood ÷ crystalUnit',
+      sweep: { row: 10, t: 'keep 0', v: 0 } },
+    { g: 'econ', id: 'treeWood', k: 'Wood a tree gives', e: 'economy', f: 'treeWood', u: 'logs',
+      read: () => { const g = G(); return g ? hund(g.treeWood) : undefined; }, where: 'base.ECON.treeWood ÷ crystalUnit',
+      sweep: { row: 11, t: 'keep 3 logs', v: 3 } },
+    { g: 'econ', id: 'chopMs', k: 'Time to cut one log', e: 'economy', f: 'chopMs', u: 's', scale: 1000,
+      read: () => { const g = G(); return g && g.chopMs / 1000; }, where: 'base.ECON.chopMs',
+      sweep: { row: 12, t: 'keep 1.4 s a log', v: 1.4 } },
+    { g: 'econ', id: 'regrowMs', k: 'Time for a tree to grow back', e: 'economy', f: 'regrowMs', u: 's', scale: 1000,
+      read: () => { const g = G(); return g && g.regrowMs / 1000; }, where: 'base.ECON.regrowMs',
+      sweep: { row: 13, t: '15 min (900 s) - the game runs at demo pace', v: 900 } },
+    { g: 'econ', id: 'handYield', k: 'What a Friend cuts from a ripe seam by hand', e: 'economy', f: 'handYield', u: 'crystals',
       read: () => { const g = G(); return g && g.handYield; }, where: 'base.ECON.handYield',
-      s: 'One crystal per depot level today.' },
-    { g: 'econ', id: 'growMs', k: "A seam's full growth cycle", u: 's', scale: 1000,
-      read: () => { const g = G(); return g && g.growMs / 1000; }, where: 'base.ECON.growMs' },
-    { g: 'econ', id: 'harvCost', k: 'What a harvester costs', u: 'crystals',
-      read: () => { const g = G(); return g && g.harvCost; }, where: 'base.ECON.harvCost' },
+      sweep: { row: 15, t: 'keep 1.00 at full growth', v: 1 },
+      s: 'It was labelled <i>what a harvester brings back</i>. It is not: the schema and the game both call it a hand harvest. The harvester\'s haul is the next card.' },
+    { g: 'econ', id: 'harvHaul', k: 'What a harvester brings back in a load', u: 'crystals', open: true,
+      read: () => undefined, where: 'nothing',
+      sweep: { row: 17, t: 'keep 1 / 2 / 3 by depot level' },
+      // TODO(M8): read it once base.ECON carries the haul as a key. Today it is a rule in code, not a number.
+      s: 'The game pays the depot\'s level in crystals per ripe load, but as a rule written into its code (index.html <code>bank()</code>), <b>not a number in <code>base.ECON</code></b>, so there is nothing here to read. Waits on M8 giving it a key.' },
+    { g: 'econ', id: 'growMs', k: "A seam's full growth cycle", e: 'economy', f: 'growMs', u: 's', scale: 1000,
+      read: () => { const g = G(); return g && g.growMs / 1000; }, where: 'base.ECON.growMs',
+      sweep: { row: 14, t: '15 min (900 s), one clock with the trees - the game runs at demo pace', v: 900 } },
+    { g: 'econ', id: 'harvCost', k: 'What a harvester costs', e: 'economy', f: 'harvCost', u: 'crystals',
+      read: () => { const g = G(); return g ? hund(g.harvCost) : undefined; }, where: 'base.ECON.harvCost ÷ crystalUnit',
+      sweep: { row: 18, t: 'keep 20.00', v: 20 } },
     { g: 'econ', id: 'seamStages', k: 'What a seam gives at each stage of its growth', u: 'crystals', open: true,
       read: () => undefined, where: 'nothing',
-      s: 'The stages exist - a quarter of the growth cycle each - and <b>what each one gives is not decided</b>. Worth less when cut young is the rule; no number carries it.' },
+      sweep: { row: 16, t: '0.25 / 0.50 / 0.75 / 1.00 at stages 0 to 3' },
+      // TODO(M8): read it once base.ECON carries a per-stage yield.
+      s: 'The stages exist - a quarter of the growth cycle each - and <b>what each one gives is not decided</b>. No key in <code>base.ECON</code> carries it.' },
     { g: 'econ', id: 'depotCap', k: "The collection depot's cap", u: 'crystals', open: true,
-      read: () => undefined, where: 'nothing', s: 'No cap on the depot exists in the game.' },
-    { g: 'econ', id: 'siloCap', k: 'What a silo holds, by level', u: 'crystals', tab: true,
-      read: () => { const g = G(); return g && list(g.siloCap); }, where: 'base.ECON.siloCap',
-      s: 'Marked a placeholder in the game\'s own source.' },
+      read: () => undefined, where: 'nothing',
+      sweep: { row: 20, t: '240.00 / 720.00 / 2,160.00 by depot level' },
+      // TODO(M8): read it once base.ECON carries a depot cap.
+      s: 'No cap on the depot exists in the game, and no key in <code>base.ECON</code> carries one.' },
+    { g: 'econ', id: 'siloCap', k: 'What a silo holds, by level', e: 'buildingType', f: 'capacity', u: 'crystals', tab: true,
+      read: () => { const g = G(); return g && g.siloCap && cu() ? g.siloCap.map(hund).join(', ') : undefined; }, where: 'base.ECON.siloCap ÷ crystalUnit',
+      sweep: { row: 21, t: '+300 / +900 / +3,000 per silo level, added up over every standing silo' },
+      s: 'The game takes these as a cap, from the largest silo standing. The proposal is that every silo adds to it.' },
 
     // ---- the fight: M4 item 5 ----------------------------------------------
     { g: 'fight', id: 'hp', k: "A Friend's hit points, by generation", e: 'rules', f: 'hp', tab: true,
@@ -326,7 +415,9 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
     { g: 'fight', id: 'wallHp', k: 'A wall section\'s hit points', e: 'rules', f: 'wallHp', u: 'HP',
       read: () => { const g = G(); return g && g.wallHp; }, where: 'base.ECON.wallHp' },
     { g: 'fight', id: 'hpCeiling', k: 'The most hit points a building can have', e: 'rules', f: 'hp', u: 'HP', open: true,
-      read: () => undefined, where: 'nothing', s: 'The deployer\'s table requires it. No number for it exists anywhere.' },
+      read: () => undefined, where: 'nothing', sweep: { row: 7, t: '6,000 - the Citadel\'s own number, so nothing out-lasts the keep' },
+      // TODO(M8): read it once base.ECON carries building strength and its ceiling.
+      s: 'The deployer\'s table requires it. No number for it exists in the game.' },
     { g: 'fight', id: 'weapons', k: 'Weapon damage and range, by generation', e: 'rules', f: 'dmg', tab: true,
       read: () => { const g = G(); return g && Object.entries(g.weapons).map(([k, w]) => 'gen ' + k + ' ' + w.n + ' ' + w.dmg + ' dmg / ' + w.rng + ' tiles').join(' · '); },
       where: 'base.ECON.weapons' },
@@ -353,29 +444,45 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
       read: () => { const R = CR(); return R && R.defendReach / 2; }, where: 'Combat.rulesFrom default (combat.js), read back out of defendReach in spots',
       s: '<b>PROPOSED 5 tiles - keep.</b> Five is the longest weapon range (catapult), so a DEFEND Friend can reach an attacker shelling its post from the far edge of any range in the game. <b>Below 5</b> a catapult stands off and shells a post its defender is not allowed to leave - DEFEND becomes HOLD with extra steps. <b>Above 5</b> DEFEND drifts into ENGAGE and the third standing order has no reason to exist. Not measured against a base\'s size, which the map decides; that comparison is owed.' },
     { g: 'fight', id: 'splashFalloff', k: 'What splash loses with distance', e: 'rules', f: 'splashFalloff', open: true,
-      read: () => undefined, where: 'nothing', s: 'Named in DESIGN and <b>missing from the rules table altogether</b>.' },
+      read: () => undefined, where: 'nothing', sweep: { row: 5, t: '÷2 per spot, as a field of RareCombat.Rules' },
+      s: 'Named in DESIGN and <b>missing from the rules table altogether</b>: <code>combat.js</code> halves it per spot in its own code, so there is no number to read.' },
 
     // ---- the buildings: M4 item 6 ------------------------------------------
     { g: 'build', id: 'costs', k: 'What each building costs', e: 'buildingType', f: 'crystalCost', tab: true,
-      read: () => { const g = G(); return g && Object.entries(g.kinds).map(([k, v]) => k + ' ' + (Array.isArray(v.cost) ? v.cost.join('/') : v.cost)).join(' · '); },
-      where: 'base.ECON.kinds' },
+      // per level, crystals and (level 1) wood, both in hundredths in the game and shown whole here
+      read: () => { const g = G(); if (!g || !g.kinds || !cu()) return undefined;
+        return Object.entries(g.kinds).map(([k, v]) => k + ' ' + (v.cost || []).map((c, i) => hund(c) + (v.wood && v.wood[i] ? '+' + hund(v.wood[i]) + 'w' : '')).join(' / ')).join(' · '); },
+      where: 'base.ECON.kinds[*].cost and .wood ÷ crystalUnit - crystals per level, then +Nw for wood',
+      sweep: { row: 23, t: 'question 22: level 1 wood only, level 2 half and half, level 3 crystals - each rung keeps its total' } },
     { g: 'build', id: 'buildMs', k: 'How long a building takes to raise', e: 'buildingType', f: 'buildMs', u: 's', scale: 1000,
       read: () => { const g = G(); return g && g.buildMs / 1000; }, where: 'base.ECON.buildMs',
+      sweep: { row: 24, t: '4 s per unit of the rung\'s materials, one Friend, by hand - a hut I 4 min, a Hall 10 min' },
       s: '<b>One number for every building and every level in the game today.</b> The deployer\'s table wants one per building per level.' },
     { g: 'build', id: 'handsOff', k: 'What a second pair of hands takes off the time', u: '%', open: true,
-      read: () => undefined, where: 'nothing' },
+      read: () => undefined, where: 'nothing', sweep: { row: 25, t: 'linear: the time divided by the Friends on it, up to the ceiling' },
+      // TODO(M8): read it once base.ECON carries how hands divide the time.
+      s: 'No key in <code>base.ECON</code> carries it.' },
     { g: 'build', id: 'handsCap', k: 'The most Friends that can usefully work on one building', u: 'Friends', open: true,
-      read: () => undefined, where: 'nothing' },
-    { g: 'build', id: 'footprint', k: 'Tiles a building takes up', e: 'buildingType', f: 'footprint', open: true,
-      read: () => undefined, where: 'nothing', s: 'It has a home in the schema and no value in the game.' },
+      read: () => undefined, where: 'nothing', sweep: { row: 27, t: '4 for every one-tile building; a wall 2; the capacitor 4' },
+      // TODO(M8): read it once base.ECON carries the ceiling on hands.
+      s: 'No key in <code>base.ECON</code> carries it.' },
+    { g: 'build', id: 'footprint', k: 'Tiles a building takes up', e: 'buildingType', f: 'footprint', tab: true,
+      read: () => { const g = G(); return g && g.kinds ? Object.entries(g.kinds).map(([k, v]) => k + ' ' + (Array.isArray(v.footprint) ? v.footprint.length : '?')).join(' · ') : undefined; },
+      where: 'base.ECON.kinds[*].footprint - the number of tiles each one covers',
+      sweep: { row: 28, t: 'keep: one tile for all nine, a wall an edge' },
+      s: 'Read as the count of tile offsets in each row\'s footprint. A wall is counted as the one tile it is placed on; that it stands on an edge is a placement rule, not a footprint.' },
     { g: 'build', id: 'energy', k: 'What energy each building draws', e: 'buildingType', f: 'capacity', u: 'P', open: true,
-      read: () => undefined, where: 'nothing' },
+      read: () => undefined, where: 'nothing', sweep: { row: 29, t: 'as economy.html proposes it, plus the capacitor 0 at every level' },
+      // TODO(M8): read it once base.ECON carries an energy draw.
+      s: 'Proposed on <code>economy.html</code> only. No key in <code>base.ECON</code> carries it.' },
     { g: 'build', id: 'cellReach', k: 'How far a cell reaches at each level', e: 'buildingType', f: 'reach', tab: true,
       read: () => { const g = G(); return g && list(g.cellReach); }, where: 'base.ECON.cellReach',
       doc: [2, 3, 4, 5], against: '2, 3, 4, 5 tiles to start',
       s: 'The deployer\'s table says <b>2, 3, 4, 5 tiles to start</b>, and <b>the document is right</b> — that was ruled on when this page first found the game reading 0, 1.5, 2.5, 3.5, 4.5. Compare it with what the game reads.' },
     { g: 'build', id: 'cellNeeds', k: 'The worst generation that can run a cell, by level', e: 'buildingType', f: 'levels', tab: true,
-      read: () => { const g = G(); return g && list(g.cellNeeds); }, where: 'base.ECON.cellNeeds' },
+      // an EMPTY table is an answer, not a blank: the operator gate is struck (M8 item 7) and no level needs anyone
+      read: () => { const g = G(); if (!g || !g.cellNeeds) return undefined; return Object.keys(g.cellNeeds).length ? list(g.cellNeeds) : 'none at any level'; },
+      where: 'base.ECON.cellNeeds', s: 'The operator gate is struck in DESIGN (M8 item 7), so the game asks for no one at any level.' },
 
     // ---- the switches: M4 item 7 - the four that are typed web addresses today
     { g: 'sw', id: 'seams', k: 'Crystals on this map', e: 'map', f: 'seams', sw: true, put: 'url', q: 'seams',
@@ -386,17 +493,19 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
       where: 'the Doopies standing on the base, counted in base.actors',
       s: 'A whole collection on or off. <code>?doopies=1</code> today.' },
     { g: 'sw', id: 'fresh', k: 'An empty base', sw: true, put: 'url', q: 'fresh',
-      read: () => { const w = gameWin(); return w ? (w.buildings.length === 0 ? 'on' : 'off') : undefined; },
-      where: 'base.buildings.length', s: 'Start from bare ground. <code>?fresh=1</code> today.' },
+      // what the base STARTED as, not what stands now: the old read was the live building count, which says ON the moment
+      // a player razes their last building and OFF the moment they raise their first, whatever the switch was
+      read: () => { const w = gameWin(); return w && w.ECON.startBuildings ? (w.ECON.startBuildings.length === 0 ? 'on' : 'off') : undefined; },
+      where: 'base.ECON.startBuildings - what the base started as', s: 'Start from bare ground. <code>?fresh=1</code> today. The game reads it as on only when the address says exactly 1; <code>?fresh=0</code> used to raze the base all the same.' },
     { g: 'sw', id: 'world', k: 'The two-base test map', sw: true, put: 'url', q: 'world',
       read: () => { const w = gameWin(); return w ? (w.BASES.length > 1 ? 'on' : 'off') : undefined; },
       where: 'base.BASES.length', s: 'A generated map with more than one base on it. <code>?world=1</code> today.' },
     { g: 'sw', id: 'seed', k: 'The seed the map is generated from', e: 'map', f: 'seed', put: 'url', q: 'seed', u: '',
-      read: () => undefined, where: 'nothing',
-      s: 'The generator is seeded and the game stores the seed; <b>the running map does not read its own seed back out</b>, so this one cannot be proved from the game. Delivered with the two-base switch.' },
+      read: () => { const w = gameWin(); return w && w.WORLDGEN ? w.WORLDGEN.seed : undefined; }, where: 'base.WORLDGEN.seed - the seed the generated map was drawn from',
+      s: 'Read back out of the map the game generated, so it is NOT READABLE while the game plays its one hand-drawn base. Delivered with the two-base switch, which is M12 item 8\'s.' },
 
     // ---- the money and the clock: M4 items 8 and 13 ------------------------
-    { g: 'money', id: 'length', k: 'How long a game lasts', e: 'game', f: 'closesAt', u: 'h', dec: 'length', warn: true,
+    { g: 'money', id: 'length', k: 'How long a game lasts', e: 'game', f: 'length', u: 'h', dec: 'length', warn: true,
       read: () => { const g = G(); return g && g.gameLength / 3600e3; }, where: 'base.ECON.gameLength (ms; the game takes ?length= in hours and defaults to the decided 168)',
       s: 'Decided as a starting value and it stays a parameter. The game reads it for one thing today: <b>the game year is derived from it</b>, and the year opens the upgrades after the water mill. The lifecycle on the start screen still has a join window and a gap and no length.' },
     { g: 'money', id: 'gameYear', k: 'One game year', e: 'game', f: 'closesAt', u: 'h', ro: true, exp: () => Number(DEC.length.v) * YEAR_OF,
@@ -407,14 +516,15 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
     { g: 'money', id: 'startAfter', k: 'The gap between joining closing and the game starting', e: 'game', f: 'startsAt', u: 'h', dec: 'startAfter',
       read: () => { const e = eraWin(); return e && e.START_AFTER_LOCK / 3600e3; }, where: "the start screen's START_AFTER_LOCK",
       s: 'Held back from M18 to this page deliberately, so the field is built with its safety catch rather than without it.' },
-    { g: 'money', id: 'minPlayers', k: 'The fewest players a game needs', e: 'game', f: 'state', u: 'players',
+    { g: 'money', id: 'minPlayers', k: 'The fewest players a game needs', e: 'game', f: 'minPlayers', u: 'players', dec: 'minPlayers',
       read: () => { const e = eraWin(); return e && e.MIN_PLAYERS; }, where: "the start screen's MIN_PLAYERS" },
     { g: 'money', id: 'cut', k: 'The cut', e: 'game', f: 'cutBps', u: '%', dec: 'cut', bound: true,
       read: () => undefined, where: 'nothing',
       s: 'The share of the pot that covers the game\'s fees. Set per game, frozen once the first player has paid, and <b>refused outside its floor and ceiling</b>.' },
     { g: 'money', id: 'cutFloor', k: "The cut's floor", e: 'game', f: 'cutBps', u: '%', dec: 'cutFloor', read: () => undefined, where: 'nothing' },
     { g: 'money', id: 'cutCeiling', k: "The cut's ceiling", e: 'game', f: 'cutBps', u: '%', dec: 'cutCeiling', read: () => undefined, where: 'nothing' },
-    { g: 'money', id: 'places', k: 'How many places pay out', e: 'game', f: 'placeShareBps', u: 'places', open: true, cap: PLACES_CAP,
+    { g: 'money', id: 'places', k: 'How many places pay out', e: 'game', f: 'places', u: 'places', open: true, cap: PLACES_CAP,
+      sweep: { row: 40, t: '3 - the number the deployer once gave; still open for the deployer', v: 3 },
       read: () => undefined, where: 'nothing',
       s: '<b>A count, with a ceiling of ' + PLACES_CAP + ' and no fixed value.</b> The split is not a field: it is a rule, and it is derived below.' },
     { g: 'money', id: 'mktFee', k: 'The marketplace fee', e: 'listing', f: 'feeBps', u: '%', dec: 'mktFee', live: true,
@@ -430,7 +540,7 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
       read: () => undefined, where: 'nothing',
       s: '<b>Zero for v1</b>, decided 2026-09-30. Held by <code>RareRoles.roleChangeDelay</code> as chain state; the value shown is read from the contract when deployed and compared with the decided 0.' },
     // ---- the launch whitelist: M4 item 15, ruling 21 (2026-09-30) --------------
-    { g: 'money', id: 'whitelistOpen', k: 'The launch whitelist: open to everyone', e: 'roles', f: 'whitelistOpen', sw: true, decSw: false,
+    { g: 'money', id: 'whitelistOpen', k: 'The launch whitelist: open to everyone', e: 'roles', f: 'whitelistOpen', sw: true, decSw: false, decT: 'CLOSED at launch - ruling 21',
       read: () => undefined, where: 'RareRoles.whitelistOpen — read back from the chain, never kept here',
       s: '<b>CLOSED at launch</b>, decided 2026-09-30 (ruling 21): only whitelisted Robinhood Chain addresses may play, enforced in <code>RareRoles.isAllowed</code> and checked by every player-facing verb. The switch shown beside the decided value is <b>read from the contract</b> once deployed. Turning it ON opens the gate to everyone; it is a transaction, root only.' },
     { g: 'money', id: 'whitelistAdd', k: 'The launch whitelist: add addresses', e: 'roles', f: 'whitelisted', text: true, u: 'addresses',
@@ -439,13 +549,18 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
     { g: 'money', id: 'whitelistRemove', k: 'The launch whitelist: remove addresses', e: 'roles', f: 'whitelisted', text: true, u: 'addresses',
       read: () => undefined, where: 'RareRoles.whitelisted(address) — the first address typed is read back from the chain',
       s: 'Comma-separated 0x addresses, sent as <code>setWhitelisted(address[], false)</code>. Read back the same way as adding.' },
-    { g: 'money', id: 'multiPartner', k: 'More than one partnership at a time', e: 'partnership', f: 'id', sw: true, decSw: false,
+    { g: 'money', id: 'multiPartner', k: 'More than one partnership at a time', e: 'partnership', f: 'id', sw: true, decSw: false, decT: 'OFF at launch',
       read: () => undefined, where: 'nothing', s: '<b>Off at launch</b>, turned on once we have seen how a single one behaves.' },
-    { g: 'money', id: 'tradeCrystals', k: 'Trading: crystals', e: 'listing', f: 'state', sw: true, read: () => undefined, where: 'nothing',
-      s: '"The first switch we will want is probably crystals."' },
-    { g: 'money', id: 'tradeItems', k: 'Trading: items', e: 'listing', f: 'itemId', sw: true, read: () => undefined, where: 'nothing' },
-    { g: 'money', id: 'tradeBuildings', k: 'Trading: a building sold back', e: 'listing', f: 'state', sw: true, read: () => undefined, where: 'nothing' },
-    { g: 'money', id: 'tradeBase', k: 'Trading: a whole base', e: 'listing', f: 'state', sw: true, read: () => undefined, where: 'nothing' },
+    // RULING 29 (2026-09-30): all four are ON at launch, overruling the economist's all-off proposal (sweep row 41).
+    // Each keeps its own switch so any one can be turned off later. NO CONTRACT HOLDS THEM AS FOUR: RareMarket has
+    // `tradeable(address collection)`, one switch per COLLECTION, and crystals and items are not collections. So the
+    // chain line stays NO CONTRACT YET - the honest sentence - and the switch shows the decision, not a reading.
+    { g: 'money', id: 'tradeCrystals', k: 'Trading: crystals', e: 'listing', f: 'state', sw: true, decSw: true, decT: 'ON at launch - ruling 29', read: () => undefined, where: 'nothing',
+      s: '<code>RareMarket.tradeable(collection)</code> switches a <b>collection</b>; crystals are not one, so no contract carries this switch yet.' },
+    { g: 'money', id: 'tradeItems', k: 'Trading: items', e: 'listing', f: 'itemId', sw: true, decSw: true, decT: 'ON at launch - ruling 29', read: () => undefined, where: 'nothing',
+      s: 'Whether meme attack cards are listable is <b>not</b> settled by ruling 29 (M15 item 4).' },
+    { g: 'money', id: 'tradeBuildings', k: 'Trading: a building sold back', e: 'listing', f: 'state', sw: true, decSw: true, decT: 'ON at launch - ruling 29', read: () => undefined, where: 'nothing' },
+    { g: 'money', id: 'tradeBase', k: 'Trading: a whole base', e: 'listing', f: 'state', sw: true, decSw: true, decT: 'ON at launch - ruling 29', read: () => undefined, where: 'nothing' },
 
     // ---- demo mode: M4 item 14 --------------------------------------------
     { g: 'demo', id: 'demo', k: 'Demo mode', e: 'game', f: 'entry', sw: true, read: () => undefined, where: 'nothing',
@@ -463,7 +578,10 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
     const h = (f && f.home) || e.home;
     return { h, why: r.e + '.' + (r.f || '') + ' — ' + (SCH.homes[h] || '') };
   };
-  const HOME_TAG = { chain: ['chain', 'ON CHAIN'], map: ['map', 'IN A SEED'], client: ['client', 'CLIENT BELIEF'] };
+  // `server` is schema.json's fourth home (M3 item 5): the live game - a base, its buildings, its purse - held on
+  // our server, which decides every fight in v1. The chain holds that game's RECORD, not its state. The words are the
+  // schema's own, so a card never calls a server-held number a chain number or a client guess.
+  const HOME_TAG = { chain: ['chain', 'ON CHAIN'], map: ['map', 'IN A SEED'], client: ['client', 'CLIENT BELIEF'], server: ['server', 'OUR SERVER'] };
 
   // ---------------------------------------------------------------------------
   // WHERE A VALUE IS VERIFIED, AND IT IS NOT THIS PAGE.
@@ -490,10 +608,22 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
   //   NO CONTRACT DEPLOYED   a contract holds it and no address is on record
   //   NOT READ BY THE GAME   the game's own copy does not carry it either
   //
-  // Today that is ONE row of sixty-one: RareRoles holds the demo-mode flag. Saying
+  // The census is counted on the page from CHAIN_READ, never typed: RareRoles, RareMarket and RareGame. Saying
   // so plainly is worth more than looking capable.
   // ---------------------------------------------------------------------------
+  // RareGame.sol holds what the NEXT game is created with - every one public, so each has a getter. bridge-config.json's
+  // key is `rareGame`, the name deploy.mjs writes (contract name, first letter lowered). Seconds -> hours, bps -> %.
+  const word = (w) => parseInt(String(w).replace(/^0x/, '') || '0', 16);
+  const GAME_READ = (sig, dec) => ({ at: 'rareGame', sig, src: 'RareGame.' + sig, dec });
   const CHAIN_READ = {
+    length: GAME_READ('defaultLength()', (w) => word(w) / 3600),
+    joinWindow: GAME_READ('joinWindow()', (w) => word(w) / 3600),
+    startAfter: GAME_READ('startDelay()', (w) => word(w) / 3600),
+    minPlayers: GAME_READ('minPlayers()', (w) => word(w)),
+    cut: GAME_READ('defaultCutBps()', (w) => word(w) / 100),
+    cutFloor: GAME_READ('MIN_CUT_BPS()', (w) => word(w) / 100),
+    cutCeiling: GAME_READ('MAX_CUT_BPS()', (w) => word(w) / 100),
+    places: GAME_READ('defaultPlaces()', (w) => word(w)),
     roleDelay: { at: 'rareRoles', sig: 'roleChangeDelay()', src: 'RareRoles.roleChangeDelay()',
       dec: (w) => parseInt(String(w).replace(/^0x/, '') || '0', 16) / 3600 },
     // RareMarket holds the fee in basis points; the page shows percent, so both decode as bps / 100.
@@ -941,6 +1071,9 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
   // reads the value out of the game and compares it with the field.
   // ---------------------------------------------------------------------------
   const val = {};                                        // what the page holds, by row id
+  // A DECIDED switch starts where the decision put it, so the page shows ruling 29's ON and ruling 21's CLOSED rather
+  // than an OFF nobody chose. Flipping it from there is a change like any other, through the confirm screen.
+  R.forEach((r) => { if (r.sw && r.decSw !== undefined) val[r.id] = r.decSw; });
   const REFUSE = {};                                     // a refusal stands on the card until the next try
   function fieldOf(r) {
     if (r.dec) return DEC[r.dec].v;
@@ -997,9 +1130,13 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
     if (val.world && val.seed == null) q.set('seed', '7');
     q.set('econ', '1');
     log('the switches and the starting purse', 'the game as it was', 'base.html?' + q, true);
+    // The game that answered before the reload must not be the one read back after it: setting src does not
+    // replace the window at once, so the wait below is for a DIFFERENT game object, or the screen shows the old
+    // value while the new game is already playing the new one.
+    const was = gameWin();
     $('pBase').src = 'base.html?' + q;
     $('status').textContent = 'DELIVERED — WAITING FOR THE GAME TO COME BACK…';
-    waitForBase(() => { $('status').textContent = 'THE GAME ANSWERED. READ BACK BELOW.'; paintAll(); });
+    waitForBase(() => { $('status').textContent = 'THE GAME ANSWERED. READ BACK BELOW.'; paintAll(); }, was);
   }
 
   // ---------------------------------------------------------------------------
@@ -1046,6 +1183,8 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
       s: 'Its home is the chain and <b>nothing on chain holds it</b>. There is nothing to sign and nothing this page can deliver — the number here is a proposal until a contract carries it.' };
     if (h === 'map') return { k: 'seed', t: 'A SEED CHANGE — THE NEXT MAP', can: false,
       s: 'Frozen into a map at its seed, so it would change what the <b>next</b> map is generated with and nothing about the one being played. Nothing is signed, and <b>no setter exists</b>, so this page cannot deliver it.' };
+    if (h === 'server') return { k: 'server', t: 'OUR SERVER\'S RECORD', can: false,
+      s: 'Held on our server, which runs the game as it is played; the chain keeps its record, not its state. Nothing is signed, and <b>no setter exists</b>, so this page cannot deliver it.' };
     return { k: 'belief', t: 'A CLIENT BELIEF', can: false,
       s: 'The game believes it and nothing enforces it. Nothing is signed, and <b>no setter exists</b>, so this page cannot deliver it.' };
   }
@@ -1144,11 +1283,13 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
     const rb = readback(r);
     const tags = [];
     tags.push(ht ? '<span class="tag ' + ht[0] + '">' + ht[1] + '</span>' : '<span class="tag nohome">NO HOME</span>');
-    if (r.dec) tags.push('<span class="tag dec">DECIDED</span>');
+    if (r.dec || r.decSw !== undefined) tags.push('<span class="tag dec">DECIDED</span>');
     else if (r.prop) tags.push('<span class="tag prop">PROPOSED</span>');
     else if (r.open) tags.push('<span class="tag open">NOT DECIDED</span>');
     else if (CHAIN_READ[r.id]) tags.push('<span class="tag ph">READ FROM THE CONTRACT</span>');
     else tags.push('<span class="tag ph">READ FROM THE GAME</span>');
+    // a proposal from the economist's sweep sits BESIDE whatever the card is, never in place of a decision
+    if (r.sweep && !r.dec && !r.prop) tags.push('<span class="tag prop">PROPOSED</span>');
     const locked = state().locked;
     let ctl;
     if (r.sw) {
@@ -1168,6 +1309,15 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
     if (r.warn) extra += lengthWarning();
     if (r.bound) extra += '<div class="s">Refused below <b>' + DEC.cutFloor.v + '%</b> or above <b>' + DEC.cutCeiling.v + '%</b>.</div>' +
       '<div class="refuse" id="refuse_' + r.id + '"' + (REFUSE[r.id] ? '' : ' hidden') + '>' + esc(REFUSE[r.id] || '') + '</div>';
+    if (r.decSw !== undefined) extra += '<div class="s">DECIDED: <b>' + esc(r.decT || (r.decSw ? 'ON' : 'OFF')) + '</b>. The switch starts there.</div>';
+    // THE ECONOMIST'S PROPOSAL (DESIGN, The number sweep, proposed - question 21). Shown as a proposal and never as
+    // a decision; where it is a number and the game reads one, the two are compared so a gap cannot hide.
+    if (r.sweep) {
+      const pv = r.sweep.v, cur = rb.got, num = pv !== undefined && cur != null && cur !== '' && !isNaN(Number(cur));
+      const same = num && Math.abs(Number(cur) - pv) < 1e-9;
+      extra += '<div class="rb nr" data-sweep="' + r.sweep.row + '">' + esc('PROPOSED, NOT DECIDED (SWEEP ROW ' + r.sweep.row + '): ' + r.sweep.t +
+        (num ? (same ? ' · THE GAME READS THE SAME' : ' · THE GAME READS ' + cur + (r.u ? ' ' + r.u : '') + ' - THEY DIFFER') : '')) + '</div>';
+    }
     if (r.live) extra += '<div class="s"><b>Editable while a game runs</b> — the one exemption on this page.</div>';
     if (r.pv !== undefined) {                              // a PROPOSED row: the proposal beside what the fight runs today, compared live
       const cur = rb.got, same = cur != null && Math.abs(Number(cur) - r.pv) < 1e-9;
@@ -1180,13 +1330,16 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
     // no chain line at all, and there the game IS the authority.
     const cb = chainback(r);
     const dk = docCheck(r, rb.got);
+    // a row that proves a rule rather than compares a number (item 9: the version against what it draws)
+    const vf = r.verify ? (r.verify() || { c: 'nr', t: 'NOT READABLE — the game has not answered yet' }) : null;
+    if (vf) extra = '<div class="rb ' + vf.c + '" data-verify="' + r.id + '">' + esc(vf.t) + '</div>' + extra;
     const gameLine = cb
       ? '<div class="rb nr">' + esc('THE GAME\'S OWN COPY, WHICH IS NOT THE CHAIN: ' +
           (rb.got === null ? 'NOT READ THERE EITHER' : String(rb.got))) + '</div>' +
         // a read-only row that says what it expects is still compared, chain home or not (the game year)
         (r.exp && rb.got !== null ? '<div class="rb ' + rb.c + '">' + esc(rb.t) + '</div>' : '')
       : '<div class="rb ' + rb.c + '">' + esc(rb.t) + '</div>';
-    return '<div class="p' + ((cb ? cb.c : rb.c) === 'no' || (r.exp && rb.c === 'no') || (dk && !dk.agree) ? ' dis' : '') + '">' +
+    return '<div class="p' + ((cb ? cb.c : rb.c) === 'no' || (r.exp && rb.c === 'no') || (dk && !dk.agree) || (vf && vf.c === 'no') ? ' dis' : '') + '">' +
       '<div class="k">' + r.k + '</div>' +
       '<div class="tags">' + tags.join('') + '</div>' +
       '<div class="f">' + ctl + '</div>' +
@@ -1273,10 +1426,13 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
 
   function readbackSection() {
     const g = verifiedSplit(), N = R.length;
-    const rows = R.map((r) => { const rb = readback(r); return { r, cb: chainback(r), rb, dk: docCheck(r, rb.got) }; });
-    const dis = rows.filter((x) => (x.cb && x.cb.c === 'no') || (x.dk && !x.dk.agree));
+    const rows = R.map((r) => { const rb = readback(r); return { r, cb: chainback(r), rb, dk: docCheck(r, rb.got), vf: r.verify ? r.verify() : null }; });
+    const dis = rows.filter((x) => (x.cb && x.cb.c === 'no') || (x.dk && !x.dk.agree) || (x.vf && x.vf.c === 'no'));
     const signable = R.filter((r) => CHAIN_WRITE[r.id] && at(CHAIN_WRITE[r.id].at)).length;
     const held = R.filter((r) => CHAIN_WRITE[r.id]).length;
+    const getters = R.filter((r) => CHAIN_READ[r.id]);
+    const contracts = [...new Set(getters.map((r) => CHAIN_READ[r.id].src.split('.')[0]))];
+    const keys = [...new Set(getters.map((r) => CHAIN_READ[r.id].at))];
     return '<section id="readback"><h2><span class="n">11</span>THE READ-BACK<span class="d">M4 DELIVERABLE</span></h2>' +
       '<p class="q">No preview and no dry run. A preview says what a number would do before it is real; a read-back says a real number arrived. ' +
       '<b>And for a number whose home is the chain, only the chain can say so.</b> Reading the game\'s own copy proves this page and the game agree; ' +
@@ -1290,9 +1446,11 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
       '<div class="ct"><div class="v">' + signable + ' of ' + N + '</div><div class="k">CAN BE SIGNED TODAY</div></div>' +
       '</div>' +
       '<div class="note warn"><b>' + g.contract.length + ' of ' + N + ' numbers on this page can be verified against a contract right now.</b> ' +
-      (g.contract.length ? '' : 'None. ') + '<b>' + held + ' of ' + N + '</b> has a getter in a contract that exists at all — <code>RareRoles.demoMode()</code> — and ' +
-      (signable ? 'it can be read and signed because its address is on record.'
-        : '<b>no contract has an address on record</b>, so even that one cannot be read: <code>bridge-config.json</code> carries <code>shadowFriends</code> and <code>attestor</code>, both null, and no <code>rareRoles</code> key at all.') +
+      (g.contract.length ? '' : 'None. ') + '<b>' + getters.length + ' of ' + N + '</b> have a getter in a contract written in <code>estate/contracts</code> - ' +
+      contracts.map((c) => '<code>' + c + '</code>').join(', ') + ' - and <b>' + held + '</b> of those a setter. ' +
+      (signable ? signable + ' can be signed because an address is on record.'
+        : '<b>No contract has an address on record</b>, so none of them can be read: <code>bridge-config.json</code> has no ' +
+          keys.map((k) => '<code>' + k + '</code>').join(', ') + ' key.') +
       ' The other <b>' + g.nochain.length + '</b> whose home is the chain have <b>nothing on chain holding them</b>: the rules table on chain is specified and not built. ' +
       'That is the honest state of this page, and it is the number to watch as M20 lands.</div>' +
       '<div class="note">The three sentences are not interchangeable. <b>NO CONTRACT YET</b> means the chain is its home and no contract has a getter for it. ' +
@@ -1300,7 +1458,7 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
       'A page that showed one sentence for all three would be hiding which of the three is true.</div>' +
       (dis.length ? '<h3>WHAT DISAGREES</h3><div class="tw"><table><thead><tr><th>NUMBER</th><th>THE DISAGREEMENT</th></tr></thead><tbody>' +
         dis.map((x) => '<tr><td class="wrap">' + x.r.k + '</td><td class="wrap">' +
-          esc(x.cb && x.cb.c === 'no' ? x.cb.t : 'THE DOCUMENT SAYS ' + x.r.against + ' — THE GAME READS ' + (x.dk ? x.dk.lv.join(', ') : x.rb.got) + ' at those levels') + '</td></tr>').join('') +
+          esc(x.cb && x.cb.c === 'no' ? x.cb.t : x.vf && x.vf.c === 'no' ? x.vf.t : 'THE DOCUMENT SAYS ' + x.r.against + ' — THE GAME READS ' + (x.dk ? x.dk.lv.join(', ') : x.rb.got) + ' at those levels') + '</td></tr>').join('') +
         '</tbody></table></div>' : '') +
       '</section>';
   }
@@ -1386,9 +1544,9 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
     if (b) b.onclick = openConfirm;
   }
 
-  function waitForBase(then) {
+  function waitForBase(then, not) {
     let n = 0;
-    (function go() { if (gameWin()) return then(); if (++n > 120) { $('status').textContent = 'THE GAME DID NOT ANSWER.'; return; } setTimeout(go, 250); })();
+    (function go() { const w = gameWin(); if (w && w !== not) return then(); if (++n > 120) { $('status').textContent = 'THE GAME DID NOT ANSWER.'; return; } setTimeout(go, 250); })();
   }
 
   // boot: the schema first (the homes), then the game, then paint. The lock is

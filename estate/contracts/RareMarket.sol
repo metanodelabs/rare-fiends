@@ -4,7 +4,15 @@ pragma solidity ^0.8.36;
 import { IERC20 } from "lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { SafeERC20 } from "lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
 import { IERC721 } from "lib/openzeppelin-contracts/contracts/token/ERC721/IERC721.sol";
+import { ECDSA } from "lib/openzeppelin-contracts/contracts/utils/cryptography/ECDSA.sol";
+import { EIP712 } from "lib/openzeppelin-contracts/contracts/utils/cryptography/EIP712.sol";
 import { IRareRoles } from "./RareRoles.sol";
+
+/// @notice The one question the market asks about a terminal's shadow: is it a one-of-one. `RareDoopieGate`
+/// answers it and **never reverts** - an unknown, revoked or ordinary shadow is `false`.
+interface IDoopieGate {
+    function isOneOfOne(uint256 tokenId) external view returns (bool);
+}
 
 /// @notice What a partnership is owed out of one sale. **`RarePartners` (M16) implements it: the partner's
 /// split of the sale PRICE, so the price is passed** - a claim oracle never told the price cannot compute one.
@@ -99,14 +107,46 @@ interface IRarePartners {
 /// re-pointable exceptions - the fight and the dice roll - and **the marketplace is neither.** It also
 /// meets DESIGN's own test for the permanently off-limits list: *"can it be stolen."* It holds no balance,
 /// but it holds **operator approvals on players' tokens and allowances on their `$RF`**, and a market that
-/// could be swapped for another could move both. So: its five `immutable`s can never change, and the only
-/// things that can are `feeBps`, `feeTo` and the per-collection switch - all three guarded, all three
-/// logged, and none of them able to name a new payee for a seller's proceeds.
+/// could be swapped for another could move both. So: its seven `immutable`s can never change, and the only
+/// things that can are `feeBps`, `feeTo`, the per-collection switch, the terminal's share and the gate -
+/// all five guarded, all five logged, and none of them able to name a new payee for a seller's proceeds.
 ///
 /// **What could not be added later:** the currency (there is one `immutable` token and no argument
 /// anywhere names another), the partnership claim, the fee ceiling, the registry it asks about demo mode,
-/// and the escrow-free shape. **What can:** a collection, through the switch, with no redeploy.
-contract RareMarket {
+/// the escrow-free shape, **and the terminal's cut (below): where it comes from, its ceiling, its shadow
+/// token and the form of what the server signs.** **What can:** a collection, through the switch, with no
+/// redeploy; the terminal's share under its ceiling; and which gate answers *is this a one-of-one*.
+///
+/// ## A planted terminal's cut (DESIGN ruling 54, M20 item 20)
+///
+/// *"if the terminal is made from a 1/1 they will have a corresponding shadow NFT ... so YES they should get
+/// a cut. It is theirs after all."* A trade made **through** a planted terminal pays the owner of that
+/// terminal's shadow a share of the trade. The hard part is *through*: where a Friend stands is server state
+/// (decision 9), so the chain cannot see a terminal on its own, and a host the caller types in is a host
+/// anyone can name themselves as.
+///
+/// **The mechanism.** `buyVia` and `acceptOfferVia` are `buy` and `acceptOffer` carrying one more thing: a
+/// `TerminalSale` authorization **signed by a key holding `SIGN_TERMINAL`** in `RareRoles` (the game server,
+/// the one party that knows a Friend is standing at a terminal). The signature binds **which terminal** (its
+/// shadow id), **who is acting** (`msg.sender`), **exactly which sale** (collection, token, counterparty,
+/// price, buy or accept), a **deadline no more than `TERMINAL_AUTH_TTL` ahead** and a **nonce**, and it is
+/// **spent** on use. The EIP-712 domain is this contract's own address on chain 4663, so an authorization
+/// cannot be carried to another market or another chain.
+///
+/// **What the signature does NOT carry is a payee.** The cut goes to `shadows.ownerOf(shadowId)`, read live
+/// at settlement, and only when `gate.isOneOfOne(shadowId)` holds at settlement. So even a leaked server key
+/// can send the cut nowhere but to the holder of a live 1/1 shadow, and a 1/1 sold on Solana (revoked, then
+/// re-claimed) pays its NEW holder - or nobody, until somebody re-claims it. A terminal that is no longer a
+/// live 1/1 does not make the sale fail: the sale settles and the cut stays in our fee.
+///
+/// **It comes out of OUR fee, never the seller's proceeds or the buyer's price.** `terminalShareBps` is a
+/// share **of the fee** the sale already pays, so the buyer pays and the seller receives exactly what they
+/// would without a terminal, and `quote()` is unchanged. The alternative - a cut out of the seller's money, as
+/// the partner's is - would let a BUYER standing at their own terminal take part of a SELLER's proceeds
+/// without the seller agreeing to anything. Out of the fee, the worst any abuse can do is spend our fee,
+/// bounded by `maxTerminalShareBps`. A trade with no terminal pays exactly as it always did: `buy` and
+/// `acceptOffer` keep their signatures and settle through the same path with nothing about a terminal read.
+contract RareMarket is EIP712 {
     using SafeERC20 for IERC20;
 
     // ---------- what can never change ----------
@@ -124,6 +164,19 @@ contract RareMarket {
     /// `setFeeBps(10000)` would take a whole sale, which is theft by setter in a contract that is supposed
     /// to be safe because it holds nothing.
     uint16 public immutable maxFeeBps;
+    /// @notice the shadow token whose `ownerOf` is paid a terminal's cut. Permanent: it is the ledger of who
+    /// holds a 1/1 on this chain, and a settable one would be a lever that names a payee.
+    IERC721 public immutable shadows;
+    /// @notice the most of our fee a terminal may ever be given, in bps OF THE FEE (10,000 = all of it). Fixed
+    /// at deployment so a holder of `SET_TERMINAL` cannot hand our whole fee to a 1/1 they hold.
+    uint16 public immutable maxTerminalShareBps;
+    /// @notice how long a terminal authorization may live, at most: the deadline it carries must be no more
+    /// than this far ahead. The same fifteen minutes as `ShadowFriends.CLAIM_TTL`, for the same reason - a
+    /// signature is a standing permission and it should not stand longer than the act it permits.
+    uint64 public constant TERMINAL_AUTH_TTL = 15 minutes;
+    bytes32 private constant TERMINAL_SALE_TYPEHASH = keccak256(
+        "TerminalSale(uint256 shadowId,address actor,address collection,uint256 tokenId,address counterparty,uint128 price,bool fromOffer,uint256 nonce,uint64 deadline)"
+    );
 
     // ---------- the two powers, named so a log reads as English ----------
 
@@ -135,6 +188,13 @@ contract RareMarket {
     /// switch, set by the deployer, so a thing can be made tradeable or not without touching the
     /// marketplace itself."*
     bytes32 public constant SET_TRADEABLE = keccak256("rarefriends.power.setTradeable");
+    /// @notice set the terminal's share of the fee (under its immutable ceiling), or re-point the gate that
+    /// answers *is this a one-of-one*. Neither can name a payee: the payee is always `shadows.ownerOf`.
+    bytes32 public constant SET_TERMINAL = keccak256("rarefriends.power.setTerminal");
+    /// @notice sign a `TerminalSale`: *this actor's Friend is at this terminal, for this sale*. GRANTABLE, and
+    /// meant for the game server's key - the sibling of RECORD_FIGHT, RECORD_SYNC and RECORD_ORDERS. Read LIVE
+    /// at settlement, so revoking the power kills every outstanding authorization at once.
+    bytes32 public constant SIGN_TERMINAL = keccak256("rarefriends.power.signTerminal");
 
     // ---------- what can ----------
 
@@ -143,11 +203,37 @@ contract RareMarket {
     /// @notice the per-asset switch. Nothing is tradeable until it is turned on, which is DESIGN's *"closed
     /// first and opened deliberately, not left open and policed."*
     mapping(address => bool) public tradeable;
+    /// @notice the terminal's share of OUR fee, in bps of the fee. Starts at a constructor argument whose
+    /// value is PROPOSED (the economist's, ruling 54); never above `maxTerminalShareBps`.
+    uint16 public terminalShareBps;
+    /// @notice who answers *is this shadow a one-of-one* - `RareDoopieGate`, which is the repairable tier by
+    /// its own design (a collection can rename a trait), so it is re-pointable here behind `SET_TERMINAL`
+    IDoopieGate public gate;
+    /// @notice every terminal authorization ever spent, by its EIP-712 digest: one sale each, never twice
+    mapping(bytes32 => bool) public terminalAuthUsed;
+
+    /// @notice what the game server signs, besides the sale itself: this terminal, by this deadline
+    struct TerminalSale {
+        uint256 shadowId;   // the terminal: the 1/1 Doopie's shadow token id (its raw Solana mint)
+        uint256 nonce;      // the server's, so two identical sales can each have their own authorization
+        uint64 deadline;    // no later than now + TERMINAL_AUTH_TTL when it is used
+    }
 
     struct Listing {
         address seller;     // who listed it, and who must still own it when it settles
         uint16 feeBps;      // the fee this listing was made at - see "the fee is pinned" above
         uint128 price;      // in $RF
+    }
+
+    /// @dev one settlement, as `_settle` reads it. Never stored.
+    struct Sale {
+        address collection;
+        uint256 tokenId;
+        address seller;
+        address buyer;
+        uint128 price;
+        uint16 atFeeBps;
+        bool fromOffer;
     }
 
     struct Offer {
@@ -183,6 +269,12 @@ contract RareMarket {
     event FeeBpsSet(uint16 bps, address indexed by);
     event FeeToSet(address indexed to, address indexed by);
     event TradeableSet(address indexed collection, bool on, address indexed by);
+    /// @notice one per sale made through a terminal, beside `Sold` - which is unchanged, so an ordinary sale's
+    /// record is the same as it always was. `host` and `paid` are zero when the terminal was no longer a live
+    /// 1/1 at settlement: the record still says the sale claimed a terminal and that it paid nobody.
+    event TerminalCut(address indexed collection, uint256 indexed tokenId, uint256 indexed shadowId, address host, uint256 paid);
+    event TerminalShareSet(uint16 bps, address indexed by);
+    event GateSet(address indexed gate, address indexed by);
 
     // ---------- errors ----------
 
@@ -221,31 +313,62 @@ contract RareMarket {
     /// cannot pay the partner in full does not happen, rather than paying them part.
     error PartnerClaimExceedsPrice(uint256 owed, uint256 fee, uint128 price);
     error PartnerUnnamed();
+    error NotAContract(address target);
+    error TerminalShareUnchanged();
+    error GateUnchanged();
+    /// @notice the authorization is past its deadline
+    error TerminalAuthExpired(uint64 deadline, uint64 asOf);
+    /// @notice the authorization's deadline is further ahead than TERMINAL_AUTH_TTL allows
+    error TerminalAuthTooLong(uint64 deadline, uint64 latest);
+    /// @notice this exact authorization has already paid for one sale
+    error TerminalAuthUsed(bytes32 digest);
+    /// @notice the signature does not come from a key holding SIGN_TERMINAL - which is also what a signature
+    /// over a DIFFERENT sale, actor, terminal or market recovers to, so a lifted or edited one lands here
+    error TerminalSignerUnauthorized(address recovered);
 
     /// @param partners_ M16's claim oracle, or the zero address while M16 does not exist. **Immutable
     /// either way**, and deploying with zero is a decision with a consequence: *a partner is paid first* is
     /// unenforced, and it cannot be switched on later without a redeploy. The alternative - a settable
     /// address - is a lever that redirects a seller's money, in the one contract that must not have one.
+    /// @param shadows_ `ShadowFriends`: whose `ownerOf` a terminal's cut is paid to. Immutable.
+    /// @param gate_ `RareDoopieGate`: re-pointable later behind SET_TERMINAL. Both must hold code.
+    /// @param maxTerminalShareBps_ the ceiling on the terminal's share, in bps OF THE FEE. Immutable.
+    /// @param terminalShareBps_ the starting share - PROPOSED, the economist's to set (ruling 54).
     constructor(
         address rf_,
         address roles_,
         address partners_,
         uint16 maxFeeBps_,
         uint16 feeBps_,
-        address feeTo_
-    ) {
+        address feeTo_,
+        address shadows_,
+        address gate_,
+        uint16 maxTerminalShareBps_,
+        uint16 terminalShareBps_
+    ) EIP712("RareMarket", "1") {
         if (rf_ == address(0) || roles_ == address(0) || feeTo_ == address(0)) revert ZeroAddress();
+        if (shadows_ == address(0) || gate_ == address(0)) revert ZeroAddress();
+        if (shadows_.code.length == 0) revert NotAContract(shadows_);
+        if (gate_.code.length == 0) revert NotAContract(gate_);
         if (maxFeeBps_ > 10_000) revert CeilingAboveWhole(maxFeeBps_);
         if (feeBps_ > maxFeeBps_) revert FeeAboveCeiling(feeBps_, maxFeeBps_);
+        if (maxTerminalShareBps_ > 10_000) revert CeilingAboveWhole(maxTerminalShareBps_);
+        if (terminalShareBps_ > maxTerminalShareBps_) revert FeeAboveCeiling(terminalShareBps_, maxTerminalShareBps_);
         rf = IERC20(rf_);
         roles = IRareRoles(roles_);
         partners = IRarePartners(partners_);
         maxFeeBps = maxFeeBps_;
         feeBps = feeBps_;
         feeTo = feeTo_;
+        shadows = IERC721(shadows_);
+        gate = IDoopieGate(gate_);
+        maxTerminalShareBps = maxTerminalShareBps_;
+        terminalShareBps = terminalShareBps_;
         // the opening state, so the log starts at deployment rather than at the first change
         emit FeeBpsSet(feeBps_, msg.sender);
         emit FeeToSet(feeTo_, msg.sender);
+        emit TerminalShareSet(terminalShareBps_, msg.sender);
+        emit GateSet(gate_, msg.sender);
     }
 
     // ---------- views ----------
@@ -266,6 +389,43 @@ contract RareMarket {
         fee = (uint256(price) * atFeeBps) / 10_000;
         (partner, owed) = _claim(collection, tokenId, price);
         toSeller = uint256(price) - fee - owed;   // reverts on an over-claim, the same as a real sale would
+    }
+
+    /// @notice what a terminal would be paid out of a fee of `fee`, and to whom, if a sale settled now: zero
+    /// and nobody unless the shadow is a live one-of-one. The buyer's price and the seller's proceeds are
+    /// `quote()`'s, unchanged - the cut is inside `fee`, never added to it. Never reverts, so a broken gate
+    /// or a burned shadow cannot stop a sale; it can only stop the cut.
+    function terminalCut(uint256 shadowId, uint256 fee) public view returns (address host, uint256 paid) {
+        try gate.isOneOfOne(shadowId) returns (bool one) {
+            if (!one) return (address(0), 0);
+        } catch {
+            return (address(0), 0);
+        }
+        try shadows.ownerOf(shadowId) returns (address o) {
+            host = o;
+        } catch {
+            return (address(0), 0);
+        }
+        paid = (fee * terminalShareBps) / 10_000;
+    }
+
+    /// @notice the EIP-712 digest a `TerminalSale` is signed over, so the server and a page can compute the
+    /// same bytes this contract checks. `actor` is whoever will send the transaction: the buyer for
+    /// `buyVia`, the seller for `acceptOfferVia`; `counterparty` is the listing's seller or the offerer.
+    function terminalSaleDigest(
+        TerminalSale calldata t,
+        address actor,
+        address collection,
+        uint256 tokenId,
+        address counterparty,
+        uint128 price,
+        bool fromOffer
+    ) public view returns (bytes32) {
+        // Built in two halves and joined, as ShadowFriends._hash is: one abi.encode of ten fields needs more
+        // stack than the compiler has, and every field is static, so the bytes are the same either way.
+        bytes memory head = abi.encode(TERMINAL_SALE_TYPEHASH, t.shadowId, actor, collection, tokenId);
+        bytes memory tail = abi.encode(counterparty, price, fromOffer, t.nonce, t.deadline);
+        return _hashTypedDataV4(keccak256(bytes.concat(head, tail)));
     }
 
     // ---------- the four verbs ----------
@@ -311,15 +471,29 @@ contract RareMarket {
 
     /// @notice buy at the asking price.
     function buy(address collection, uint256 tokenId) external {
+        Listing memory l = _takeListing(collection, tokenId);
+        _settle(Sale(collection, tokenId, l.seller, msg.sender, l.price, l.feeBps, false), 0, false);
+    }
+
+    /// @notice buy at the asking price THROUGH A PLANTED TERMINAL: `buy`, plus the server's authorization that
+    /// the buyer is at terminal `t.shadowId` for this sale. The buyer pays and the seller receives exactly
+    /// what `buy` would; the terminal's share comes out of our fee.
+    function buyVia(address collection, uint256 tokenId, TerminalSale calldata t, bytes calldata sig) external {
+        Listing memory l = _takeListing(collection, tokenId);
+        _spendTerminal(t, sig, collection, tokenId, l.seller, l.price, false);
+        _settle(Sale(collection, tokenId, l.seller, msg.sender, l.price, l.feeBps, false), t.shadowId, true);
+    }
+
+    /// @dev the checks `buy` has always made, in the order it has always made them, and the deletion
+    function _takeListing(address collection, uint256 tokenId) internal returns (Listing memory l) {
         roles.requireMayPlay(msg.sender);
         if (!tradeable[collection]) revert NotTradeable(collection);
-        Listing memory l = _listings[collection][tokenId];
+        l = _listings[collection][tokenId];
         if (l.seller == address(0)) revert NotListed(collection, tokenId);
         if (l.seller == msg.sender) revert BuyerIsSeller();
         address owner = IERC721(collection).ownerOf(tokenId);
         if (owner != l.seller) revert SellerNoLongerOwns(collection, tokenId, l.seller, owner);
         delete _listings[collection][tokenId];                // effects before interactions, always
-        _settle(collection, tokenId, l.seller, msg.sender, l.price, l.feeBps, false);
     }
 
     // ---------- offers ----------
@@ -353,6 +527,30 @@ contract RareMarket {
     /// @param amount what the seller believes they are accepting. Passed in rather than read, so an offer
     /// lowered in the same block cannot be accepted at the new figure.
     function acceptOffer(address collection, uint256 tokenId, address offerer, uint128 amount) external {
+        _takeOffer(collection, tokenId, offerer, amount);
+        // The live fee, not a pinned one: the seller is the party it comes out of and they are the party
+        // calling this function, so they see it as they act.
+        _settle(Sale(collection, tokenId, msg.sender, offerer, amount, feeBps, true), 0, false);
+    }
+
+    /// @notice accept an offer THROUGH A PLANTED TERMINAL: `acceptOffer`, plus the server's authorization that
+    /// the seller is at terminal `t.shadowId` for this sale. The same money to both parties; the cut is our fee's.
+    function acceptOfferVia(
+        address collection,
+        uint256 tokenId,
+        address offerer,
+        uint128 amount,
+        TerminalSale calldata t,
+        bytes calldata sig
+    ) external {
+        _takeOffer(collection, tokenId, offerer, amount);
+        _spendTerminal(t, sig, collection, tokenId, offerer, amount, true);
+        _settle(Sale(collection, tokenId, msg.sender, offerer, amount, feeBps, true), t.shadowId, true);
+    }
+
+    /// @dev the checks `acceptOffer` has always made, in the same order, and the two deletions. `amount` is
+    /// proved equal to the offer here, so settling on it is settling on the offer.
+    function _takeOffer(address collection, uint256 tokenId, address offerer, uint128 amount) internal {
         roles.requireMayPlay(msg.sender);
         if (!tradeable[collection]) revert NotTradeable(collection);
         Offer memory o = _offers[collection][tokenId][offerer];
@@ -364,9 +562,28 @@ contract RareMarket {
         if (owner != o.ownerAtOffer) revert OfferStaleOwner(o.ownerAtOffer, owner);
         delete _offers[collection][tokenId][offerer];
         delete _listings[collection][tokenId];                // a sold token is not still for sale
-        // The live fee, not a pinned one: the seller is the party it comes out of and they are the party
-        // calling this function, so they see it as they act.
-        _settle(collection, tokenId, msg.sender, offerer, o.amount, feeBps, true);
+    }
+
+    /// @dev Verify and SPEND a terminal authorization, before any money moves. The digest binds the actor
+    /// (`msg.sender`), the sale and the terminal, so it recovers to an unauthorized address if any of them is
+    /// not what was signed. Spent by digest, so the same authorization never pays twice.
+    function _spendTerminal(
+        TerminalSale calldata t,
+        bytes calldata sig,
+        address collection,
+        uint256 tokenId,
+        address counterparty,
+        uint128 price,
+        bool fromOffer
+    ) internal {
+        if (t.deadline < block.timestamp) revert TerminalAuthExpired(t.deadline, uint64(block.timestamp));
+        uint64 latest = uint64(block.timestamp) + TERMINAL_AUTH_TTL;
+        if (t.deadline > latest) revert TerminalAuthTooLong(t.deadline, latest);
+        bytes32 digest = terminalSaleDigest(t, msg.sender, collection, tokenId, counterparty, price, fromOffer);
+        if (terminalAuthUsed[digest]) revert TerminalAuthUsed(digest);
+        address signer = ECDSA.recover(digest, sig);
+        if (!roles.hasPower(signer, SIGN_TERMINAL)) revert TerminalSignerUnauthorized(signer);
+        terminalAuthUsed[digest] = true;
     }
 
     // ---------- settlement, one path for both ways in ----------
@@ -381,24 +598,30 @@ contract RareMarket {
     /// the seller sees anything - and the buyer sees it in the price, so nobody buys a base and then
     /// discovers somebody else has a claim on what it earns."* The token moves last, so the buyer's
     /// `onERC721Received` runs after every payment and after every storage write.
-    function _settle(
-        address collection,
-        uint256 tokenId,
-        address seller,
-        address buyer,
-        uint128 price,
-        uint16 atFeeBps,
-        bool fromOffer
-    ) internal {
-        uint256 fee = (uint256(price) * atFeeBps) / 10_000;
-        (address partner, uint256 owed) = _claim(collection, tokenId, price);
+    ///
+    /// The fourth payee, a terminal's host, is paid OUT OF `fee`: `feeTo` receives `fee - hostPaid` and the
+    /// host `hostPaid`, and the partner's and the seller's lines are the same numbers with or without a
+    /// terminal. With `via` false nothing about a terminal is read and the transfers are exactly the three
+    /// they always were. The sale arrives as one memory struct only because nine stack arguments and the
+    /// locals below do not fit in the EVM's sixteen reachable slots.
+    function _settle(Sale memory s, uint256 shadowId, bool via) internal {
+        uint256 fee = (uint256(s.price) * s.atFeeBps) / 10_000;
+        (address partner, uint256 owed) = _claim(s.collection, s.tokenId, s.price);
         if (owed != 0 && partner == address(0)) revert PartnerUnnamed();
-        if (fee + owed > price) revert PartnerClaimExceedsPrice(owed, fee, price);
-        if (owed != 0) rf.safeTransferFrom(buyer, partner, owed);          // the partner, FIRST
-        if (fee != 0) rf.safeTransferFrom(buyer, feeTo, fee);
-        rf.safeTransferFrom(buyer, seller, uint256(price) - fee - owed);   // and only then the seller
-        IERC721(collection).safeTransferFrom(seller, buyer, tokenId);
-        emit Sold(collection, tokenId, buyer, seller, price, fee, partner, owed, fromOffer);
+        if (fee + owed > s.price) revert PartnerClaimExceedsPrice(owed, fee, s.price);
+        if (owed != 0) rf.safeTransferFrom(s.buyer, partner, owed);            // the partner, FIRST
+        {
+            // scoped so the host's two words leave the stack before `Sold` needs nine
+            address host;
+            uint256 hostPaid;
+            if (via) (host, hostPaid) = terminalCut(shadowId, fee);
+            if (fee - hostPaid != 0) rf.safeTransferFrom(s.buyer, feeTo, fee - hostPaid);
+            if (hostPaid != 0) rf.safeTransferFrom(s.buyer, host, hostPaid);   // the terminal, out of our fee
+            if (via) emit TerminalCut(s.collection, s.tokenId, shadowId, host, hostPaid);
+        }
+        rf.safeTransferFrom(s.buyer, s.seller, uint256(s.price) - fee - owed); // and only then the seller
+        IERC721(s.collection).safeTransferFrom(s.seller, s.buyer, s.tokenId);
+        emit Sold(s.collection, s.tokenId, s.buyer, s.seller, s.price, fee, partner, owed, s.fromOffer);
     }
 
     // ---------- the setters, each guarded and each logged ----------
@@ -417,6 +640,28 @@ contract RareMarket {
         if (to == feeTo) revert FeeToUnchanged();
         feeTo = to;
         emit FeeToSet(to, msg.sender);
+    }
+
+    /// @notice set the terminal's share of our fee. Never above the ceiling fixed at deployment.
+    function setTerminalShareBps(uint16 bps) external {
+        roles.requirePower(msg.sender, SET_TERMINAL);
+        if (bps > maxTerminalShareBps) revert FeeAboveCeiling(bps, maxTerminalShareBps);
+        if (bps == terminalShareBps) revert TerminalShareUnchanged();
+        terminalShareBps = bps;
+        emit TerminalShareSet(bps, msg.sender);
+    }
+
+    /// @notice re-point the one-of-one gate, for when the collection renames its trait and a new
+    /// `RareDoopieGate` is deployed - that contract's own reason for being separate. It cannot name a payee:
+    /// the worst a bad gate can do is say *yes* for a shadow whose live holder is then paid out of OUR fee,
+    /// and only on a sale the server signed.
+    function setGate(address gate_) external {
+        roles.requirePower(msg.sender, SET_TERMINAL);
+        if (gate_ == address(0)) revert ZeroAddress();
+        if (gate_.code.length == 0) revert NotAContract(gate_);
+        if (gate_ == address(gate)) revert GateUnchanged();
+        gate = IDoopieGate(gate_);
+        emit GateSet(gate_, msg.sender);
     }
 
     /// @notice turn a collection on or off. **Turning one off stops listing, offering, buying and

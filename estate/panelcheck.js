@@ -30,7 +30,8 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   const steps = [
     ['panel starts closed',      'document.getElementById("panel").classList.contains("open") === false'],
     ['BUILD opens it',           'document.getElementById("buildBtn").click(), document.getElementById("panel").classList.contains("open")'],
-    ['catalogue lists 8',        'document.querySelectorAll("#pbody .cell").length === 8'],
+    // the registry's own row count, not a typed 8: M8 added the capacitor as a ninth row and a typed 8 went red
+    ['catalogue lists every row of the registry', 'document.querySelectorAll("#pbody .cell").length === Object.keys(base.ECON.kinds).length && Object.keys(base.ECON.kinds).length >= 9'],
     ['picking marks it',         'document.querySelector("#pbody .cell[data-k=tower]").click(), document.querySelector("#pbody .cell[data-k=tower]").getAttribute("aria-pressed") === "true"'],
     ['CLOSE shuts it',           'document.getElementById("pclose").click(), document.getElementById("panel").classList.contains("open") === false'],
     ['upgrade view opens',       'base.openPanel(base.buildings.find(b=>b.type==="tower")), document.getElementById("ptitle").textContent === "UPGRADE"'],

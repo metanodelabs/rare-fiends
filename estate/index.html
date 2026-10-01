@@ -165,8 +165,10 @@ body.reel .studiobtn, body.menu .studiobtn { display: none; }
 .bridgebtn { top: 298px; }
 .faqbtn { top: 334px; }
 .deployerbtn { top: 370px; }
+.playerbtn { top: 406px; }            /* M5: the player's own page */
 body.reel .startbtn, body.menu .startbtn, body.reel .econbtn, body.menu .econbtn, body.reel .mapbtn, body.menu .mapbtn, body.reel .fightbtn, body.menu .fightbtn, body.reel .costbtn, body.menu .costbtn, body.reel .bridgebtn, body.menu .bridgebtn,
 body.reel .faqbtn, body.menu .faqbtn, body.reel .deployerbtn, body.menu .deployerbtn { display: none !important; }
+body.reel .playerbtn, body.menu .playerbtn { display: none !important; }
 body.hero .hud, body.hero .tray, body.hero .note, body.hero .studiobtn, body.hero .buildbtn, body.hero .marketbtn,
 body.hero .standbtn, body.hero .panel, body.hero .market { display: none !important; }
 body.hero { overflow: hidden; }
@@ -246,9 +248,10 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
   body.pages #bridgeBtn    { top: 158px; right: 10px; }
   body.pages #faqBtn       { top: 158px; right: 158px; }
   /* At 375px the frame is 250px tall (3:2), so a row's bottom must stay under 250. Rows run to
-     top: 214px — measured, 14px to spare — which is seven rows, fourteen slots. Eleven are used;
-     the next three pages go at 186/158px, 214/10px, 214/158px, and a fourth would overflow. */
+     top: 214px — measured, 14px to spare — which is seven rows, fourteen slots. Twelve are used
+     (M5's YOUR PAGE took 186/158px); the next two go at 214/10px, 214/158px, and a third would overflow. */
   body.pages #deployerBtn  { top: 186px; right: 10px; }
+  body.pages #playerBtn    { top: 186px; right: 158px; }
 }
 </style>
 </head>
@@ -256,6 +259,12 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
 <div class="frame" id="frame">
   <canvas id="c"></canvas>
   <div class="hud">
+    <!-- M5 item 1: the player is an address, asked of the wallet through wallet.js and nowhere else.
+         Wired into M11's live-Friend read: the connected address shows its Friends, and a switch repaints them
+         (see "M5 item 1, wired" in the sprite block). A typed ?wallet= or ?token= pins the base instead.
+         FIRST in the HUD on purpose: on a phone the HUD wraps and every line after the first sits under
+         the selected-Friend note, so the first line is the only place a tap can reach. -->
+    <button id="walletBtn" type="button" data-wallet style="pointer-events:auto; font:inherit; letter-spacing:inherit; font-size:14px; color:var(--signal); background:rgba(0,0,0,.6); border:1px solid var(--signal); padding:1px 6px; line-height:1.1; cursor:pointer">CONNECT WALLET</button>
     <span>RARE FIENDS</span><span style="color:rgba(255,255,255,.5)">base of</span>
     <b id="genesisName">GENESIS #4</b>
     <span class="sp"></span>
@@ -264,6 +273,7 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
     <span>TILES <b id="tiles">36</b></span>
     <span>WALL <b id="crew">0/12</b></span>
     <span>HIRED <b id="hired">0</b></span>
+    <script src="wallet.js"></script>
   </div>
   <div class="note" id="note">drag to turn · tap a friend, then tap the ground</div>
   <div class="tray" id="tray"></div>
@@ -283,6 +293,7 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
   <a class="studiobtn bridgebtn" id="bridgeBtn" href="bridge.html" data-page="bridge.html">BRIDGE</a>
   <a class="studiobtn faqbtn" id="faqBtn" href="faq.html" data-page="faq.html">FAQ</a>
   <a class="studiobtn deployerbtn" id="deployerBtn" href="deployer.html" data-page="deployer.html">DEPLOYER</a>
+  <a class="studiobtn playerbtn" id="playerBtn" href="player.html" data-page="player.html">YOUR PAGE</a>
   <button class="studiobtn pagesbtn" id="pagesBtn" type="button" aria-expanded="false" aria-controls="studioBtn">PAGES</button>
   <div class="challenge" id="challenge" hidden></div>
   <button class="buildbtn" id="buildBtn" type="button" aria-pressed="false">BUILD</button>
@@ -308,16 +319,32 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
 
 <script src="gif.js"></script>
 <script src="mapgen.js"></script>
+<script src="sprites/friendsdk.js"></script><!-- the toolkit's walking, navigation, collision and props, at the TOOLKIT.md pin (M11 item 6) -->
 <script src="chance.js"></script>
 <script src="chainlive.js"></script><!-- remembers ?rpc=local for the tab, so the page buttons stay on the fork -->
 <script src="combat.js"></script>
+<script src="values.js"></script><!-- the chain's table: every number this page plays by, declared once (M3 item 1) -->
+<script src="record.js"></script><!-- the base's record: what survives the tab closing, and the one rule that takes a session's write (M6) -->
 <script>
 (async function () {
   'use strict';
   const D = await (await fetch('base-data.json?v=' + Date.now())).json();
+  // M3 ITEM 1: THE CHAIN'S TABLE. Every number below whose home is the chain is read out of values.js
+  // and declared nowhere in this file. The NAMES stay - CRYSTAL_UNIT, KIND, HP_OF and the rest are
+  // what the page reads - and the definitions went, so a number changed in values.js reaches this
+  // page, the parity check, gencheck and hashcheck from one place. Deliberately NOT guarded with a
+  // fallback: a fallback copy would be the second home all over again. If values.js fails to load,
+  // this fails loudly.
+  const V = window.VALUES;
+  if (!V) throw new Error('values.js did not load: the game has no table to play by');
   const cv = document.getElementById('c'), ctx = cv.getContext('2d', { alpha: false });
   const Q = new URLSearchParams(location.search);
-  const DOOPIES = Q.get('doopies') === '1';               // the Doopies are kept off the estate for now
+  // THE SWITCHES (M4 item 7): read here, once, and by one rule - a switch is on only when its address
+  // says exactly 1. `?fresh` was read as "present", so `?fresh=0` razed the base while the deployer page
+  // read it as off. Each one is set on the deployer page, which delivers it in this address and reads
+  // its effect back out of the game. The two-base map (`?world`) is M12 item 8's and stays where it is.
+  const SWITCH = Object.freeze({ doopies: Q.get('doopies') === '1', fresh: Q.get('fresh') === '1', seams: Q.get('seams') === '1' });
+  const DOOPIES = SWITCH.doopies;                     // the Doopies are kept off the estate for now
   const STUDIO_URL = !!Q.get('studio');               // open straight into the studio (the CLI recorder uses this)
   const REELING = !!Q.get('reel');
   const HERO = Q.get('hero') === '1';                 // the start page's demo reel
@@ -398,8 +425,8 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
   // in landKeys, and each one becomes a lane in WATER running the way the generator says it flows,
   // a fall in FALLS wherever the next tile downstream is lower, and a site in WATER_SITES where a
   // generator may stand. One source of truth: M.water and M.flowDir, read here and nowhere else.
-  function buildWorld(seed) {
-    const M = MapGen.generate({ seed, players: 40 });
+  function buildWorld(seed, players) {
+    const M = MapGen.generate({ seed, players });
     const inb = (x, y) => x >= 0 && y >= 0 && x < M.W && y < M.H;
     const at = (x, y) => y * M.W + x;
     const wet = (i) => M.water[i] === MapGen.WATER.SEA || M.water[i] === MapGen.WATER.LAKE;
@@ -510,8 +537,13 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
         .map(s => ({ x: s.x + 0.5 - ox, y: s.y + 0.5 - oy, t0: s.t0, wild: !!s.wild, plot: s.plot })),
     };
   }
+  // The island the window is cut from: `seed` and `players` are read off the URL. With no `?players`
+  // the count is the generator's own, MapGen.MAP_DEFAULT.players - 100, a 181x181 island (M12 item 2) -
+  // and not a 40 written here: that was a second home for the map's size, and the deployer page reads
+  // MAP_DEFAULT as the number the game plays on. The generator clamps the count, so nothing is clamped
+  // twice; a count that is not a number falls through to the generator's default.
   const WORLDGEN = Q.get('world') === '1' && window.MapGen
-    ? buildWorld(parseInt(Q.get('seed') || '7', 10)) : null;
+    ? buildWorld(parseInt(Q.get('seed') || '7', 10), parseInt(Q.get('players'), 10) || MapGen.MAP_DEFAULT.players) : null;
 
   const HILL = WORLDGEN ? WORLDGEN.hill
     : { '-1.5,2.5': 1, '-1.5,1.5': 2, '-0.5,1.5': 3 };   // steps up from the west to the summit
@@ -520,11 +552,201 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
   const SPRING = [-0.18, 1.36];                        // where the water comes up
   const levelAt = (x, y) => HILL[tileKey(x, y)] || 0;
   const heightAt = (x, y) => levelAt(x, y) * STEP;
-  // Stepped access: a rise of two or more levels is a cliff, and a Friend can't climb it. A Friend sent
-  // somewhere walks a route over the tiles, only ever between neighbours within one level of each other,
-  // so to reach high ground they go round by the steps. (The map generator enforces the same rule: every
-  // raised area has at least one way up.) If there's no way at all, they get as close as they can.
+  /* ---------- walking, navigation and collision: the toolkit's own, not ours (M11 item 6) ---------- */
+  // FriendSDK ships all three - `isWorldWalkable` (a disc against ground, blocked rectangles and every
+  // prop's footprint), `createWorldNavigator` (A* on an 8-unit grid, every segment collision-checked,
+  // then line-of-sight simplified) and `createWorldMovement` (a walker at 170 px a second that slides
+  // along what it bumps and gives up a route that becomes blocked). This file used to have its own
+  // tile-by-tile route and an eased glide that checked nothing it passed through. Now a Friend walks
+  // with the toolkit's code, loaded from `sprites/friendsdk.js` - the toolkit's own source at the
+  // TOOLKIT.md pin, made browser-ready by `sprites/friendsdk-vendor.mjs`, never edited by hand.
+  //
+  // WHAT IS OURS IS ONLY THE TRANSLATION, and it is the part to read if a Friend walks wrongly:
+  //  - THE UNIT IS ALREADY THE TOOLKIT'S. TILE is 52 world units and ISO is the toolkit's projection, so
+  //    a tile is 52 of its units. Its world is a 576 x 384 plane, which holds the single estate (8 x 6
+  //    tiles = 416 x 312) at full size. A bigger window - `?world=1` is 25 x 25 tiles - is laid on the
+  //    plane shrunk by NAV.s, and the Friend's radius and speed shrink with it, so a tile is still a tile.
+  //  - THE GROUND is the window's rectangle; a cell of it that is not land is a blocked rectangle.
+  //  - A CLIFF - two neighbouring tiles more than one level apart - is the game's rule, not the
+  //    toolkit's, which has no heights. It goes in as a thin blocked rectangle on the shared edge, and a
+  //    post on any corner where it could be cut diagonally, so the toolkit's collision is what refuses it.
+  //  - BUILDINGS AND WALLS ARE NOT OBSTACLES, as they never were, and that is a game rule left open
+  //    rather than made here. It was tried: with each building blocking the middle half of its tile, the
+  //    generator at the foot of the falls closed the hill's only way down and a Friend on the summit
+  //    could not leave. A wall is an edge (ruling 26), and walls that stopped your own Friends would
+  //    shut them in their keep. Whether either should block is the game engineer's to decide.
+  //  - A TREE, and every prop placed with placeProp, is the toolkit's own prop with the toolkit's own
+  //    footprint, scaled by how large we draw it. The toolkit caps a world at 128 props, so a window
+  //    with more trees than that (`?world=1` has hundreds) leaves the trees out and says so in NAV.why.
+  //  - A Friend sent INTO something - the trunk it is to chop, a prop's footprint - routes to the nearest open
+  //    ground and steps the last few hundredths of a tile straight in. One sent from inside something
+  //    steps straight out first. Those two straight steps are the only movement here not checked.
+  // If the toolkit refuses the world (more than it holds) the old tile route below, tileRoute and
+  // tileWalk, takes over and NAV.mode says 'tiles' with the reason in NAV.why. It is the fallback, not
+  // the way.
+  const SDK = window.FriendSDK;
+  const PROP_ART_K = 0.58;            // a prop's 240px art is drawn at this many pixels a pixel - trees too
+  const NAV = { mode: '', why: '', key: null, at: -1, world: null, nav: null, s: 1, ox: 0, oy: 0, R: 7, SPEED: 170, builds: 0 };
+  const toTk = (x, y) => [(x - NAV.ox) * TILE * NAV.s, (y - NAV.oy) * TILE * NAV.s];
+  const fromTk = (p) => [p[0] / (TILE * NAV.s) + NAV.ox, p[1] / (TILE * NAV.s) + NAV.oy];
+  const navOpen = (x, y) => NAV.mode === 'toolkit' && SDK.isWorldWalkable(NAV.world, toTk(x, y), NAV.R);
+  function navKey() {
+    return tiles.length + '|' + trees.length + '|' + placedProps.map(p => p.type + p.x + ',' + p.y + ',' + p.scale).join(';');
+  }
+  function navWorld() {
+    if (NAV.at === simT && NAV.key !== null) return NAV;
+    NAV.at = simT;
+    const key = navKey();
+    if (key === NAV.key) return NAV;
+    NAV.key = key; NAV.builds++;
+    if (!SDK) { NAV.mode = 'tiles'; NAV.why = 'sprites/friendsdk.js did not load'; console.error('walking: ' + NAV.why); return NAV; }
+    const xs = tiles.map(t => t.x), ys = tiles.map(t => t.y);
+    const x0 = Math.min(...xs) - 0.5, x1 = Math.max(...xs) + 0.5, y0 = Math.min(...ys) - 0.5, y1 = Math.max(...ys) + 0.5;
+    const P = SDK.PROJECTION;
+    // 0.999: the plane's edge is a hard limit in validateWorld, and a float a hair over it is a refusal
+    NAV.s = Math.min(1, P.width / ((x1 - x0) * TILE), P.height / ((y1 - y0) * TILE)) * 0.999;
+    NAV.ox = x0; NAV.oy = y0; NAV.R = 7 * NAV.s; NAV.SPEED = 170 * NAV.s;
+    const u = TILE * NAV.s, W = (x1 - x0) * u, H = (y1 - y0) * u;
+    const rect = (x, y, w, h) => {                   // tiles in, the toolkit's units out, clipped to the plane
+      const ax = Math.max(0, (x - x0) * u), ay = Math.max(0, (y - y0) * u);
+      const bx = Math.min(W, (x + w - x0) * u), by = Math.min(H, (y + h - y0) * u);
+      return { x: ax, y: ay, w: Math.max(0.001, bx - ax), h: Math.max(0.001, by - ay) };
+    };
+    const blocked = [], land = (x, y) => landKeys.has(tileKey(x, y));
+    for (let cy = y0; cy < y1; cy++) {                // not land, merged along each row
+      let from = null;
+      for (let cx = x0; cx <= x1; cx++) {
+        const open = cx < x1 && !land(cx + 0.5, cy + 0.5);
+        if (open && from === null) from = cx;
+        if (!open && from !== null) { blocked.push(rect(from, cy, cx - from, 1)); from = null; }
+      }
+    }
+    const lv = (x, y) => land(x, y) ? levelAt(x, y) : null, T = 2 / TILE;   // a cliff is 2 units thick
+    tiles.forEach(t => {
+      const here = levelAt(t.x, t.y);
+      [[1, 0], [0, 1]].forEach(([dx, dy]) => {
+        const there = lv(t.x + dx, t.y + dy);
+        if (there === null || Math.abs(there - here) <= 1) return;
+        blocked.push(dx ? rect(t.x + 0.5 - T / 2, t.y - 0.5, T, 1) : rect(t.x - 0.5, t.y + 0.5 - T / 2, 1, T));
+      });
+    });
+    for (let cy = y0; cy <= y1; cy++) for (let cx = x0; cx <= x1; cx++) {   // posts where a corner could be cut
+      const round = [lv(cx - 0.5, cy - 0.5), lv(cx + 0.5, cy - 0.5), lv(cx - 0.5, cy + 0.5), lv(cx + 0.5, cy + 0.5)].filter(l => l !== null);
+      if (round.length > 1 && Math.max(...round) - Math.min(...round) > 1) blocked.push(rect(cx - T, cy - T, 2 * T, 2 * T));
+    }
+    const tk = (p, type, scale) => { const [x, y] = toTk(p.x, p.y); return { type, x, y, scale: Math.max(0.1, NAV.s * PROP_ART_K * scale / 1.4) }; };
+    const props = placedProps.map(p => tk(p, p.type, p.scale));
+    const why = [];
+    if (props.length + trees.length <= 128) trees.forEach(tr => props.push(tk(tr, 'tree', tr.size)));
+    else why.push(trees.length + ' trees are more than the toolkit\'s 128 props, so trees do not block here');
+    try {
+      NAV.world = SDK.validateWorld({ id: 'estate', name: 'The estate', family: 'estate', setting: 'estate', shape: 'window',
+        summary: 'the estate as the toolkit walks it', variant: 'complete',
+        geometry: { polygons: [[[0, 0], [W, 0], [W, H], [0, H]]], holes: [], depth: 18 },
+        props, actors: [], paths: [], patches: [], signals: [], missingChunks: [], collision: { blocked } });
+      NAV.nav = SDK.createWorldNavigator(NAV.world, NAV.R);
+      NAV.mode = 'toolkit';
+    } catch (e) {
+      NAV.mode = 'tiles'; why.push('the toolkit refused this world (' + e.message + ') - walking on the tile route');
+      console.warn('walking: ' + why[why.length - 1]);
+    }
+    NAV.why = why.join('; ');
+    NAV.counts = { props: props.length, blocked: blocked.length, scale: NAV.s };
+    return NAV;
+  }
+  // The nearest point a Friend's disc fits, searched outwards in rings. Null if there is none in reach.
+  function nearestOpen(x, y, reach = 1.5) {
+    if (navOpen(x, y)) return [x, y];
+    for (let r = 0.04; r <= reach; r += 0.04) {
+      let best = null, bd = Infinity;
+      for (let i = 0; i < 24; i++) {
+        const q = [x + Math.cos(i / 24 * 2 * Math.PI) * r, y + Math.sin(i / 24 * 2 * Math.PI) * r];
+        if (navOpen(q[0], q[1])) { const d = Math.hypot(q[0] - x, q[1] - y); if (d < bd) { bd = d; best = q; } }
+      }
+      if (best) return best;
+    }
+    return null;
+  }
+  // Where a Friend at (x0, y0) can actually get to on the way to (x1, y1): the spot itself, the open
+  // ground nearest it, or - when the toolkit finds no route at all - the nearest point back along the
+  // straight line that it does find one to. `post` is the last straight step in, when the spot is
+  // inside something. Returns the toolkit's route as well, so route() and walk() share one answer.
+  function navPlan(x0, y0, x1, y1) {
+    const from = toTk(x0, y0);
+    let goal = nearestOpen(x1, y1), post = goal && (goal[0] !== x1 || goal[1] !== y1) ? [x1, y1] : null;
+    if (goal) { const way = NAV.nav.route(from, toTk(goal[0], goal[1])); if (way) return { way, goal, post }; }
+    for (let k = 1; k <= 6; k++) {                  // no way there: as close as it can get
+      const f = 1 - k / 6, g = nearestOpen(x0 + (x1 - x0) * f, y0 + (y1 - y0) * f, 0.5);
+      if (!g) continue;
+      const way = NAV.nav.route(from, toTk(g[0], g[1]));
+      if (way) return { way, goal: g, post: null };
+    }
+    return { way: [], goal: [x0, y0], post: null };
+  }
+  // Stepped access, the toolkit's way: a rise of two or more levels is a cliff and a Friend cannot climb
+  // it, so to reach high ground they go round by the steps. (The map generator enforces the same rule:
+  // every raised area has at least one way up.) Returns the route as waypoints in tiles.
   function route(x0, y0, x1, y1) {
+    const N = navWorld();
+    if (N.mode !== 'toolkit') return tileRoute(x0, y0, x1, y1);
+    if (Math.hypot(x1 - x0, y1 - y0) < 1e-9) return [];
+    const start = nearestOpen(x0, y0);
+    if (!start) return [[x1, y1]];
+    const p = navPlan(start[0], start[1], x1, y1);
+    const way = p.way.map(fromTk);
+    if (start[0] !== x0 || start[1] !== y0) way.unshift(start);
+    if (p.post) way.push(p.post);
+    return way;
+  }
+  // A Friend's own walker. It is remade whenever the world is rebuilt or something else put the Friend
+  // somewhere (a reload, a fight, a check), because the toolkit's walker owns the position it walks.
+  function glide(a, to, dt) {                        // a straight step at the walker's own speed, in its own pixels
+    const [sx, sy] = SDK.project(...toTk(a.x, a.y)), [ex, ey] = SDK.project(...toTk(to[0], to[1]));
+    const d = Math.hypot(ex - sx, ey - sy), step = Math.min(40, dt) * NAV.SPEED / 1000;
+    if (d <= step) { a.x = to[0]; a.y = to[1]; return true; }
+    a.x += (to[0] - a.x) * step / d; a.y += (to[1] - a.y) * step / d;
+    return false;
+  }
+  function walk(a) {                                   // move one frame towards (a.tx, a.ty)
+    const N = navWorld();
+    if (N.mode !== 'toolkit') return tileWalk(a);
+    const dt = a.mvT === undefined ? 16 : Math.max(0, simT - a.mvT); a.mvT = simT;
+    let m = a.mv;
+    if (!m || m.key !== N.key || m.x !== a.x || m.y !== a.y) {
+      const open = navOpen(a.x, a.y);
+      m = a.mv = { key: N.key, sdk: open ? SDK.createWorldMovement(N.world, toTk(a.x, a.y), { speed: N.SPEED, radius: N.R }) : null,
+        goal: null, phase: 'plan', out: null, post: null };
+    }
+    if (!m.goal || m.goal[0] !== a.tx || m.goal[1] !== a.ty) {
+      m.goal = [a.tx, a.ty]; a.goal = m.goal; m.phase = 'plan';
+      if (m.inside) { m.sdk = null; m.inside = false; }   // it stepped in past its walker: out again first
+    }
+    const x0 = a.x, y0 = a.y;
+    if (!m.sdk) {                                      // standing inside something: step straight out
+      m.out = m.out || nearestOpen(a.x, a.y) || [a.tx, a.ty];
+      if (glide(a, m.out, dt) && navOpen(a.x, a.y)) {
+        m.sdk = SDK.createWorldMovement(N.world, toTk(a.x, a.y), { speed: N.SPEED, radius: N.R }); m.out = null; m.phase = 'plan';
+      }
+    } else if (m.phase === 'plan') {
+      const p = navPlan(a.x, a.y, a.tx, a.ty);
+      m.post = p.post;
+      m.phase = p.way.length && m.sdk.moveTo(toTk(p.goal[0], p.goal[1])) ? 'go' : m.post ? 'in' : 'done';
+    }
+    if (m.sdk && m.phase === 'go') {
+      const st = m.sdk.update(dt);
+      [a.x, a.y] = fromTk(st.position);
+      if (!st.walking && !st.destination) m.phase = m.post ? 'in' : 'done';
+    } else if (m.sdk && m.phase === 'in') {
+      if (glide(a, m.post, dt)) { m.phase = 'done'; m.inside = true; }   // the walker is left at the edge
+    }
+    m.x = a.x; m.y = a.y;
+    const mx = a.x - x0, my = a.y - y0, md = Math.hypot(mx, my);
+    if (md > 1e-9) { a.wx = a.x + mx / md; a.wy = a.y + my / md; } else { a.wx = a.tx; a.wy = a.ty; }
+    noteGround(a);
+  }
+  // THE FALLBACK, and only that: the tile route this file walked before M11 item 6. It runs when the
+  // toolkit cannot hold the world (NAV.mode 'tiles'), and nowhere else.
+  function tileRoute(x0, y0, x1, y1) {
     const key = (x, y) => (Math.floor(x) + 0.5) + ',' + (Math.floor(y) + 0.5);
     const start = key(x0, y0), goal = key(x1, y1);
     if (start === goal) return [];
@@ -547,10 +769,10 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
     if (best === goal) way[way.length - 1] = [x1, y1];   // the last step goes to the exact spot asked for
     return way;
   }
-  function walk(a) {                                   // move one frame along the route to (a.tx, a.ty)
+  function tileWalk(a) {                               // the fallback's walk: one frame along the tile route
     if (!a.goal || a.goal[0] !== a.tx || a.goal[1] !== a.ty) {
       a.goal = [a.tx, a.ty];
-      a.way = route(a.x, a.y, a.tx, a.ty);
+      a.way = tileRoute(a.x, a.y, a.tx, a.ty);
       if (!a.way.length) a.way = [[a.tx, a.ty]];        // already on the right tile: just walk to the spot
     }
     const wp = a.way[0] || [a.tx, a.ty];
@@ -669,8 +891,17 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
       // layer: `occupy`/`vacate` hand it to WALLS, the edge set below, and OCCUPIED is buildings only.
       // Registering a wall here is the bug this count exists to catch - in world mode the rampart's
       // segments share their tiles with the silos and with each other, and the count goes above 0.
-      occupy: (b) => { if (b.type === 'wall') return WALLS.occupy(b); const i = idx(b.x, b.y); if (i < 0) return; if (cell[i] & OCCUPIED) { grid.collisions++; return; } cell[i] |= OCCUPIED; who.set(i, b); },
-      vacate: (b) => { if (b.type === 'wall') return WALLS.vacate(b); const i = idx(b.x, b.y); if (i >= 0 && who.get(i) === b) { cell[i] &= ~OCCUPIED; who.delete(i); } },
+      // M3 ITEM 3: the tiles a building covers are its row's `footprint` in values.js, read here as
+      // [dx, dy] offsets from where it stands. Every row is [[0, 0]] today, so this marks exactly what
+      // it always marked; a building bigger than one tile is a row there and no change here. A
+      // footprint that collides on ANY tile lands on none, so the layer never half-holds a building.
+      footprintOf: (b) => (V.kinds[b.type] && V.kinds[b.type].footprint) || [[0, 0]],
+      occupy: (b) => { if (b.type === 'wall') return WALLS.occupy(b);
+        const ix = grid.footprintOf(b).map(([dx, dy]) => idx(b.x + dx, b.y + dy)).filter(i => i >= 0); if (!ix.length) return;
+        if (ix.some(i => cell[i] & OCCUPIED)) { grid.collisions++; return; }
+        ix.forEach(i => { cell[i] |= OCCUPIED; who.set(i, b); }); },
+      vacate: (b) => { if (b.type === 'wall') return WALLS.vacate(b);
+        grid.footprintOf(b).forEach(([dx, dy]) => { const i = idx(b.x + dx, b.y + dy); if (i >= 0 && who.get(i) === b) { cell[i] &= ~OCCUPIED; who.delete(i); } }); },
       count: (flag) => { let n = 0; for (let i = 0; i < cell.length; i++) if (cell[i] & flag) n++; return n; },
     };
     return grid;
@@ -701,21 +932,21 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
   landKeys.forEach((k) => { const c = k.split(','); TILES.set(+c[0], +c[1], TILES.LAND); });
   const onLand = (x, y) => TILES.has(x, y, TILES.LAND);
 
-  const CRYSTAL_UNIT = 100;                             // crystals and wood are stored in hundredths; every display divides by this
-  const START_PURSE = 24000;                            // hundredths — 240.00 crystals
+  const CRYSTAL_UNIT = V.crystalUnit;                   // crystals and wood are stored in hundredths; every display divides by this
   // THE GAME'S LENGTH, AND ITS YEAR (M10 item 8). The length is the deployer's parameter and 168 h is its
   // decided starting value (deployer.html holds the same 168 h as DEC.length, and deployercheck compares
   // the two). A game year is a QUARTER of that length - derived here, typed nowhere - so a game is four
   // game years long and a year is 42 h at the default. It is a fraction and not a duration so that the
   // deployer changing the length can never make a year longer than the game. `?length=<h>` on the URL
   // is the deployer's hand on the parameter for a probe; the fraction is not a parameter.
-  const GAME_LENGTH_MS = (Number(Q.get('length')) || 168) * 3600e3;
-  const GAME_YEAR_OF = 1 / 4;
+  const GAME_LENGTH_MS = (Number(Q.get('length')) || V.gameLengthH) * 3600e3;
+  const GAME_YEAR_OF = 1 / V.yearDiv;                 // a quarter: values.js holds the divisor, since a chain cannot hold a fraction
   const GAME_YEAR_MS = GAME_LENGTH_MS * GAME_YEAR_OF;
   // What the year opens, as data the game reads (DESIGN, "How long a game year is": a water mill standing
   // plus one game year is the capacitor's prerequisite). `needs` is the building that starts the
-  // countdown, by kind and tier: the generator's tier 2 is WATER MILL in KIND.
-  const UNLOCKS = { capacitor: { needs: { type: 'generator', tier: 2 }, afterMs: GAME_YEAR_MS } };
+  // countdown, by kind and tier: the generator's tier 2 is WATER MILL in KIND. values.js says how many
+  // game years; this page turns that into milliseconds of its own clock.
+  const UNLOCKS = Object.fromEntries(Object.entries(V.unlocks).map(([k, u]) => [k, { needs: u.needs, afterMs: u.afterYears * GAME_YEAR_MS }]));
   // The countdown itself, one per base: when its water mill was first seen standing (finished, tier 2 or
   // better), on the game's clock, and whether the year has been reached - so the note fires once.
   const YEAR_CLOCK = new Map();                         // base id -> { t0, reached }
@@ -746,13 +977,21 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
   // than taken from the whole map. On a home estate there is exactly one base and every one of
   // these reads the way it always did; the difference only shows on an island.
   const BASES = WORLDGEN ? WORLDGEN.bases.map(p => p.id) : [0];
-  const HOME = BASES[0];                            // the base the player runs: the HUD and the build menu are its
-  const PURSE = new Map(BASES.map(id => [id, {
-    crystals: id === HOME ? (Q.has('purse') ? +Q.get('purse') * CRYSTAL_UNIT : START_PURSE) : 0, wood: 0,   // ?purse= is typed in whole crystals
-  }]));
+  // ?seat=0|1 on an island (M7, two players in one game): which of its two bases this client plays. A seat
+  // is what turns the island into a shared game - its records live on our server (THE RECORD, below).
+  const SEAT = WORLDGEN ? { 0: 0, 1: 1 }[Q.get('seat')] : undefined;
+  const HOME = BASES[SEAT || 0];                    // the base the player runs: the HUD and the build menu are its
+  // THE PURSE IS THE RECORD'S BASE ROW (M6; schema base.crystals and base.wood, home: the server). One row
+  // a base, in record.js's shape: the player's own starts with what values.js says a base is created
+  // holding, every other base empty. The home row is RESTORED from the store on open and written back at
+  // the session's end - see THE RECORD below - so nothing here is typed in and nothing is lost on close.
+  // ?purse= is a probe's hand on a FRESH home base, in whole crystals; a restored record ignores it.
+  const PURSES = new Map(BASES.map(id => [id, Record.baseRow(id, id === HOME ? V.startBase.purse : null)]));
+  if (Q.has('purse')) PURSES.get(HOME).crystals = +Q.get('purse') * CRYSTAL_UNIT;
+  let SESSION = null;                                 // the open session on the home base's record, once THE RECORD opens it
   // an unknown or missing base falls back to the player's own, so every existing call site that
   // asks for no base in particular keeps getting the purse it used to get
-  const purse = (id) => PURSE.get(id == null || !PURSE.has(id) ? HOME : id);
+  const purse = (id) => PURSES.get(id == null || !PURSES.has(id) ? HOME : id);
   const ofBase = (id) => (b) => (b.base == null ? HOME : b.base) === id;
   const baseTiles = (id) => (!WORLDGEN ? tiles
     : tiles.filter(t => WORLDGEN.claimed.get(tileKey(t.x, t.y)) === id));
@@ -798,7 +1037,9 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
   // until badly hurt, then retreats to the keep.
   // ENGAGE goes after whatever is attacking, however far off; ENGAGE AND DEFEND does the same but never
   // strays further than the defend distance from its post; FALL BACK retreats to the keep when badly hurt.
-  const ORDERS = ['hold', 'engage', 'defend', 'fallback'];
+  // The LIST is consensus - index i is what RareCombat.Defender.order holds - so it is declared once,
+  // in combat.js, where schemacheck holds it to the schema's `order` enum. This page keeps a reader.
+  const ORDERS = Combat.ORDERS;
   const ORDER_LABEL = { hold: 'HOLD', engage: 'ENGAGE', defend: 'ENGAGE + DEFEND', fallback: 'FALL BACK' };
   const ORDER_SHORT = { hold: '', engage: 'ENGAGE', defend: 'DEFEND', fallback: 'FALL BACK' };
   const picked = new Set();                            // Friends picked together, to give one order to all
@@ -934,10 +1175,87 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
   // nothing is dealt out in turn: its token decides its family, its seed and its picture.
   const SETS = (D.spriteSets || []).map(decodeSet);
   const ROSTER = (D.friendRoster || []).map(decodeSet);
+  // M11 items 1 and 2: A FRIEND READ OFF THE CHAIN, NOT OUT OF THE CACHE. `?wallet=0x...` reads which Friends
+  // that address holds (the toolkit's readOwnedFriends: generation 0 left out) and `?token=437,94` names
+  // tokens outright. Each is drawn from familyOf(id), seedOf(id) and frames(family, seed) on the registry,
+  // read now - sprites/friend-chain.js, a port of the toolkit's own readers. Those Friends are claimed
+  // before the cached roster, in places of their own generation (claimFriend below). Without any address nothing is
+  // read and the page is exactly what it was. A failed read leaves the cached roster and says why in
+  // `window.liveFriends.error` - the page still opens.
+  // M5 item 1, wired: THE CONNECTED WALLET FEEDS THE SAME READ. With no ?wallet= and no ?token= typed, the address
+  // is the one wallet.js holds - asked quietly on open (eth_accounts, no prompt) and followed after: a connect,
+  // an account switch or a disconnect re-reads and repaints the Friends already standing. A typed ?wallet= or
+  // ?token= PINS the base to that probe and the wallet is not followed - a probe that changed under a click
+  // would prove nothing. `liveFriends.asked` says which: 'wallet' (typed), 'token' (typed), 'connected', or null.
+  const LIVE = [];                                     // one array for the page's life: refilled in place, never replaced
+  const PINNED = Q.get('wallet') ? 'wallet' : Q.get('token') ? 'token' : null;
+  window.liveFriends = { asked: PINNED, address: Q.get('wallet') || '', tokens: [], hiddenCount: 0, block: null, error: null };
+  async function readLive(addr, tokenList) {          // -> { rows, meta }; throws if the chain read fails
+    if (!window.FriendChain) await new Promise((ok, no) => { const s = document.createElement('script');
+      s.src = 'sprites/friend-chain.js'; s.onload = ok; s.onerror = () => no(new Error('sprites/friend-chain.js did not load')); document.head.appendChild(s); });
+    const fc = FriendChain.connect(D.toolkit, ChainLive.RPC);   // ChainLive.RPC honours ?rpc=local
+    let ids, meta = { hiddenCount: 0, block: null };
+    if (addr) {
+      const r = await fc.owned(addr);
+      ids = r.friends.map(f => f.id); meta = { hiddenCount: r.hiddenCount, block: r.blockNumber };
+    } else ids = tokenList.split(',').map(s => s.trim()).filter(Boolean);
+    const cached = [...(D.spriteSets || []), ...(D.friendRoster || [])];
+    const rows = (await Promise.all(ids.map(id => fc.sprites(id)))).map(s => decodeSet(FriendChain.withDrawn(s, cached)));
+    return { rows, meta };
+  }
+  function showLive(asked, addr, got, err) {
+    LIVE.length = 0; if (got) LIVE.push(...got.rows);
+    Object.assign(window.liveFriends, { asked, address: addr || '', error: err || null,
+      hiddenCount: got ? got.meta.hiddenCount : 0, block: got ? got.meta.block : null,
+      tokens: LIVE.map(s => ({ token: s.token, family: s.family, familyName: s.familyName, seed: s.seed, generation: s.generation, drawn: s.drawn })) });
+  }
+  // the address on open: the typed one, else the wallet's quiet answer - capped, so a wallet that never
+  // answers cannot hold the base closed
+  const askWallet = () => window.RFWallet ? Promise.race([RFWallet.current(), new Promise(ok => setTimeout(() => ok(''), 1500))]).catch(() => '') : Promise.resolve('');
+  const openAddr = PINNED ? Q.get('wallet') : await askWallet();
+  const openAsked = PINNED || (openAddr ? 'connected' : null);
+  if (openAsked) {
+    try { showLive(openAsked, openAddr, await readLive(openAddr, Q.get('token'))); }
+    catch (e) { showLive(openAsked, openAddr, null, e.message); console.warn('live Friends not read, the cached roster stands:', e.message); }
+  }
+  // Repaint after a wallet change. Every Friend standing that holds a token of the OLD read gives it back;
+  // then the new read's Friends take places of their own generation first, over a cached-roster Friend
+  // there; a place left empty claims from the pool again (claimFriend). claimedTokens is touched only the
+  // way claimFriend and release() already touch it - added when a Friend takes a token, deleted when it is
+  // given back - so the sprites' ledger stays exactly who holds what. Runs only after the page has opened,
+  // so `actors` and claimedTokens (declared below) exist by then.
+  function repaintLive(oldTokens) {
+    const friends = actors.filter(a => a.kind === 'friend');
+    friends.forEach(a => { if (a.token != null && oldTokens.has(a.token)) { claimedTokens.delete(a.token); a.token = null; a.set = null; } });
+    friends.forEach(a => {
+      const row = LIVE.find(r => r.generation === a.gen && !claimedTokens.has(r.token));
+      if (!row) return;
+      if (a.token != null) claimedTokens.delete(a.token);
+      claimedTokens.add(row.token); a.token = row.token; a.set = row;
+    });
+    friends.forEach(a => { if (a.set) return; const row = claimFriend(a.gen); a.token = row ? row.token : null; a.set = row; });
+    sync();                                            // the tray chips and the selected note name the family and token: redraw them too
+  }
+  let liveSeq = 0;
+  if (!PINNED && window.RFWallet) RFWallet.onChange(async (addr) => {
+    if ((addr || '').toLowerCase() === window.liveFriends.address.toLowerCase()) return;   // the quiet check on open, answering what was already read
+    const my = ++liveSeq, old = new Set(LIVE.map(r => r.token));
+    let got = null, err = null;
+    if (addr) { try { got = await readLive(addr); } catch (e) { err = e.message; console.warn('live Friends not read, the cached roster stands:', e.message); } }
+    if (my !== liveSeq) return;                        // a later switch has overtaken this read
+    showLive(addr ? 'connected' : null, addr, got, err);
+    repaintLive(old);
+  });
   const claimedTokens = new Set();
   function claimFriend(gen) {
-    const row = ROSTER.find(r => r.generation === gen && !claimedTokens.has(r.token))
-             || ROSTER.find(r => !claimedTokens.has(r.token));   // pool short: a real Friend, wrong era
+    const free = r => !claimedTokens.has(r.token);
+    // A Friend's generation is its token's generation, so a chain-read Friend takes only a place of its own
+    // generation. It is preferred there over the cached roster; it never stands in a wrong era. Which places
+    // the base has (GENS, the rented three) is the game's, not this region's - so a wallet of four
+    // generation-5 Friends shows as many of them as the base has generation-5 places.
+    const row = LIVE.find(r => r.generation === gen && free(r))   // the wallet's own Friend of this generation
+             || ROSTER.find(r => r.generation === gen && free(r))
+             || ROSTER.find(free);                                 // pool short: a real Friend, wrong era
     if (!row) return null;                                 // pool empty: the old dealt art, as before
     claimedTokens.add(row.token); return row;
   }
@@ -1111,9 +1429,13 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
 
   /* ---------- entities ---------- */
   const GENS = [1, 2, 3, 4, 5, 6];
-  const DEF = { 1: 60, 2: 34, 3: 20, 4: 12, 5: 7, 6: 4 };   // tower: quality wins, gen 1 best
-  const WALL_SLOT = 10;        // wall: every body counts the same, so numbers win
-  const WALL_CAP = 3;          // bodies per segment
+  // The first mockup's defence numbers - the tower plaque's DEF table and the wall's WALL_SLOT - are
+  // GONE (M8 items 9 and 12: "Defense is just strength"). No fight ever read them; combat.js fights
+  // with HP and weapons, and a building's strength is its row's `strength` column in values.js.
+  const WALL_CAP = V.kinds.wall.capacity[0];   // bodies per segment at level 1: ECON.wallCap, which towercheck reads
+  // A wall's crew by its own level, read off the row (question 23): the tap, the panel and the HUD all
+  // used to agree on 3, 4, 5 except the HUD, which multiplied level 1 by the number of walls.
+  const wallCrewCap = (b) => V.kinds.wall.capacity[(b.tier || 1) - 1];
   // A Friend is its GENERATION and its FAMILY. The job titles that used to sit here - SCIENTIST,
   // SCHOLAR, ENGINEER, ARTISAN, LABOURER, SOLDIER - were a hardcoded list in this one file and
   // nothing on chain ever said them, so they are gone. The generation is already printed beside
@@ -1210,20 +1532,12 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
     kit.forEach((step, n) => step.forEach(b => { b.order = order0 + n; }));
     return out;
   }
-  const buildings = WORLDGEN
-    ? [...baseKit(WORLDGEN.bases[0], 2, 0), ...baseKit(WORLDGEN.bases[1], 1, 0)]
-    : [
-    { type: 'keep',  x:  0.5, y:  0.5, tier: 1 },
-    { type: 'tower', x: -2.5, y: -0.5, tier: 1, occupant: null },
-    { type: 'hut',   x: -1.5, y: -1.5 },
-    { type: 'cell',  x:  1.5, y: -0.5 },
-    { type: 'silo',  x: -2.5, y:  0.5 },
-    { type: 'collectionDepot', x: 2.5, y: 0.5, tier: 1, harvesters: 1 },   // beside the southern seam
-    { type: 'generator', x: -0.5, y: 2.5, tier: 1 },      // the water wheel, at the foot of the falls
-    // a light wall running along the northern edge
-    { type: 'wall', x: -1.5, y: -2.5, crew: [] }, { type: 'wall', x: -0.5, y: -2.5, crew: [] },
-    { type: 'wall', x:  0.5, y: -2.5, crew: [] }, { type: 'wall', x: 1.5, y: -2.5, crew: [] },
-  ];
+  // What a single estate starts with is values.js's startBase rows, cloned so the rows this page
+  // mutates - crew, occupant, build progress - never write back into the table. A two-base island
+  // is laid out by baseKit from the generator instead.
+  const startPlan = () => V.startBase.buildings.map(b => JSON.parse(JSON.stringify(b)));
+  const buildings = !WORLDGEN ? startPlan()
+    : [...baseKit(WORLDGEN.bases[0], 2, 0), ...baseKit(WORLDGEN.bases[1], 1, 0)];
   // A building enters the world through `place` and leaves it through `razeAll` or `demolish` (or the
   // hero splice below), so the OCCUPIED layer of TILES is never out of step with `buildings`.
   // the single-estate plan's cell, read off the plan before ?fresh or the hero reel clears it: the
@@ -1233,7 +1547,7 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
   const razeAll = () => { buildings.forEach(TILES.vacate); buildings.length = 0; };
   buildings.forEach(TILES.occupy);
   // ?fresh=1: an unclaimed estate, so the keep-first rule can be seen from the start
-  if (Q.get('fresh')) razeAll();
+  if (SWITCH.fresh) razeAll();
   // the hero reel raises the default estate from bare land: keep first, then the rest, one by one
   if (HERO) document.body.classList.add('hero');
   const HERO_PLAN = HERO ? buildings.splice(0, buildings.length).map(b => (TILES.vacate(b), b)) : [];
@@ -1257,16 +1571,13 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
   // A cell claims every tile whose centre lies within its reach. Cells can only be placed on
   // land you already hold, so a chain of them walks the border outward — toward new seams,
   // or toward a rival. Reach is by tier, and nothing but the keep's crystals gates a rung.
-  // The ladder is 2, 3, 4, 5 tiles. It held 1.5/2.5/3.5/4.5 and the deployer ruled the document
-  // right and the game wrong — "design document is correct, it should use that". DESIGN.md carries
-  // it three ways: the decided ladder table, the deployer's power list, and M8 item 7. Index 0 is
-  // unused: `reclaim` reads CELL_REACH[c.tier || 1], so tier 1 is the first rung.
-  const CELL_REACH = [0, 2, 3, 4, 5];                 // tiles, indexed by tier
-  // The operator gate - a cell needing a Friend of a good enough generation posted at it before it
-  // could rise a level - is struck through in DESIGN.md (M8 item 7: "the cell was a permission gate,
-  // not a quality dial"). It held { 2: 3, 3: 2, 4: 1 }. It is empty rather than deleted because
-  // economy.html and deployer.html read `cellNeeds` to report whether the game still enforces it.
-  const CELL_NEEDS = {};                              // tier -> the worst generation that can run it: none
+  // The ladder (2, 3, 4, 5 tiles) is the cell row's `reach` in values.js, per level. Index 0 is
+  // unused here: `reclaim` reads CELL_REACH[c.tier || 1], so tier 1 is the first rung.
+  const CELL_REACH = [0, ...V.kinds.cell.reach];      // tiles, indexed by tier
+  // The operator gate is the cell row's placement.scienceGen in values.js (every level 0: struck
+  // through, M8 item 7). Read here as tier -> generation, with the zeros dropped, because
+  // economy.html and deployer.html read `cellNeeds` in that shape to report whether the game enforces it.
+  const CELL_NEEDS = Object.fromEntries(V.kinds.cell.placement.scienceGen.map((g, i) => [i + 1, g]).filter(([, g]) => g));
   const WORLD = { x: 7.5, y: 6.5 };                   // how far the map runs
   function reclaim(now, id = HOME) {
     const cells = buildings.filter(b => b.type === 'cell' && ofBase(id)(b));
@@ -1299,14 +1610,16 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
   reclaim(0);
 
   /* ---------- crystal resource nodes that grow on a clock ---------- */
-  const GROW_MS = 36000;                              // full cycle, stages every quarter (9 s each)
+  const GROW_MS = V.growMs;                           // full cycle, stages every quarter
   // Crystal seams are off for now: the estate and the studio show none. ?seams=1 brings them back
   // (the harvester checks use it). With none, harvesters simply stay parked in the depot's bay.
-  const SEAMS = Q.get('seams') === '1';
+  const SEAMS = SWITCH.seams;
   const SEAM_PLAN = [
     { x: 2.5, y: 1.5, t0: 0 }, { x: -0.5, y: 2.5, t0: 3000 },
     { x: 3.5, y: -0.5, t0: 6000 }, { x: -3.5, y: 0.5, t0: 1500 },
-    // wild seams past the border: worth nothing until a cell's reach brings them onto your land.
+    // wild seams past the border. They USED to be worth nothing until a cell's reach brought them onto
+    // your land; M10 item 3 took that rule out - a harvester cuts them where they stand - so a cell now
+    // brings them onto your ground, not into your reach.
     // `meant` is what each one is FOR (M8 item 8): the first needs a level-III cell to reach, the
     // second is beyond any single cell (null) and needs a second cell placed further out.
     { x: 4.5, y: 0.5, t0: 800, wild: true, meant: 3 }, { x: -5.5, y: -0.5, t0: 4200, wild: true, meant: null },
@@ -1333,8 +1646,11 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
   // over and chops; each tree gives TREE_WOOD logs, falls, leaves a stump, and grows back. When a
   // tree is down the Friend moves on to the next standing tree in the grove, so more Generations
   // in the wallet means more hands on the axe.
-  const LOG_WOOD = CRYSTAL_UNIT, TREE_WOOD = 3 * LOG_WOOD, CHOP_MS = 1400, REGROW_MS = 45000, FALL_MS = 650;
+  const LOG_WOOD = CRYSTAL_UNIT, TREE_WOOD = V.treeWood, CHOP_MS = V.chopMs, REGROW_MS = V.regrowMs, FALL_MS = 650;   // FALL_MS is how long the fall is drawn: a client belief
   const GROVES = [[-3.5, -0.5], [-3.5, 0.5], [-2.5, 1.5], [-2.5, -1.5], [3.5, -0.5], [3.5, 0.5], [2.5, -1.5]];
+  // where each grove's trees stand, as offsets from the grove: the single estate's plan (home: map),
+  // like GROVES above. How many trees a grove has is this list's length, never a number typed beside it.
+  const GROVE_TREES = [[-0.22, -0.2], [0.21, -0.12], [-0.04, 0.23]];
   const trees = [];
   if (WORLDGEN) {
     // the generator already placed every tree on the island; it counts them per tile and the
@@ -1344,7 +1660,7 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
       size: 0.85 + (((i) * 0.37) % 1) * 0.3, flip: i % 2 === 1,
     }));
   } else GROVES.forEach(([gx, gy], gi) => {
-    [[-0.22, -0.2], [0.21, -0.12], [-0.04, 0.23]].forEach(([ox, oy], k) => trees.push({
+    GROVE_TREES.forEach(([ox, oy], k) => trees.push({
       x: gx + ox, y: gy + oy, grove: gi, wood: TREE_WOOD, chop: 0, felled: 0,
       size: 0.85 + (((gi * 3 + k) * 0.37) % 1) * 0.3, flip: (gi + k) % 2 === 1,
     }));
@@ -1355,7 +1671,7 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
   // Each one picks the nearest seam nobody else is working, drives out, waits for it to ripen,
   // cuts it, and carries the crystals home. A collection depot's tier sets how many it can run and how
   // much each haul is worth.
-  const HARV_COST = 2000;                               // hundredths — 20.00 crystals
+  const HARV_COST = V.harvCost;                         // hundredths (values.js: 20.00 crystals)
   // The collection depot sits toward -x on its tile; the +x side is its bay, which faces the camera at the
   // default angle so the arched door is in view. Harvesters park either side of the rails, and
   // a third only when there is one, so the doorway stays clear.
@@ -1363,6 +1679,7 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
   const bayPoint = (f, i) => [f.x + 0.36, f.y + [-0.31, 0.31, 0][i % 3]];   // far side of the rails first
   const drones = [];
   function spawnHarvester(f) {
+    noteHarvester(f);                                  // the record: one more harvester on this depot (a no-op while restoring)
     const i = drones.filter(d => d.f === f).length;
     const [hx, hy] = bayPoint(f, i);
     drones.push({ f, x: hx, y: hy, state: 'idle',
@@ -1371,8 +1688,9 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
   buildings.filter(b => b.type === 'collectionDepot')
     .forEach(f => { for (let i = 0; i < (f.harvesters || 0); i++) spawnHarvester(f); });
   // 0..1 through the growth cycle - the one place ripeness is measured: the seam is drawn from it,
-  // and a haul is worth the depot's full haul times it. DECIDED (DESIGN.md): a seam can be cut at
-  // any time and nothing waits for it to ripen; take it young and you get less.
+  // and a haul is worth the depot's full haul at the STAGE it was cut (M10 item 2: Record.haulOf reads
+  // values.js stageYieldBps, the same rule a hand cut is owed). DECIDED (DESIGN.md): a seam can be cut
+  // at any time and nothing waits for it to ripen; take it young and you get less.
   const ripeness = (n, t) => (((t - n.t0) % GROW_MS + GROW_MS) % GROW_MS) / GROW_MS;
   let lastDroneT = 0;
   function updateDrones(t) {
@@ -1394,7 +1712,10 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
       if (d.state === 'idle') {
         d.moving = false;
         if (t - d.rest < 700) return;
-        const free = nodes.filter(n => onLand(n.x, n.y) && !drones.some(o => o !== d && o.node === n));
+        // M10 item 3: crystals can be cut anywhere on the map, whoever owns the ground - a seam past your
+        // border, or on another base's land, is as good as one at home. The only test is that nobody else
+        // is working it.
+        const free = nodes.filter(n => !drones.some(o => o !== d && o.node === n));
         if (!free.length) return;
         free.sort((p, q) => Math.hypot(p.x - d.f.x, p.y - d.f.y) - Math.hypot(q.x - d.f.x, q.y - d.f.y));
         d.node = free[0]; d.state = 'out';
@@ -1416,9 +1737,9 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
       }
       if (d.state === 'back' && go(home[0], home[1])) {
         d.heading = 0;                                     // parked, pointing out along the rails
-        bank(d.f.base, Math.round((d.f.tier || 1) * CRYSTAL_UNIT * d.ripe));   // the full haul only from a ripe seam; its own depot's base, clipped at the silo
+        bank(d.f.base, Record.haulOf(d.f.tier || 1, d.ripe));   // the depot's level times the yield of the stage it was cut at; its own depot's base, clipped at the store
         d.cargo = false; d.node = null; d.state = 'idle'; d.rest = t;
-        const el = document.getElementById('crystals'); if (el) el.textContent = fmtC(purse(d.f.base).crystals);
+        const el = document.getElementById('crystals'); if (el) el.textContent = fmtC(purse(HOME).crystals);   // the HUD is the home base's purse, whoever's harvester banked
       }
     });
   }
@@ -1787,27 +2108,51 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
   let CAP = null;
   let LOG = false;
   let LOG_ENDS = true;                                 // a single log being laid draws its own end only at the building's near corner                                     // level-1 buildings are built of logs: see box/prism/cylinder
-  const BUILD_MS = 2800 * (HERO ? 2.5 : 1);            // slower than the game when it's a demo
+  const BUILD_MS = V.buildMs * (HERO ? 2.5 : 1);       // slower than the game when it's a demo
   // A clip can want a building up faster than the game raises it: b.buildMs overrides the
   // default for that one building. World mode uses it to fit a strictly one-at-a-time sequence
   // into a length worth watching.
   const buildMsOf = (b) => b.buildMs || BUILD_MS;
+  // HOW FAR A BUILD HAS GOT, 0 to 1. The game's own builds read the RECORD's rule (M8 items 2 and 3):
+  // the kind's raise time at that level, from values.js, worked down by the Friends on it up to the kind's
+  // ceiling - Record.progress over the same row the ledger holds, so the page and the replay cannot
+  // disagree about when a building stands. A clip's own override (b.buildMs) and the hero reel's slowed
+  // pace are not the game's clock and keep the plain fraction.
+  const asRow = (b) => ({ kind: b.type, level: b.tier || 1, startedAt: b.build.t0, hands: b.hands });
+  const buildFrac = (b, t) => (b.buildMs || HERO) ? (t - b.build.t0) / buildMsOf(b) : Record.progress(asRow(b), t);
   // A build finishes on the clock, not on being drawn. It used to be cleared only by drawRaising(),
   // so a building the camera never showed - a depot behind the studio's solo focus - stayed 'going
   // up' for good and its harvesters, which wait while their depot is built, stood still forever.
   // The studio's own replays (studioRaise) and a pinned ?at= are not the game's clock and are left alone.
-  const buildDone = (b, t) => !!b.build && !b.studioRaise && AT === null && t - b.build.t0 >= buildMsOf(b);
+  const buildDone = (b, t) => !!b.build && !b.studioRaise && AT === null && buildFrac(b, t) >= 1;
   // ?at=0.35 pins every build at that fraction. Animation is otherwise untestable in a
   // headless shot, and rotation bugs only show at angles nobody happens to screenshot.
   const AT = (() => { const v = new URLSearchParams(location.search).get('at');
     return v === null ? null : Math.max(0, Math.min(1, parseFloat(v))); })();
   const STRUCT = 0.82;                                  // the last slice wipes the detail in
   const ease = (q) => q <= 0 ? 0 : q >= 1 ? 1 : 1 - Math.pow(1 - q, 3);
-  function startBuild(b) { b.build = { t0: now() }; }
+  // `raisedAt` is the record's startedAt and is never deleted: `build` is the animation and goes when it is
+  // done, progress is DERIVED from raisedAt and buildMs (schema building.startedAt). noteRaise tells the
+  // record: a building with no id yet is a new build, an existing one is a level raised or replayed.
+  // Whoever was working it keeps working the new level: the hands log restarts from the count standing
+  // now - the record's `raise` does the same, so the two stay one rule.
+  function startBuild(b) {
+    const t = now(), n = b.hands ? Record.handsAt(b, t) : 1;
+    b.build = { t0: t }; b.raisedAt = t; b.hands = n === 1 ? undefined : [[t, n]]; noteRaise(b);
+  }
+  // M8 ITEM 3: put Friends on a build, or pull them off. Never more than the base has, and a building that
+  // is standing has nothing to work. The count is a move; progress already made is kept whatever it does.
+  function setHands(b, n) {
+    const base = b.base == null ? HOME : b.base, t = now();
+    if (!b.build || buildFrac(b, t) >= 1 || !Number.isInteger(n) || n < 0 || n > FRIENDS().filter(ofBase(base)).length) return false;
+    b.hands = (b.hands || []).concat([[t, n]]);
+    noteMove(base, 'hands', { b: b.id, n }, t);
+    return true;
+  }
 
   function drawRaising(b, t) {
     LOG = (b.tier || 1) === 1;                        // the logs go up log by log, like everything else
-    const p = AT !== null ? AT : Math.max(0, Math.min(1, (t - b.build.t0) / buildMsOf(b)));
+    const p = AT !== null ? AT : Math.max(0, Math.min(1, buildFrac(b, t)));
     CAP = [];
     ctx.save(); ctx.beginPath(); ctx.rect(0, 0, 0, 0); ctx.clip();
     try { drawBuilding(b, t); } finally { ctx.restore(); }
@@ -2084,8 +2429,9 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
     const [wx, wy, h0] = powerAnchor(b), [px, py] = project(wx, wy);
     const h = Math.max(h0, POWER_MIN);                // clear of anyone standing beside the building
     const y = Math.round(py - h - 7 / SCALE), x0 = Math.round(px - POWER_W / 2), bw = Math.round(POWER_W), bh = 4;
-    // the level of power: a stand-in for now (the building's level out of its max) — see DESIGN.md
-    const p = (b.tier || 1) / kd.tiers.length, fill = Math.round(bw * p);
+    // THE BAR READS CHARGE, NOT LEVEL (M10 item 5): `b.charge` is what the energy tick gives this building -
+    // its draw met, as a share, or a store's fill. A building the tick has not reached yet reads full.
+    const p = b.charge == null ? 1 : Math.max(0, Math.min(1, b.charge)), fill = Math.round(bw * p);
     ctx.fillStyle = 'rgba(0,0,0,.72)'; ctx.fillRect(x0, y, bw, bh);
     ctx.strokeStyle = 'rgba(255,255,255,.35)'; ctx.lineWidth = 1; ctx.strokeRect(x0 + .5, y + .5, bw - 1, bh - 1);
     const gr = ctx.createLinearGradient(x0, 0, x0 + bw, 0);
@@ -2095,7 +2441,8 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
     ctx.font = '7px Silkscreen, monospace'; ctx.textAlign = 'left'; ctx.fillStyle = ELEC[1];
     sigText(ctx, Math.round(p * 100) + '%', x0 + bw + 3, y + 5);
     if (b.type === 'silo') {                          // the silo's storage bar, just under its power bar
-      const cap = SILO_CAP[(b.tier || 1) - 1], held = Math.min(purse(b.base).crystals, cap), sy = y + 8;
+      // how full the BASE is: a silo extends the depot's reserve, so the bar reads the whole store (siloCap)
+      const cap = siloCap(b.base == null ? HOME : b.base), held = Math.min(purse(b.base).crystals, cap), sy = y + 8;
       const sf = Math.round(bw * held / cap);
       ctx.fillStyle = 'rgba(0,0,0,.72)'; ctx.fillRect(x0, sy, bw, bh);
       ctx.strokeStyle = 'rgba(255,255,255,.35)'; ctx.strokeRect(x0 + .5, sy + .5, bw - 1, bh - 1);
@@ -2180,23 +2527,27 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
   const siloR = (tier) => 0.24 + (tier - 1) * 0.04, siloH = (tier) => (26 + (tier - 1) * 12) * 2 / SCALE;   // twice as tall as it first stood
   // the level-1 silo's three steps: [share of the width, share of the height, where it starts]
   const SILO_STEPS = [[1, 0.42, 0], [0.76, 0.34, 0.42], [0.54, 0.26, 0.76]];
-  const SILO_CAP = [30000, 90000, 300000];                // crystals it holds, by level (placeholders)
-  // How many crystals a base can BANK: the best finished silo it has, read off SILO_CAP. A silo still
-  // raising counts at the level it stands at, not the one it is climbing to. A base with no silo has no
-  // cap - the depot's own capacity (M8 item 6) is a number nobody has decided, and inventing one here is
-  // exactly what this file must not do. `bank()` is the ONE way crystals enter a purse from the world:
-  // it clips at the cap and returns what was actually banked, so a caller can tell a full silo from a
-  // credited one.
-  function siloCap(baseId) {
-    let cap = 0, any = false;
-    buildings.forEach(b => { if (b.type !== 'silo' || b.base !== baseId) return;
-      const standing = b.build ? (b.tier || 1) - 1 : (b.tier || 1); if (standing < 1) return;
-      any = true; cap = Math.max(cap, SILO_CAP[standing - 1]); });
-    return any ? cap : Infinity;
+  const SILO_CAP = V.kinds.silo.capacity;                 // what a silo ADDS, by level: the silo row's capacity in values.js
+  // How many crystals a base can BANK (M8 item 6; How much you can hold, DECIDED): the depot holds crystals
+  // and fills up, and every silo EXTENDS that reserve - so it is the record's own rule, Record.storeCap, run
+  // over this page's buildings in the record's shape. A building still raising counts at the level it stands
+  // at, not the one it is climbing to (`build` is the page's "still going up", the record's unfinished). A
+  // base with no depot and no silo standing has no store and is left uncapped, as the record leaves it.
+  // `bank()` is the ONE way crystals enter a purse from the world: it clips at the cap and returns what was
+  // actually banked, so a caller can tell a full store from a credited one.
+  // `without` leaves one building out: the cap the base has once it is knocked down (ruling 56).
+  function siloCap(baseId, without) {
+    // a start-plan building carries no `base` and is the home base's, the way ofBase reads it
+    const rows = buildings.filter(b => b !== without && (b.base == null ? HOME : b.base) === baseId && (b.type === 'silo' || b.type === 'collectionDepot'))
+      .map(b => ({ kind: b.type, level: b.tier || 1, startedAt: b.build ? 0 : null }));   // going up: started at 0, read at 0, so not yet standing
+    return Record.storeCap({ buildings: rows }, 0);
   }
-  function bank(baseId, amount) {
+  // `why` is 'gather' unless the caller says otherwise: a demolition's refund comes in through here too
+  // (ruling 15) and is NOT gathering, so it is not a `gather` move and standing does not move.
+  function bank(baseId, amount, why = 'gather') {
     const p = purse(baseId), room = Math.max(0, siloCap(baseId) - p.crystals), got = Math.min(amount, room);
     p.crystals += got;
+    if (why === 'gather' && got > 0) noteMove(baseId, 'gather', { got });
     if (got < amount) console.warn('silo full: base ' + baseId + ' holds ' + fmtC(p.crystals) + ', dropped ' + fmtC(amount - got));
     return got;
   }
@@ -2696,7 +3047,7 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
       if (!j.t0) j.t0 = t;
       if (t - j.t0 >= CHOP_MS) {                        // a log comes off
         j.t0 = t;
-        j.tree.wood -= LOG_WOOD; purse(a.base).wood += LOG_WOOD;
+        j.tree.wood -= LOG_WOOD; purse(a.base).wood += LOG_WOOD; noteMove(a.base, 'chop', {}, t);
         const el = document.getElementById('wood'); if (el) el.textContent = fmtC(purse(a.base).wood);
         if (!standing(j.tree)) j.tree.felled = t;       // down it comes
       }
@@ -2709,9 +3060,53 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
         .sort((p, q) => Math.hypot(p.x - a.x, p.y - a.y) - Math.hypot(q.x - a.x, q.y - a.y))[0] || null;
   }
   const TREE_ART = new Image(); TREE_ART.src = 'sprites/tree.svg';   // the FriendSDK's own tree
+  /* ---------- the toolkit's eighteen props: drawn, placed, and walked round (M11 item 6) ---------- */
+  // Each file is `renderProp(type)` byte for byte, written by sprites/friendsdk-vendor.mjs - none of them
+  // is a drawing of ours. The list is written out (a check reads which files the page loads) and held to
+  // the toolkit's own PROP_TYPES on load, so a nineteenth prop or a renamed one is an error, not a gap.
+  // A prop is static scenery: fixed 240px art at one camera, no tier, no charge, no animation - which
+  // is why none of them can stand in for a building (DESIGN.md, *Why no prop could be the capacitor*).
+  const PROP_ART = {
+    tree: 'sprites/tree.svg', flower: 'sprites/flower.svg', bench: 'sprites/bench.svg', planter: 'sprites/planter.svg',
+    terminal: 'sprites/terminal.svg', crate: 'sprites/crate.svg', pipe: 'sprites/pipe.svg', tank: 'sprites/tank.svg',
+    crystal: 'sprites/crystal.svg', rock: 'sprites/rock.svg', vent: 'sprites/vent.svg', antenna: 'sprites/antenna.svg',
+    solar: 'sprites/solar.svg', dish: 'sprites/dish.svg', buoy: 'sprites/buoy.svg', reeds: 'sprites/reeds.svg',
+    bridge: 'sprites/bridge.svg', circuit: 'sprites/circuit.svg',
+  };
+  if (SDK && (SDK.PROP_TYPES.length !== Object.keys(PROP_ART).length || SDK.PROP_TYPES.some(p => !PROP_ART[p])))
+    console.error('props: the toolkit ships ' + SDK.PROP_TYPES.join(', ') + ' and this page draws ' + Object.keys(PROP_ART).join(', '));
+  const PROP_IMG = {};                                 // loaded on first use, so a page with no props fetches none
+  const propImg = (type) => PROP_IMG[type] || (PROP_IMG[type] = Object.assign(new Image(), { src: PROP_ART[type] }));
+  // Placed props, in tiles. THE PLACEMENT API IS THIS AND ONLY THIS: placeProp adds one, removeProp takes
+  // it away, and the walking world above is rebuilt from the list on the next frame, so a prop with a
+  // footprint is walked round from the moment it lands. WHERE props go on the map is not decided here -
+  // that is the map's, and it is written as a spec in the M11 item 6 report, not guessed.
+  const placedProps = [];
+  function placeProp(type, x, y, scale = 1) {
+    if (!PROP_ART[type]) throw new Error('placeProp: ' + type + ' is not one of the toolkit\'s props');
+    if (!onLand(x, y)) throw new Error('placeProp: (' + x + ', ' + y + ') is not land');
+    const p = { type, x, y, scale }; placedProps.push(p); propImg(type); return p;
+  }
+  function removeProp(p) { const i = placedProps.indexOf(p); if (i >= 0) placedProps.splice(i, 1); return i >= 0; }
+  // ?props=1 lays all eighteen out on open ground TO BE LOOKED AT, the way ?doopies=1 brings the Doopies
+  // back. It is a viewer, not the map: no prop is placed on the base without it.
+  if (Q.get('props') === '1' && SDK) {
+    const taken = (x, y) => buildings.some(b => b.type !== 'wall' && Math.abs(b.x - x) < 0.5 && Math.abs(b.y - y) < 0.5)
+      || trees.some(tr => Math.hypot(tr.x - x, tr.y - y) < 0.45) || actors.some(a => Math.hypot(a.x - x, a.y - y) < 0.35)
+      || placedProps.some(p => Math.hypot(p.x - x, p.y - y) < 0.7);
+    const spots = [];
+    tiles.forEach(t => [[-0.25, -0.25], [0.25, 0.25], [0.25, -0.25], [-0.25, 0.25]].forEach(([dx, dy]) => spots.push([t.x + dx, t.y + dy])));
+    let n = 0;
+    for (const [x, y] of spots) { if (n >= SDK.PROP_TYPES.length) break; if (!taken(x, y)) placeProp(SDK.PROP_TYPES[n++], x, y); }
+  }
+  function drawProp(p) {
+    const [cx, cy] = project(p.x, p.y), k = PROP_ART_K * p.scale, im = propImg(p.type);
+    if (!im.complete || !im.naturalWidth) return;
+    ctx.save(); ctx.translate(cx, cy); ctx.scale(k, k); ctx.drawImage(im, -120, -180); ctx.restore();
+  }
   function drawTree(tr, t) {
     const [cx, cy] = project(tr.x, tr.y);
-    const k = 0.58 * tr.size;                           // the art is 240px square, anchored at (120, 180)
+    const k = PROP_ART_K * tr.size;                     // the art is 240px square, anchored at (120, 180)
     if (!standing(tr)) {
       const since = t - tr.felled;
       if (since < FALL_MS) {                            // falling over, away from the axe
@@ -2838,6 +3233,8 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
       if (buildType === 'generator' && !WATER_SITES.includes(tileKey(tile.x, tile.y))) {
         flashNote(WORLDGEN ? 'a generator needs running water: build it on a river or a creek' : 'a generator needs running water: at the spring on the summit, or the foot of the falls'); return;
       }
+      const siteWhy = siteReason(buildType, tile.x, tile.y);   // the row's own placement rule (nextToKind), not a name test
+      if (siteWhy) { flashNote(siteWhy); return; }
       const needWood = WOOD_COST[buildType] || 0;
       if (purse().wood < needWood) { flashNote('needs ' + fmtC(needWood) + ' wood — send Friends to the forest'); return; }
       const nb = { type: buildType, x: tile.x, y: tile.y, tier: 1, base: HOME };
@@ -2856,7 +3253,7 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
       {
         const at = b.crew.indexOf(selected);
         if (at >= 0) b.crew.splice(at, 1);
-        else if (selected.kind === 'friend' && b.crew.length < WALL_CAP + (b.tier || 1) - 1) {
+        else if (selected.kind === 'friend' && b.crew.length < wallCrewCap(b)) {
           unpost(selected);
           b.crew.push(selected);
         }
@@ -2894,14 +3291,16 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
     const [wx, wy] = screenToWorld(px, py);
     // (this used to round wx, wy to whole numbers first; tiles are centred on halves, so the
     // rounded point sat exactly on a tile edge and most taps on open ground were ignored)
+    // a hand cut: a seam tapped is cut at whatever stage it has reached and pays by that stage's yield
+    // (M10 row 2: Record.haulOf over values.js handYield and stageYieldBps - the same rule a harvester's haul reads).
+    // It comes BEFORE the land test: a seam is cut wherever it is (M10 row 3), and a wild seam past the border
+    // is not on the land set - the land test below is about where a Friend can walk, not what can be cut.
+    nodes.forEach(n => { if (Math.hypot(n.x - wx, n.y - wy) < 0.6) {
+      bank(HOME, Record.haulOf(V.handYield, ripeness(n, now()))); n.t0 = now(); document.getElementById('crystals').textContent = fmtC(purse().crystals);
+    }});
     if (!onLand(wx, wy)) return;
     selected.job = null;                                // tapping open ground stands a chopper down
     [selected.tx, selected.ty] = snapSpot(wx, wy);       // to the middle of the quadrant tapped: always on a spot
-    // harvesting: if it lands on a ripe node, collect it
-    nodes.forEach(n => { if (Math.hypot(n.x - wx, n.y - wy) < 0.6) {
-      const age = ((now() - n.t0) % GROW_MS + GROW_MS) % GROW_MS;
-      if (Math.floor(age / (GROW_MS / 4)) === 3) { bank(HOME, CRYSTAL_UNIT); n.t0 = now(); document.getElementById('crystals').textContent = fmtC(purse().crystals); }
-    }});
   }
   // The camera. One finger dragged turns the estate (yaw). Two fingers pinch to zoom and twist to
   // turn: the zoom is the ratio of the finger gap to the gap when the second finger landed, the turn
@@ -3006,16 +3405,19 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
     const i = actors.length;
     const [hx, hy] = freeSpot();
     const set = claimFriend(o.gen);                    // the Friend behind the offer, not a stand-in
-    actors.push({ kind: 'friend', rented: true, gen: o.gen, offer: o.id,
+    const a = { kind: 'friend', rented: true, gen: o.gen, offer: o.id, hired: o.hired,
       name: 'GEN ' + o.gen + ' · HIRED (' + o.hired.toUpperCase() + ')',
       token: set && set.token, set,
       x: hx, y: hy, tx: hx, ty: hy,
-      rows: FRIEND[i % FRIEND.length], walk: FRIEND[(i + 1) % FRIEND.length], px: 2, bob: Math.random() * 6 });
+      rows: FRIEND[i % FRIEND.length], walk: FRIEND[(i + 1) % FRIEND.length], px: 2, bob: Math.random() * 6 };
+    actors.push(a); noteHire(a);                      // the record: a Friend joins the roster
+    return a;
   }
   function release(o) {
     const i = actors.findIndex(a => a.offer === o.id);
     if (i < 0) return;
     const a = actors[i];
+    noteRelease(a);                                    // the record: a Friend leaves the roster (and its post)
     buildings.forEach(b => { if (b.crew) { const j = b.crew.indexOf(a); if (j >= 0) b.crew.splice(j, 1); }
       if (b.occupant === a) b.occupant = null; });
     actors.splice(i, 1);
@@ -3029,6 +3431,7 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
   /* ---------- the roster tray ---------- */
   const tray = document.getElementById('tray');
   function sync() {
+    recordSync();                                      // the record: every tap ends here, so where Friends stand, are posted and are ordered is read off the page here
     tray.innerHTML = '';
     actors.forEach(a => {
       const b = document.createElement('button');
@@ -3056,7 +3459,8 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
     document.getElementById('hired').textContent = deals.length + (deals.length ? ' · ' + rf + ' RF' + (pct ? ' + ' + pct + '%' : '') : '');
     document.getElementById('crystals').textContent = fmtC(purse().crystals);
     document.getElementById('wood').textContent = fmtC(purse().wood);
-    document.getElementById('crew').textContent = wallCrew + '/' + (WALL_CAP * buildings.filter(b => b.crew).length);
+    // the denominator is every wall's OWN crew cap summed, by its level (question 23) - not level 1 times the count
+    document.getElementById('crew').textContent = wallCrew + '/' + buildings.filter(b => b.crew).reduce((n, b) => n + wallCrewCap(b), 0);
     if (buildMode) {
       document.getElementById('note').innerHTML = '<span class="sel">build mode</span> — ' + (!theKeep()
         ? 'raise your <span class="sel">keep</span> first — nothing else can stand until it does'
@@ -3088,12 +3492,36 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
   // hoisted and safe to call from sync() and tap() whatever the order of first use.
   // this base's keep. Unscoped, base B's keep satisfied base A's keep-first rule.
   function theKeep(id = HOME) { return buildings.filter(ofBase(id)).find(b => b.type === 'keep'); }
-  function lockReason(k) {
-    if (k === 'keep') return theKeep() ? 'YOU HOLD A KEEP' : '';
-    return theKeep() ? '' : 'RAISE A KEEP FIRST';
+  // M3 ITEM 3: THE PLACEMENT RULE IS DATA THE BUILDING CARRIES. This used to know the keep by name
+  // (`k === 'keep'`). Now it reads the kind's `placement` row from values.js - in the shape of
+  // schema.json's placementRule - and knows no building by name, so a new kind is a row and no
+  // change here. The two strings are kept because the panel and the checks read them.
+  function lockReason(k, id = HOME) {
+    const P = V.kinds[k].placement, keep = theKeep(id);
+    if (P.isKeep) return keep ? 'YOU HOLD A KEEP' : '';
+    if (P.needsKeep && !keep) return 'RAISE A KEEP FIRST';
+    if (P.maxPerBase && buildings.filter(ofBase(id)).filter(b => b.type === k).length >= P.maxPerBase) return 'NO MORE THAN ' + P.maxPerBase;
+    // M8 ITEM 4: THE PREREQUISITE IS DATA. `needsKind` is a kind that must be standing finished on this
+    // base; an `unlocks` row (values.js) is a kind the game year opens - a building standing for so many
+    // years. Both are read off the rows, so a new prerequisite is a value and no line here.
+    if (P.needsKind && !buildings.some(b => ofBase(id)(b) && b.type === P.needsKind && !b.build)) return 'NEEDS A ' + V.kinds[P.needsKind].tiers[0] + ' STANDING';
+    const u = V.unlocks[k];
+    if (u && !yearOf(id).open.includes(k)) return 'OPENS ' + (u.afterYears === 1 ? 'ONE GAME YEAR' : u.afterYears + ' GAME YEARS') + ' AFTER THE ' + V.kinds[u.needs.type].tiers[u.needs.tier - 1];
+    return '';
   }
-  // level 1 is built of logs, so it is paid for in wood (placeholders); upgrades cost crystals
-  const WOOD_COST = { keep: 0, hut: 2000, silo: 1500, tower: 3000, wall: 1000, cell: 2000, generator: 2500, collectionDepot: 3000 };   // hundredths
+  // The fourth placement rule, by tile rather than by kind: `nextToKind` says the building must stand
+  // TOUCHING a finished one of that kind - sharing a tile edge - on its own base. It is the capacitor's rule
+  // (Energy: "it must be next to it"), and touching is also what binds the store to the generator it
+  // serves. Read off the row like lockReason(), so the rule knows no building by name; tap() asks it once.
+  function siteReason(k, x, y, id = HOME) {
+    const P = V.kinds[k].placement;
+    if (!P.nextToKind) return '';
+    const touching = buildings.some(b => ofBase(id)(b) && b.type === P.nextToKind && !b.build && Math.abs(b.x - x) + Math.abs(b.y - y) < 1 + 1e-6);
+    return touching ? '' : 'a ' + V.kinds[k].tiers[0].toLowerCase() + ' must stand next to a ' + V.kinds[P.nextToKind].tiers[0].toLowerCase();
+  }
+  // level 1 is built of logs, so it is paid for in wood; upgrades cost crystals. The wood is each
+  // row's `wood[0]` in values.js, read here in the shape economy.html and deployer.html expect.
+  const WOOD_COST = Object.fromEntries(Object.entries(V.kinds).map(([k, r]) => [k, r.wood[0]]));   // hundredths
   // phones: the page buttons fold behind PAGES; tap it to open or close the list, or tap anywhere else to close
   document.getElementById('pagesBtn').addEventListener('click', (e) => {
     e.stopPropagation(); const open = document.body.classList.toggle('pages');
@@ -3115,27 +3543,19 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
     n.innerHTML = '<span class="sel">' + msg + '</span>'; clearTimeout(flashNote.t);
     flashNote.t = setTimeout(sync, 2200);
   }
-  const KIND = {
-    keep:  { tiers: ['KEEP', 'HALL', 'CITADEL'],        cost: [0, 15000, 45000],
-             sub: "The Genesis seat. Nothing else can stand until it does, and no building can be raised past the keep's own tier." },
-    hut:   { tiers: ['HUT', 'HOUSE', 'MANSION'],        cost: [4000, 12000, 40000],
-             sub: 'Quarters. Each tier houses more Friends and adds a slot to your walls.' },
-    silo:  { tiers: ['SILO I', 'SILO II', 'SILO III'],  cost: [3000, 9000, 30000],
-             sub: 'Stores the base\'s crystals: 300, then 900, then 3,000. The green bar over it shows how full it is.' },
-    tower: { tiers: ['TOWER I', 'TOWER II', 'TOWER III'], cost: [8000, 24000, 70000],
-             sub: 'Needs a Friend standing watch. Their generation sets the defence; the tier sets the reach.' },
-    wall:  { tiers: ['LIGHT', 'STONE', 'CURTAIN'],      cost: [2500, 7500, 25000],
-             sub: 'Holds a crew shoulder to shoulder. Every body counts the same here, which is what Gen 6 is for.' },
-    cell:  { tiers: ['CELL I', 'CELL II', 'CELL III', 'CELL IV'], cost: [5000, 15000, 40000, 90000],
-             sub: 'An outpost that extends your land. Each level reaches further, toward new seams or a rival. Place another cell on claimed ground to push further still. Levels past the first need science: a qualified Friend posted at the cell.' },
-    generator:  { tiers: ['WATER WHEEL', 'WATER MILL', 'TURBINE'], cost: [5000, 15000, 45000],
-             sub: 'Makes power from running water: a wheel turning in its channel. Each level turns out more.' },
-    collectionDepot: { tiers: ['DEPOT I', 'DEPOT II', 'DEPOT III'], cost: [6000, 18000, 50000],
-             sub: 'Collection depot. It builds harvesters, and they bring what they cut back here to the silo. Each level runs one more harvester and adds a crystal to every haul.' },
-  };
+  // THE BUILDING REGISTRY is values.js's `kinds` - one row a kind: level names, crystal cost, wood,
+  // capacity, reach, footprint, placement and the catalogue line. This name is the page's reader of
+  // it; renderPanel, refundOf and the upgrade path read KIND[k] exactly as they always did.
+  const KIND = V.kinds;
   const panel = document.getElementById('panel');
   let panelFor = null;                                  // null = the catalogue, else the building
   function spend(n) { const P = purse(); P.crystals = Math.max(0, P.crystals - n); document.getElementById('crystals').textContent = fmtC(P.crystals); }
+  // M8 ITEM 1: a level is paid in a LIST of materials (Record.materials - the record's own rule, over values.js's
+  // per-level columns), so the panel prices, checks and pays every material a level names, not crystals alone.
+  const billOf = (k, level) => Record.materials(k, level);
+  const billText = (bill, none = 'free') => Record.MATERIALS.filter(([m]) => bill[m]).map(([m]) => fmtC(bill[m]) + ' ' + m).join(' + ') || none;
+  const canPay = (bill, P = purse()) => Record.MATERIALS.every(([m]) => (P[m] || 0) >= bill[m]);
+  function payBill(bill) { const P = purse(); Record.MATERIALS.forEach(([m]) => { if (m === 'crystals') spend(bill[m]); else P[m] = (P[m] || 0) - bill[m]; }); }
   // ---------- KNOCKING A BUILDING DOWN (Selling what you have built; ruling 15; M15 item 5) ----------
   // Half of the TOTAL spent on it - every rung it was raised through, summed off KIND's ladder, not the
   // last step - and half the wood its first level was built of. Hundredths in, hundredths out, and half
@@ -3144,14 +3564,14 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
   // construction is a level paid for, and counts. The refund is BANKED through bank(), the one way
   // crystals enter a purse - recovering materials is not gathering, so standing must not move. A refund
   // the silo has no room for is REFUSED, and the screen says how much room is needed (ruling 15), rather
-  // than losing the overflow. The room is measured with the building still standing: a silo's own refund
-  // has to fit the cap it gives.
+  // than losing the overflow. The room is measured with the building ALREADY GONE (ruling 56): a silo's
+  // own refund is not held by that silo, and with two silos the larger going leaves only the smaller's
+  // cap. A depot's refund carries half of each harvester it built, and its harvesters go with it. A base
+  // left with no depot and no silo is uncapped (Record.storeCap) and always fits - not settled by ruling 56.
   function refundOf(b) {
     const base = b.base == null ? HOME : b.base, tier = b.tier || 1;
-    const crystals = KIND[b.type].cost.slice(0, tier).reduce((n, c) => n + c, 0) / 2, wood = (WOOD_COST[b.type] || 0) / 2;
-    if (crystals !== Math.floor(crystals) || wood !== Math.floor(wood)) throw new Error('a refund would lose a hundredth');
-    const room = Math.max(0, siloCap(base) - purse(base).crystals);
-    return { crystals, wood, short: Math.max(0, crystals - room) };
+    const { crystals, wood } = Record.refund(b.type, tier, b.harvesters);   // the arithmetic lives with the record, which replays it
+    return { crystals, wood, short: Record.refundShort(purse(base).crystals, crystals, siloCap(base, b)) };
   }
   // the keep goes last: nothing else can stand without it (KIND.keep.sub), so it cannot be knocked down
   // while anything else of its base stands
@@ -3160,11 +3580,13 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
     if (!buildings.includes(b)) throw new Error('not a standing building');
     if (keepHolds(b)) { flashNote('the keep goes last — knock the rest down first'); return { ok: false, keep: true }; }
     const base = b.base == null ? HOME : b.base, rf = refundOf(b);
-    if (rf.short > 0) { flashNote('needs ' + fmtC(rf.short) + ' room — the silo cannot hold the refund'); return { ok: false, needs: rf.short }; }
-    const got = bank(base, rf.crystals); if (got !== rf.crystals) throw new Error('the silo took ' + got + ' of ' + rf.crystals);
+    if (rf.short > 0) { flashNote('needs ' + fmtC(rf.short) + ' room — the depot and silos cannot hold the refund'); return { ok: false, needs: rf.short }; }
+    const got = bank(base, rf.crystals, 'refund'); if (got !== rf.crystals) throw new Error('the store took ' + got + ' of ' + rf.crystals);
     purse(base).wood += rf.wood;
     if (b.crew) b.crew.length = 0; if ('occupant' in b) b.occupant = null;   // whoever was posted steps down
+    for (let i = drones.length - 1; i >= 0; i--) if (drones[i].f === b) drones.splice(i, 1);   // a depot's harvesters go with it (ruling 56)
     TILES.vacate(b); buildings.splice(buildings.indexOf(b), 1);
+    noteMove(base, 'demolish', { b: b.id });           // the record: the refund is the move's own arithmetic (Record.refund)
     if (panelFor === b) closePanel();
     if (b.type === 'cell') reclaim(now());
     sync();
@@ -3182,6 +3604,21 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
     buildMode = false; buildBtn.setAttribute('aria-pressed', 'false');
     sync();
   }
+  // M8 ITEM 3, on the panel: while a building goes up, how many Friends work it, the kind's ceiling, and the
+  // time left at that pace - all read off the record's rule (Record.worked / raiseMs / ceiling), never a
+  // second copy of it. Not offered where the build is on a clip's own clock (b.buildMs, the hero reel).
+  function handsBlock(b) {
+    if (!b.build || b.buildMs || HERO || b.studioRaise) return '';
+    const base = b.base == null ? HOME : b.base, t = now(), n = Record.handsAt(b, t), top = Record.ceiling(b.type);
+    const have = FRIENDS().filter(ofBase(base)).length, row = asRow(b);
+    const left = Math.max(0, Record.raiseMs(b.type, b.tier || 1) - Record.worked(row, t)), pace = Math.min(n, top);
+    return '<span class="lab">HANDS ON IT</span><div class="kv">' +
+      '<span class="k">Friends working</span><span class="v sig" id="phands">' + n + ' of ' + top + '</span>' +
+      '<span class="k">Time left</span><span class="v">' + (pace ? Math.ceil(left / pace / 1000) + ' s' : 'paused - nobody on it') + '</span></div>' +
+      '<div class="cells"><button class="cell" type="button" data-hands="-1"' + (n <= 0 ? ' disabled' : '') + '><b>PULL ONE OFF</b></button>' +
+      '<button class="cell" type="button" data-hands="1"' + (n >= top || n >= have ? ' disabled' : '') + '><b>' +
+        (n >= top ? 'AT THE CEILING' : n >= have ? 'NO FRIEND FREE' : 'PUT ONE ON') + '</b></button></div><div class="rule"></div>';
+  }
   function renderPanel() {
     const title = document.getElementById('ptitle'), body = document.getElementById('pbody');
     if (!panelFor) {
@@ -3195,8 +3632,7 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
           return '<button class="cell" type="button" data-k="' + k + '"' +
             (buildType === k ? ' aria-pressed="true"' : '') + (lock ? ' disabled' : '') + '>' +
             '<b>' + KIND[k].tiers[0] + '</b>' +
-            '<span class="cost">' + (lock || ((WOOD_COST[k] ? fmtC(WOOD_COST[k]) + ' wood' : '') +
-              (KIND[k].cost[0] ? (WOOD_COST[k] ? ' + ' : '') + fmtC(KIND[k].cost[0]) + ' crystals' : '') || 'free')) + '</span>' +
+            '<span class="cost">' + (lock || billText(billOf(k, 1))) + '</span>' +
             '<span class="sub">' + KIND[k].sub + '</span></button>';
         }).join('') + '</div>';
       body.querySelectorAll('.cell').forEach(c => c.addEventListener('click', () => {
@@ -3206,10 +3642,14 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
     }
     const b = panelFor, def = KIND[b.type], tier = b.tier || 1;
     const next = tier + 1, maxed = next > def.tiers.length;
-    const cost = maxed ? 0 : def.cost[next - 1];
-    // cells are not capped by the keep: that is what lets them reach a fourth tier. The operator
-    // gate that used to sit here is gone - see CELL_NEEDS.
-    const capped = b.type !== 'keep' && b.type !== 'cell' && !maxed && next > ((theKeep() || {}).tier || 0);
+    const bill = maxed ? null : billOf(b.type, next), cost = bill ? bill.crystals : 0, afford = !bill || canPay(bill);
+    const shortOf = bill ? (Record.MATERIALS.find(([m]) => (purse()[m] || 0) < bill[m]) || [''])[0] : '';
+    // The keep's cap is the row's `cappedByKeepLevel` (M3 item 3, M8 item 11): the keep and the cell say
+    // false on their rows, which is what lets a cell reach a fourth tier, and this line names no building.
+    // The capacitor's row says TRUE as the rule stands, so Capacitor IV is unreachable under a three-tier
+    // keep until the deployer picks a way out (Energy, "Capacitor IV is unreachable"); flipping that one
+    // value is the recommended way, and it is a value, not a line here. The operator gate is gone - see CELL_NEEDS.
+    const capped = def.placement.cappedByKeepLevel && !maxed && next > ((theKeep() || {}).tier || 0);
     const rf = refundOf(b), held = keepHolds(b);          // what knocking it down gives back, and whether it may go
     title.textContent = 'UPGRADE';
     body.innerHTML = '<p class="lede">' + def.sub + '</p>' +
@@ -3220,7 +3660,7 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
         ? '<span class="k">On watch</span><span class="v' + (b.occupant ? ' sig' : '') + '">' +
           (b.occupant ? 'GEN ' + b.occupant.gen : 'unmanned') + '</span>'
         : '') +
-      (b.crew ? '<span class="k">Crew</span><span class="v">' + b.crew.length + ' / ' + (WALL_CAP + tier - 1) + '</span>' : '') +
+      (b.crew ? '<span class="k">Crew</span><span class="v">' + b.crew.length + ' / ' + wallCrewCap(b) + '</span>' : '') +
       (b.type === 'keep'
         ? '<span class="k">Other buildings up to</span><span class="v sig">tier ' + tier + '</span>' : '') +
       (b.type === 'cell'
@@ -3228,9 +3668,16 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
         : '') +
       (b.type === 'collectionDepot'
         ? '<span class="k">Harvesters</span><span class="v">' + (b.harvesters || 0) + ' / ' + tier + '</span>' +
-          '<span class="k">Each haul</span><span class="v sig">' + tier + ' crystal' + (tier > 1 ? 's' : '') + '</span>'
+          '<span class="k">Each haul</span><span class="v sig">up to ' + fmtC(Record.haulOf(tier, 1)) + ' crystals</span>' +
+          '<span class="k">Holds</span><span class="v">' + fmtC(KIND.collectionDepot.capacity[tier - 1]) + ' crystals</span>'
         : '') +
+      (b.type === 'silo'
+        ? '<span class="k">Adds to the store</span><span class="v">' + fmtC(SILO_CAP[tier - 1]) + ' crystals</span>' : '') +
+      (b.type === 'collectionDepot' || b.type === 'silo'
+        ? '<span class="k">The base holds</span><span class="v sig">' + fmtC(purse(b.base == null ? HOME : b.base).crystals) + ' / ' +
+          (isFinite(siloCap(b.base == null ? HOME : b.base)) ? fmtC(siloCap(b.base == null ? HOME : b.base)) : 'no cap') + '</span>' : '') +
       '</div><div class="rule"></div>' +
+      handsBlock(b) +
       (b.type === 'collectionDepot'
         ? '<span class="lab">HARVESTERS</span>' +
           '<button class="go" id="pharv"' + ((b.harvesters || 0) >= tier || purse().crystals < HARV_COST ? ' disabled' : '') + '>' +
@@ -3240,16 +3687,16 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
         : '') +
       (maxed ? '<span class="lab">FULLY BUILT</span><p class="lede">Nothing further to raise here.</p>'
              : '<span class="lab">NEXT TIER</span><div class="kv">' +
-               '<span class="k">' + def.tiers[next - 1] + '</span><span class="v sig">' + fmtC(cost) + ' crystals</span>' +
-               '<span class="k">You hold</span><span class="v">' + fmtC(purse().crystals) + '</span></div>') +
-      '<button class="go" id="pgo"' + (maxed || capped || purse().crystals < cost ? ' disabled' : '') + '>' +
+               '<span class="k">' + def.tiers[next - 1] + '</span><span class="v sig">' + billText(bill) + '</span>' +
+               '<span class="k">You hold</span><span class="v">' + billText(purse(), 'nothing') + '</span></div>') +
+      '<button class="go" id="pgo"' + (maxed || capped || !afford ? ' disabled' : '') + '>' +
       (maxed ? 'MAXED' : capped ? 'RAISE THE KEEP TO ' + KIND.keep.tiers[next - 1] + ' FIRST'
-        : purse().crystals < cost ? 'NOT ENOUGH CRYSTALS' : 'RAISE ' + def.tiers[next - 1]) + '</button>' +
+        : !afford ? 'NOT ENOUGH ' + shortOf.toUpperCase() : 'RAISE ' + def.tiers[next - 1]) + '</button>' +
       '<button class="go" id="pagain" style="background:none;border:1px solid rgba(255,255,255,.4);color:#fff">' +
       'REPLAY CONSTRUCTION</button>' +
       '<div class="rule"></div><span class="lab">KNOCK DOWN</span>' +
       '<p class="lede">Half of everything spent on it comes back: ' + fmtC(rf.crystals) + ' crystals' +
-        (rf.wood ? ' and ' + fmtC(rf.wood) + ' wood' : '') + '. The crystals go to the silo, so the silo must have room.</p>' +
+        (rf.wood ? ' and ' + fmtC(rf.wood) + ' wood' : '') + '. The crystals go into the store - the depot and its silos - so it must have room.</p>' +
       '<button class="go" id="pdemo" style="background:none;border:1px solid rgba(255,255,255,.4);color:#fff"' +
         (held || rf.short > 0 ? ' disabled' : '') + '>' +
       (held ? 'THE KEEP GOES LAST' : rf.short > 0 ? 'NEEDS ' + fmtC(rf.short) + ' ROOM' : 'KNOCK DOWN · +' + fmtC(rf.crystals) + ' CRYSTALS') + '</button>';
@@ -3257,11 +3704,14 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
     if (dm && !dm.disabled) dm.addEventListener('click', () => { demolish(b); });
     const go = document.getElementById('pgo');
     if (go && !go.disabled) go.addEventListener('click', () => {
-      b.tier = next; spend(cost); startBuild(b);
+      b.tier = next; payBill(bill); startBuild(b);
       if (b.type === 'cell') reclaim(now());
       renderPanel(); sync();
     });
     document.getElementById('pagain').addEventListener('click', () => { startBuild(b); });
+    body.querySelectorAll('[data-hands]').forEach(h => h.addEventListener('click', () => {
+      if (setHands(b, Record.handsAt(b, now()) + Number(h.dataset.hands))) { renderPanel(); sync(); }
+    }));
     const hv = document.getElementById('pharv');
     if (hv && !hv.disabled) hv.addEventListener('click', () => {
       b.harvesters = (b.harvesters || 0) + 1; spend(HARV_COST); spawnHarvester(b); renderPanel(); sync();
@@ -3631,6 +4081,7 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
     nodes.forEach(n => { if (near(n.x, n.y, 0.2)) things.push({ pt: [n.x, n.y], d: zsort(n.x, n.y), f: () => lifted(n.x, n.y, () => drawNode(n, t)) }); });
     drones.forEach(dr => { if (!dr.f.build && near(dr.x, dr.y, 0.2)) things.push({ pt: [dr.x, dr.y], d: zsort(dr.x, dr.y) + 0.02, f: () => lifted(dr.x, dr.y, () => drawDrone(dr, t)) }); });
     trees.forEach(tr => { if (near(tr.x, tr.y, 0.1)) things.push({ pt: [tr.x, tr.y], d: zsort(tr.x, tr.y) + 0.005, f: () => lifted(tr.x, tr.y, () => drawTree(tr, t)) }); });
+    placedProps.forEach(p => { if (near(p.x, p.y, 0.1)) things.push({ pt: [p.x, p.y], d: zsort(p.x, p.y) + 0.005, f: () => lifted(p.x, p.y, () => drawProp(p)) }); });
     // Every tower's occupant, not just the first one's. With one tower the old `find` was fine;
     // with two bases a second tower's watch was drawn twice - once up on its platform and again
     // standing on the ground underneath it.
@@ -3679,6 +4130,7 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
     if (studioOn) { if (!EXPORTING) studioTick(); return; }
     heroTick(simT);
     yearTick(simT);
+    energyTick(simT);
     render(simT, true);
   }
   if (!RECORD) requestAnimationFrame(frame);
@@ -3965,21 +4417,14 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
   }
 
   /* ---------- the armoury: every generation's weapon, fired on a stage that turns like the map ---------- */
-  // A starting plan, not balance. HP is tier-0 and 1.5x per generation up (the chain's reward
-  // weights, compressed). Each evolution is +50% damage and +1 tile of range. A fight is one
-  // chance roll per shot, weighted by strength; the winner of the roll lands the weapon's damage.
-  const HP_OF = { 1: 759, 2: 506, 3: 337, 4: 225, 5: 150, 6: 100 };
-  const WALL_HP = 400;                                // a level-1 log wall section
-  // One weapon per generation, as agreed: weapon, range in tiles, damage per hit, and what it does to buildings
-  const WEAPONS = {
-    6: { n: 'CLUB', k: 'club', dmg: 10, rng: 0.5 },
-    5: { n: 'SLING', k: 'sling', dmg: 15, rng: 2 },
-    4: { n: 'SPEAR', k: 'spear', dmg: 25, rng: 1 },
-    3: { n: 'BOW AND ARROW', k: 'bow', dmg: 35, rng: 3 },
-    2: { n: 'CROSSBOW', k: 'xbow', dmg: 50, rng: 4, pierce: true },             // the bolt passes through one target
-    1: { n: 'CATAPULT', k: 'catapult', dmg: 80, rng: 5, siege: true, area: 1, vsBuilding: 2 },   // 160 against buildings
-  };
-  const MELEE = new Set(['club', 'spear']);
+  // THE FIGHT'S TABLES are values.js's (schema: rules), where the parity check, gencheck and hashcheck
+  // read the same five, so the game and the Solidity cannot be handed different numbers. A fight is
+  // one chance roll per shot, weighted by strength; the winner of the roll lands the weapon's damage.
+  const HP_OF = V.hp;
+  const WALL_HP = V.wallHp;                           // a level-1 log wall section
+  const WEAPONS = V.weapons;                          // one weapon per generation: range in tiles, damage per hit, what it does to buildings
+  const COMBAT = V.combat;                            // the shot clock, the tower's reach, the stone drop, how often a shot lands on a building
+  const MELEE = new Set(COMBAT.melee);
   /* ---------- meme attacks ---------- */
   // Not a weapon a generation carries - a rare card, airdropped by the deployer's wallet, that a
   // player holds and spends. Each one is named after a real moment and the joke IS the mechanic.
@@ -3990,7 +4435,20 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
            gets: 'THE SBF MEME ATTACK',                 // "FRIEND #3 GETS ..." on the intro card
            words: ['POP', 'BAM', 'SMASH'],
            take: 0.5, backfire: 0.10,
-           took: 'STRENGTH  ·  HALF OF WHAT WAS LEFT', bad: 'THE FRAUD COLLAPSES' },
+           took: 'STRENGTH  ·  HALF OF WHAT WAS LEFT', bad: 'THE FRAUD COLLAPSES',
+           tags: ['TOOK HALF', 'FRAUD'] },                // the short word over the target's bar: [it took, it backfired]
+    // M19 item 5, the second one - the template proved by a row and a drawing. 22 May 2010: 10,000 BTC
+    // for two pizzas. The pizza is spun overhead like dough and slung; the coin says whether it was
+    // delivered, or whether this is the moment you find out what you paid for it. The two outcomes
+    // are the same joke, which is the rule: you spend a fortune on a pizza and throw it at somebody.
+    // take and backfire are the SBF Attack's own decided numbers, deliberately: what a second meme is
+    // worth is the economist's to set, and this row proves the template, not a balance.
+    pizza: { n: 'BITCOIN PIZZA!', k: 'pizza', dmg: 0, rng: 2, meme: true,
+           gets: 'THE BITCOIN PIZZA',
+           words: ['SPLAT', 'THWAP', 'NOM'],
+           take: 0.5, backfire: 0.10,
+           took: 'STRENGTH  ·  DELIVERED HOT', bad: '10,000 BTC FOR TWO PIZZAS',
+           tags: ['DELIVERED', 'OVERPAID'] },
   };
   // What a meme puts on the Friend. ONE function per meme; everything else about it is the table
   // above, so a second meme is a row and a drawing and nothing more. Each takes (point, radius,
@@ -4004,13 +4462,48 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
     [ 0.14,  0.02, 0.24, 1.1], [ 0.62,  0.10, 0.24, 2.4], [-0.50,  0.30, 0.22, 0.6],
     [ 0.00,  0.30, 0.22, 3.6], [ 0.44,  0.34, 0.22, 1.8], [-0.04, -0.72, 0.22, 2.9],
   ];
-  const MEME_ART = { sbf: (p, r, fill, rim) => afroShape(p, r, fill, rim) };
+  // The Bitcoin Pizza, worn flat on the head like a hat: a whole pie seen from the iso camera, with
+  // a slice gone so it reads as pizza and not a plate. The side is ten fills of ONE colour stacked
+  // through its depth (fills of one colour cannot seam - the afro's lesson); a pixel apart in its own
+  // units was tried first, and the reveal's magnifier turned that into a staircase down the cut. The
+  // crust is a line inside the rim, and the pepperoni are separate discs that never overlap. With no
+  // rim (the glitch's ghost, the stray frames) it is the silhouette alone.
+  function pizzaShape(p, r, fill, rim) {
+    const cx = p[0], cy = p[1] - r * 0.04, A = r * 1.22, B = r * 0.52, T = Math.max(2, r * 0.26);
+    const a0 = 0.30, a1 = 1.10;                         // the missing slice, front right, toward the camera
+    const pie = (dy, grow) => {
+      ctx.beginPath(); ctx.moveTo(cx, cy + dy);
+      ctx.ellipse(cx, cy + dy, A + grow, B + grow, 0, a1, a0 + Math.PI * 2); ctx.closePath();
+    };
+    ctx.save();
+    ctx.translate(cx, cy); ctx.rotate(-0.16); ctx.translate(-cx, -cy);   // perched at an angle, not level
+    // the dark rim is a round-joined stroke round each layer, not a grown copy of it: growing the
+    // ellipse moves the cut's corner off the centre, and stacked that way the cut edge came out sawtoothed
+    if (rim) { ctx.fillStyle = ctx.strokeStyle = rim; ctx.lineWidth = r * 0.24; ctx.lineJoin = 'round';
+      for (let i = 0; i <= 10; i++) { pie(T * i / 10, 0); ctx.fill(); ctx.stroke(); }
+      ctx.lineJoin = 'miter'; }
+    ctx.fillStyle = rim ? SHADE : fill;                 // the edge of the pie, a shade under the top
+    for (let i = 1; i <= 10; i++) { pie(T * i / 10, 0); ctx.fill(); }
+    ctx.fillStyle = fill; pie(0, 0); ctx.fill();
+    if (rim) {
+      ctx.save(); pie(0, 0); ctx.clip();
+      ctx.strokeStyle = SHADE; ctx.lineWidth = Math.max(1, r * 0.09);
+      ctx.beginPath(); ctx.ellipse(cx, cy, A * 0.80, B * 0.76, 0, 0, 7); ctx.stroke();   // where the crust ends
+      ctx.fillStyle = SHADE;
+      for (const [fx, fy] of PEPPERONI) {
+        ctx.beginPath(); ctx.ellipse(cx + fx * A, cy + fy * B, r * 0.17, r * 0.09, 0, 0, 7); ctx.fill();
+      }
+      ctx.restore();
+    }
+    ctx.restore();
+  }
+  // where the pepperoni sit on the top, in units of the pie's half-width and half-height
+  const PEPPERONI = [[-0.50, -0.30], [0.06, -0.54], [0.40, -0.40], [-0.12, 0.10], [-0.55, 0.38], [0.72, 0.02]];
+  const MEME_ART = { sbf: (p, r, fill, rim) => afroShape(p, r, fill, rim),
+                     pizza: (p, r, fill, rim) => pizzaShape(p, r, fill, rim) };
   const memeArt = (p, r, fill, rim) => MEME_ART[AR.meme](p, r, fill, rim);
-  // how a fight is timed, as the armoury plays it (and the combat algorithm and contract read): a shot every
-  // periodMs, what a watchtower adds to range, how far melee reaches down from one, how often a shot lands on
-  // a building (it doesn't dodge), in basis points like the chance roll
-  const COMBAT = { periodMs: { melee: 1600, ranged: 2200, siege: 3200 }, melee: [...MELEE], towerRange: 1, dropRange: 0.75,
-    landVsBuildingBps: 9000 };
+  // COMBAT - how a fight is timed, as the armoury plays it and the combat algorithm and contract read - is
+  // declared beside HP_OF above, out of values.js.
   const AR = { gen: 3, post: 'ground', target: 'dummy', spin: true, turns: 1, secs: 24, fps: 20, t0: 0, hp: 0, n: -1, down: 0, log: [], meme: null, intro: false, purse: 0, loot: [] };
   let armouryOn = false;
   const SX = 20, SY = 20;                             // the stage sits far off the estate, clear of the hill
@@ -4019,7 +4512,7 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
   // melee from the tower can only drop stones on whoever is at its foot; range weapons gain a tile
   const arDrop = () => arTower() && MELEE.has(arW().k);
   const arRange = () => arDrop() ? COMBAT.dropRange : arW().rng + (arTower() ? COMBAT.towerRange : 0);
-  const DUMMY_HP = 100;                              // a training dummy: as tough as a Gen 6, and it never fights back
+  const DUMMY_HP = HP_OF[6];                         // a training dummy: as tough as a Gen 6 (derived, not a second 100), and it never fights back
   const arMax = () => AR.target === 'wall' ? WALL_HP : DUMMY_HP;
   const arOdds = () => COMBAT.landVsBuildingBps / 10000;   // nothing here dodges; against a Friend it is weighted by strength (see the panel)
   const oddsVs = (g) => HP_OF[AR.gen] / (HP_OF[AR.gen] + HP_OF[g]);
@@ -4166,12 +4659,13 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
   function arLaunch(u0, base) {
     const k = arW().k;
     if (k === 'catapult') return [u0 + 0.3, base + 34 / SCALE];
-    if (k === 'sling' || k === 'sbf') return [u0 + 0.05, base + HEAD];
+    if (k === 'sling' || arW().meme) return [u0 + 0.05, base + HEAD];   // every meme leaves from overhead, off the rope
     return [u0 + 0.2, base + HAND + 2 / SCALE];
   }
   function arArc() {
     const k = arW().k, D = arRange();
-    return { catapult: 110, bow: 10 * D, xbow: 3 * D, sling: 9 * D, sbf: 9 * D, club: 0, spear: 0 }[k] / SCALE;
+    if (arW().meme) return 9 * D / SCALE;             // every meme is slung like a sling stone
+    return { catapult: 110, bow: 10 * D, xbow: 3 * D, sling: 9 * D, club: 0, spear: 0 }[k] / SCALE;
   }
   // the thing in flight, at q (0..1) of the way; `miss` sends it wide and long
   function arShot(q, u0, z0, uT, zT, miss) {
@@ -4186,7 +4680,7 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
       poly([[p[0] + dx * 3, p[1] + dy * 3], [p[0] - dy * 2, p[1] + dx * 2], [p[0] + dy * 2, p[1] - dx * 2]], '#fff');
       const f = tail(14); ctx.fillStyle = '#fff'; ctx.fillRect(Math.round(f[0] - 2), Math.round(f[1] - 1), 3, 2);   // fletching
     } else if (k === 'xbow') seg(tail(9), p, 1.5, '#fff');                        // a short, heavy bolt
-    else if (k === 'sbf') {
+    else if (arW().meme) {                             // whatever this meme draws, tumbling
       ctx.save(); ctx.translate(p[0], p[1]); ctx.rotate(q * 9); ctx.translate(-p[0], -p[1]);
       memeArt(p, 9, SIGNAL, '#0b0b0b'); ctx.restore();
     }
@@ -4221,10 +4715,11 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
       L(butt, head, 1.5);
       const mid = at(len - 0.07), base2 = at(len - 0.14);        // a leaf blade
       poly([at(len + 0.06), [mid[0] - 3, mid[1] - 2], base2, [mid[0] + 3, mid[1] + 2]], '#fff');
-    } else if (k === 'sbf') {
-      // The afro arrives on the head glitching, lifts onto the rope, and is spun round. It sits in
-      // WORLD space, not the 1.7x weapon space - the magnifier is for a silhouette held out in
-      // front, and running the hair through it parks it in the air above the sprite's scalp.
+    } else if (arW().meme) {
+      // Every meme - the afro, the pizza, whatever MEME_ART draws - arrives on the head glitching,
+      // lifts onto the rope, and is spun round. It sits in WORLD space, not the 1.7x weapon space -
+      // the magnifier is for a silhouette held out in front, and running hair through it parks it in
+      // the air above the sprite's scalp.
       const ON = 0.3, RAD = 9, SEAT = SEAT_Z / SCALE, SPUN = 56 / SCALE;
       const headP = arP(u0, 0.1, base + SEAT);
       if (ph < ON) memeGlitch(headP, RAD, simT, ease(ph / ON));
@@ -4379,8 +4874,9 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
     if (ph >= T.I && AR.n < n && !AR.down) {
       AR.n = n;
       if (w.meme) {
-        // The afro always connects. What it does is the coin: either it takes half of whatever is
-        // still standing, or the fraud collapses and the thrower loses a tenth of what they held.
+        // A meme always connects. What it does is the coin, and both outcomes are the row's: it takes
+        // `take` of whatever is still standing, or it backfires and the thrower loses `backfire` of
+        // what they held (the SBF Attack: half, or the fraud collapses and a tenth walks out).
         const u = rnd(n * 3.77 + 12.9), fraud = u < 0.5;
         const took = fraud ? 0 : Math.ceil(AR.hp * w.take);
         const lc = fraud ? Math.ceil(AR.purse.c * w.backfire) : 0, lw = fraud ? Math.ceil(AR.purse.w * w.backfire) : 0;
@@ -4501,11 +4997,11 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
       ctx.font = '9px Silkscreen, monospace'; ctx.textAlign = 'center';
       const say = (p2, text, col) => { ctx.fillStyle = '#000'; ctx.fillText(text, p2[0] + 1, p2[1] + 1); ctx.fillStyle = col; ctx.fillText(text, p2[0], p2[1]); };
       if (cur.fraud) {
-        // the fraud collapses on the thrower: nothing is taken, and their own store walks out
+        // it backfires on the thrower: nothing is taken, and their own store walks out. The words are the row's
         const meP = arP(au + 0.1, 0, base + 46 / SCALE);
-        say([tgt[0], tgt[1] + 30 + age * 8], 'THE FRAUD COLLAPSES', SIGNAL);
+        say([tgt[0], tgt[1] + 30 + age * 8], w.bad, SIGNAL);
         say([meP[0], meP[1] - age * 18], '-' + cur.lc + ' CRYSTALS  -' + cur.lw + ' WOOD', '#fff');
-      } else say([tgt[0], tgt[1] + 30 + age * 8], '-' + cur.took + ' STRENGTH  ·  HALF OF WHAT WAS LEFT', SIGNAL);
+      } else say([tgt[0], tgt[1] + 30 + age * 8], '-' + cur.took + ' ' + w.took, SIGNAL);
       ctx.textAlign = 'left';
     } else if (cur && ph >= T.I && ph < T.I + 0.35) {
       const age = (ph - T.I) / 0.35;
@@ -4526,7 +5022,7 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
     const over = project(SX, SY + uT + 0.1, (AR.target === 'wall' ? 44 : 50) / SCALE);
     arBar(over, AR.hp / arMax(), down ? 'DESTROYED' : 'HP ' + Math.max(0, Math.round(AR.hp)) + ' / ' + arMax());
     if (last && (last.n === n || last.n === n - 1)) arTag([over[0], over[1] - 20],
-      w.meme ? 'COIN ' + last.roll + ' · ' + (last.fraud ? 'FRAUD' : 'TOOK HALF')
+      w.meme ? 'COIN ' + last.roll + ' · ' + w.tags[last.fraud ? 1 : 0]
              : Math.round(arOdds() * 100) + '% · ROLLED ' + last.roll + ' · ' + (last.hit ? 'HIT' : 'MISS'),
       last.hit ? SIGNAL : '#fff');
     ctx.restore();
@@ -4686,54 +5182,425 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
     openArmoury();
   }
 
-  // every number the economy page shows is read from here, so the page can never drift from the game
-  const ECON = {
-    crystalUnit: CRYSTAL_UNIT, startPurse: START_PURSE, startWood: 0,
+  // ---------- ENERGY (M10 item 4): the generator makes it, buildings draw it, the capacitor stores it ----------
+  // Everything the loop reads is a column of the registry (values.js): `supply` on a row that makes power,
+  // `energy` on every row for what it draws while running, and on a store `capacity` (P·h held), `release`
+  // (P let out at most) and `leak` (% a day). Nothing here types a number. Today every draw and every supply
+  // in values.js is 0 - the economist's figures are PROPOSED (question 21, rows 29 to 32) and a proposal is
+  // not written as a value - so no building starves until the deployer decides, and the loop is proved by a
+  // check that raises a draw above the supply at run time. Per base, each tick on the game's clock: supply
+  // is the sum of its standing generators' output, demand the sum of its standing buildings' draws, and
+  // `ratio` how much of the demand is met. Every drawing building gets `b.charge` = that share and
+  // `b.stalled` when it is short - "a building that cannot draw enough stops" - and drawPower reads `charge`
+  // (M10 item 5). A store's `charge` is its fill, `b.stored / capacity`; its leak is DECIDED and ticks here
+  // (a share of what it holds, per day, applied each tick). What FILLS a store is M10 item 6's, because the
+  // charge ladder's rungs are not yet matched to generator levels (Energy, "Two ladders"), and what it
+  // RELEASES waits on the same row. A level still raising is not running: it draws and makes nothing.
+  const ENERGY = new Map();                            // base id -> { supply, demand, ratio, stalled }
+  const standingLevel = (b) => (b.build ? (b.tier || 1) - 1 : (b.tier || 1));
+  const colAt = (b, col) => { const r = KIND[b.type], L = standingLevel(b); return r && r[col] && L > 0 ? (r[col][L - 1] || 0) : 0; };
+  const isStore = (b) => !!(KIND[b.type] && KIND[b.type].release);
+  let energyAt = null;
+  function energyTick(t) {
+    const dt = energyAt == null ? 0 : Math.max(0, t - energyAt); energyAt = t;
+    BASES.forEach((id) => {
+      const mine = buildings.filter(ofBase(id));
+      const supply = mine.reduce((n, b) => n + colAt(b, 'supply'), 0);
+      const demand = mine.reduce((n, b) => n + colAt(b, 'energy'), 0);
+      const ratio = demand > 0 ? Math.min(1, supply / demand) : 1;
+      const stalled = [];
+      mine.forEach((b) => {
+        if (isStore(b)) {
+          const cap = colAt(b, 'capacity'), leak = colAt(b, 'leak');
+          b.stored = Math.max(0, (b.stored || 0) * (1 - leak / 100 * dt / 86400e3));
+          b.charge = cap > 0 ? Math.min(1, b.stored / cap) : 0; b.stalled = false; return;
+        }
+        const draw = colAt(b, 'energy');
+        b.charge = draw > 0 ? ratio : 1;
+        b.stalled = draw > 0 && ratio < 1;
+        if (b.stalled) stalled.push(b);
+      });
+      ENERGY.set(id, { supply, demand, ratio, stalled });
+    });
+  }
+  const energyOf = (id = HOME) => ENERGY.get(id) || { supply: 0, demand: 0, ratio: 1, stalled: [] };
+
+  // every number the economy page shows is read from here, so the page can never drift from the game.
+  // M3 ITEM 1: ECON DEFINES NOTHING ANY MORE. It is a VIEW: values.js's table spread in first, so a key
+  // added there reaches every reader without a line here, and then only what this page alone knows -
+  // the map it is drawing (home: map), the clock derived from the game's length, the names the page
+  // gives the registry's columns (siloCap, cellReach, woodCost), and what the base started as.
+  const ECON = Object.assign({}, V, {
     gameLength: GAME_LENGTH_MS, gameYear: GAME_YEAR_MS, yearOf: GAME_YEAR_OF, unlocks: UNLOCKS,   // ms; the year is derived from the length, never typed
-    seams: SEAM_PLAN.map(n => ({ x: n.x, y: n.y, wild: !!n.wild })), seamIntent: SEAM_INTENT, seamsOn: SEAMS, growMs: GROW_MS, handYield: 1,
-    harvCost: HARV_COST, siloCap: SILO_CAP, siloCaps: true,             // siloCaps: the cap is enforced by bank(), not only drawn
-    groves: GROVES.length, treesPerGrove: 3, treeWood: TREE_WOOD, chopMs: CHOP_MS, regrowMs: REGROW_MS,
-    woodCost: WOOD_COST, kinds: Object.fromEntries(Object.entries(KIND).map(([k, v]) => [k, { tiers: v.tiers, cost: v.cost }])),
+    wallCap: WALL_CAP, dummyHp: DUMMY_HP,   // the wall's level-1 crew and the dummy: this page's, not the chain's. towerDef and wallSlot are GONE (M8 item 9)
+    energy: energyOf,                       // the energy loop as a base sees it (M10 item 4): supply, demand, and who is stalled
+    seams: SEAM_PLAN.map(n => ({ x: n.x, y: n.y, wild: !!n.wild })), seamIntent: SEAM_INTENT, seamsOn: SEAMS,
+    siloCap: SILO_CAP, siloCaps: true,             // siloCaps: the cap is enforced by bank(), not only drawn
+    groves: GROVES.length, treesPerGrove: GROVE_TREES.length,   // the map's, read off the plan, never typed
+    woodCost: WOOD_COST, kinds: KIND,
     tiles: PLAN.join('').split('').filter(c => c === '#').length, plan: PLAN, world: { w: WORLD.x * 2 + 1, h: WORLD.y * 2 + 1 },
     hill: HILL, waterSites: WATER_SITES, cellReach: CELL_REACH, cellNeeds: CELL_NEEDS,
     // `rank` is read by two cells in economy.html, which is not this file's to edit. It now feeds the
     // generation, because the generation is what is real. One of those two cells reads redundantly
     // ("Gen 3 · gen 3") until the economist drops it; neither is broken and neither invents a title.
     rank: Object.fromEntries(GENS.map((g) => [g, 'Gen ' + g])),
-    towerDef: DEF, wallSlot: WALL_SLOT, wallCap: WALL_CAP,
-    hp: HP_OF, wallHp: WALL_HP, dummyHp: DUMMY_HP, weapons: WEAPONS, buildMs: 2800,
-    combat: COMBAT,
     startBuildings: (HERO ? HERO_PLAN : buildings).map(b => ({ type: b.type, tier: b.tier || 1, harvesters: b.harvesters || 0 })),
-  };
+  });
   // a handle on the estate, so the click paths can be driven by a check instead of by eye
-  // the base as a fight sees it: every tile, every finished wall section and watchtower, and every Friend on
-  // the estate on its spot. Posted Friends stand at their post: up a tower, or along the top of a wall. The
-  // Genesis never fights. All in spots (see SPOTS above).
-  function defense(id = HOME) {
-    const done = (b) => !b.build && ofBase(id)(b);
-    // A wall covers the two spots along the edge it stands on. dir 'x' stands on the tile's back
-    // (north) edge, so it covers that tile's two back spots, (2tx, 2ty) and (2tx+1, 2ty). dir 'y'
-    // stands on the west edge, so it covers (2tx, 2ty) and (2tx, 2ty+1) instead - `vert` says
-    // which, and combat.js and RareCombat.sol read it the same way.
-    const walls = buildings.filter(b => b.type === 'wall' && done(b)).map(b => { const tx = Math.floor(b.x), ty = Math.floor(b.y);
-      return { x: tx * 2, y: ty * 2, vert: b.dir === 'y', tile: [tx, ty] }; });
-    const towers = buildings.filter(b => b.type === 'tower' && done(b)).map(b => ({ x: spotOf(b.x, b.y)[0], y: spotOf(b.x, b.y)[1], occupant: b.occupant }));
-    const post = (a) => {
-      const tw = towers.find(t => t.occupant === a); if (tw) return { x: tw.x, y: tw.y, tower: true, post: 'watchtower' };
-      const w = buildings.find(b => b.type === 'wall' && done(b) && (b.crew || []).includes(a));
-      if (w) { const i = w.crew.indexOf(a), tx = Math.floor(w.x), ty = Math.floor(w.y);
-        // the crew stand side by side along the wall, so they spread along its own axis
-        return w.dir === 'y' ? { x: tx * 2, y: ty * 2 + (i % 2), tower: false, post: 'wall' }
-                             : { x: tx * 2 + (i % 2), y: ty * 2, tower: false, post: 'wall' }; }
-      const [x, y] = spotOf(a.tx, a.ty); return { x, y, tower: false, post: '' };
-    };
-    const keep = buildings.find(b => b.type === 'keep' && done(b)), back = keep ? spotOf(keep.x, keep.y) : null;
-    const defenders = actors.filter(a => a.kind === 'friend' && !a.art && ofBase(id)(a)).map(a => { const p = post(a);
-      return Object.assign({ gen: a.gen, name: a.name, rented: !!a.rented, order: ORDERS.indexOf(a.order || 'hold'),
-        fx: back ? back[0] : p.x, fy: back ? back[1] : p.y }, p); });
-    return { base: id, tiles: baseTiles(id).map(t => [Math.floor(t.x), Math.floor(t.y)]), walls: walls.map(({ x, y, vert, tile }) => ({ x, y, vert, tile })),
-      towers: towers.map(({ x, y, occupant }) => ({ x, y, manned: !!occupant })), defenders };
+  // ---------- THE RECORD (M6, "State that survives"; decision 9; rulings 3 and 16) ----------
+  // What this page holds in memory - the purse, the buildings, the Friends and where they stand, are posted
+  // and are ordered - is the base AS IT IS PLAYED, and schema.json says its home is the server. record.js
+  // gives it a shape (the LEDGER), a head (keccak over it), and the one rule that takes a session's write.
+  // This page: assigns every building and every Friend the id the record knows it by; NOTES each change
+  // as a move into the open session (which replays it at once, so a move the rules refuse is known the
+  // moment it is made and logged as an error - every pagewatch-attached check counts that); RESTORES the
+  // base from the store on open; and WRITES the session as one batch when the page is hidden or closed.
+  // On a single estate the store is the browser's, a stand-in for the server's record; two tabs of one
+  // browser share it, which is two clients sharing one record, and the second to write is refused. On an
+  // island opened with ?seat= the store is OUR SERVER's (serve.py /api/record, M7) - see THE SHARED GAME.
+  // Switched off where the page is not the game: the hero reel, the reel, the studio, the recorder, an
+  // island with no seat, ?fresh=1 (a probe wants bare land) and ?record=0.
+  // ?fresh is read off SWITCH (M4's frozen table: on only when it is exactly 1), never by whether the name is
+  // present - `!Q.get('fresh')` turned saving off for ?fresh=0, which razes nothing and is the game.
+  // TWO PLAYERS IN ONE GAME (M7). An island opened with a seat is a shared game: its records live on OUR
+  // SERVER (M3 item 5 - the live game runs on our server, the chain holds the record; ruling 3 - the server's
+  // record stands), in serve.py's /api/record, which takes a write by running record.js's own apply(). This
+  // client writes its own base's record and reads the other base's; an island without a seat is still the
+  // unsaved demo it was.
+  const SHARED = SEAT != null;
+  const PERSIST = !HERO && !REELING && !STUDIO_URL && !RECORD && (!WORLDGEN || SHARED) && !SWITCH.fresh && Q.get('record') !== '0';
+  const STORE = SHARED ? Record.serverStore('rarefriends', 'api/record') : Record.browserStore('rarefriends');
+  let NEXT_ID = 1, NEXT_RID = 0, RESTORING = false, LAST_WRITE = null;
+  // the shared game's state: the other bases' records as last read (the record stands for them, ruling 3),
+  // the write in flight, the last time this client lost to the record, and whether the server answered at all
+  const OTHERS = new Map();
+  let INFLIGHT = null, LAST_RESYNC = null, SERVER_DOWN = null, POLLS = 0;
+  const SAME_CLOSE_MS = 2000;                         // `hidden` and `pagehide` of one close land within this; a client belief about a browser, not a game number
+  const FRIENDS = () => actors.filter(a => a.kind === 'friend');   // the roster, in the order they arrived
+  buildings.forEach(b => { if (b.id == null) b.id = NEXT_ID++; });
+  FRIENDS().forEach(a => { if (a.rid == null) a.rid = NEXT_RID++; });
+  // a Friend's post as the page holds it, in the record's shape
+  function postOf(a) {
+    for (const b of buildings) {
+      if (b.occupant === a) return { kind: 'tower', building: b.id, slot: 0 };
+      if (b.crew) { const i = b.crew.indexOf(a); if (i >= 0) return { kind: 'wall', building: b.id, slot: i }; }
+    }
+    return null;
   }
+  // THE PAGE'S VIEW, PROJECTED INTO THE RECORD'S SHAPE. What the record must equal after every move: the
+  // parity assertion (base.record.parity()) hashes this against the session's ledger, and a change the page
+  // makes that no move carries is exactly what makes the two differ.
+  function viewLedger(id = HOME) {
+    const L = Record.fresh(id, null);
+    L.base = Object.assign({}, purse(id)); L.nextId = NEXT_ID;
+    buildings.filter(ofBase(id)).forEach(b => L.buildings.push(Record.buildingRow(b.id, b.type, b.tier || 1, b.x, b.y, b.dir === 'y', b.raisedAt, b.harvesters, b.hands)));
+    L.buildings.sort((p, q) => p.id - q.id);
+    FRIENDS().filter(ofBase(id)).forEach(a => { const [x, y] = spotOf(a.tx, a.ty);
+      L.roster.push(Record.rosterRow(a.rid, { gen: a.gen, name: a.name, rented: a.rented, token: a.token, offer: a.offer, hired: a.hired,
+        x, y, order: ORDERS.indexOf(a.order || 'hold'), post: postOf(a) })); });
+    L.roster.sort((p, q) => p.id - q.id);
+    return L;
+  }
+  // THE SCENE: what is restored for continuity and nothing replays - the clock, where each body is mid-walk,
+  // the trees' wood, the seams' growth, the year's countdown. Saved beside the ledger, never hashed.
+  function sceneOf() {
+    return { clock: now(), actors: actors.map(a => ({ x: a.x, y: a.y, tx: a.tx, ty: a.ty })),
+      trees: trees.map(tr => ({ wood: tr.wood, felled: tr.felled, chop: tr.chop })), seams: nodes.map(n => ({ t0: n.t0, cut: n.cut })),
+      year: YEAR_CLOCK.has(HOME) ? Object.assign({}, YEAR_CLOCK.get(HOME)) : null };
+  }
+  // NOTING A MOVE. Only the home base has a session; a move for another base, or made while restoring, is
+  // not a move. The session replays it at once; a refusal is an error on the console, because the page just
+  // did something the record will not take and the write at the end will not carry it.
+  function noteMove(baseId, kind, body, at) {
+    if (!SESSION || RESTORING || (baseId == null ? HOME : baseId) !== HOME) return null;
+    const m = SESSION.note(kind, body, at == null ? now() : at);
+    if (!m) { const r = SESSION.refused[SESSION.refused.length - 1]; console.error('the record refused a move the page made: ' + kind + ' ' + JSON.stringify(body) + ' - ' + r.why); return null; }
+    if (PERSIST) STORE.draft(HOME, { parent: SESSION.parent, moves: SESSION.moves, at: SESSION.at, seen: SESSION.ledger.lastSeen, after: SESSION.head() });
+    return m;
+  }
+  function noteRaise(b) {
+    if (!SESSION || RESTORING || (b.base == null ? HOME : b.base) !== HOME) return;
+    if (b.id == null) { b.id = NEXT_ID++; noteMove(HOME, 'build', { b: b.id, of: b.type, x: b.x, y: b.y, vert: b.dir === 'y' }, b.raisedAt); }
+    else noteMove(HOME, 'raise', { b: b.id, level: b.tier || 1 }, b.raisedAt);
+  }
+  function noteHarvester(f) { if (SESSION && !RESTORING && f.id != null) noteMove(f.base, 'harvester', { b: f.id }); }
+  function noteHire(a) {
+    if (!SESSION || RESTORING) return;
+    a.rid = NEXT_RID++; const [x, y] = spotOf(a.tx, a.ty);
+    noteMove(HOME, 'hire', { r: a.rid, gen: a.gen, name: a.name, token: a.token == null ? null : a.token, offer: a.offer, hired: a.hired, x, y });
+  }
+  function noteRelease(a) { if (SESSION && !RESTORING && a.rid != null) noteMove(HOME, 'release', { r: a.rid }); }
+  // Where Friends stand, are posted and are ordered is set inside tap() and the order buttons, and every one
+  // of those paths ends in sync() - so it is read off the page there, against the record, and the difference
+  // is the moves. Posts: anyone whose post changed steps down first, then everyone takes their place, so a
+  // crew that shuffled along its wall never asks for a slot somebody has not left yet.
+  function recordSync() {
+    if (!SESSION || RESTORING) return;
+    const t = now(), rows = new Map(SESSION.ledger.roster.map(r => [r.id, r]));
+    const friends = FRIENDS().filter(ofBase(HOME)).filter(a => a.rid != null && rows.has(a.rid));
+    friends.forEach(a => { const r = rows.get(a.rid), [x, y] = spotOf(a.tx, a.ty);
+      if (r.x !== x || r.y !== y) noteMove(HOME, 'walk', { r: r.id, x, y }, t);
+      const o = ORDERS.indexOf(a.order || 'hold'); if (r.order !== o) noteMove(HOME, 'order', { r: r.id, order: o }, t); });
+    const changed = friends.filter(a => JSON.stringify(postOf(a)) !== JSON.stringify(rows.get(a.rid).post));
+    changed.forEach(a => { if (rows.get(a.rid).post) noteMove(HOME, 'unpost', { r: a.rid }, t); });
+    changed.forEach(a => { const p = postOf(a); if (p) noteMove(HOME, 'post', { r: a.rid, b: p.building, slot: p.slot }, t); });
+  }
+  // A base's buildings and harvesters leave the page together. On a single estate every building is the home
+  // base's and this is razeAll; on a shared island it leaves the other base standing.
+  function razeBase(id) {
+    buildings.filter(ofBase(id)).forEach(b => { TILES.vacate(b); buildings.splice(buildings.indexOf(b), 1); });
+    for (let i = drones.length - 1; i >= 0; i--) if (ofBase(id)(drones[i].f)) drones.splice(i, 1);
+  }
+  // A ledger row as the page's building. `shift` moves a recorded time onto this page's clock: 0 for the
+  // home base (its record's clock is this page's, restored with the scene), and for another player's base
+  // the difference between the two clocks - each client's world runs on its own clock (see OTHER BASES).
+  function rowOf(b, id, shift) {
+    const row = { type: b.kind, x: b.x, y: b.y, tier: b.level, base: id, id: b.id };
+    if (b.startedAt != null) { row.raisedAt = b.startedAt + shift; if (!Record.finished(b, simT - shift)) row.build = { t0: b.startedAt + shift }; }
+    if (b.hands) row.hands = b.hands.map(([at, n]) => [at + shift, n]);   // M8 item 3: who was working it, so the build resumes at the pace it had - its times on this page's clock, like startedAt
+    if (b.kind === 'wall') { row.dir = b.vert ? 'y' : 'x'; row.crew = []; }
+    if (b.kind === 'tower') row.occupant = null;
+    if (b.kind === 'collectionDepot') row.harvesters = b.harvesters;
+    return row;
+  }
+  // RESTORING: the page's view is rebuilt from the record. Buildings are razed and placed again from the
+  // ledger (ids kept; an unfinished one resumes its build from startedAt), harvesters respawned, the ground
+  // re-derived from the cells, the Friends the page already made put where the record says and hired ones
+  // hired again; then the scene. The clock resumes where it stopped, because progress is derived from it.
+  function restoreRecord(rec) {
+    RESTORING = true;
+    try {
+      const L = rec.ledger, S = rec.scene || {};
+      simT = S.clock || 0;
+      Object.assign(purse(HOME), { crystals: L.base.crystals, wood: L.base.wood });
+      razeBase(HOME);                                 // the home base's alone: on a shared island the other base is its own record's
+      L.buildings.forEach(b => place(rowOf(b, HOME, 0)));
+      NEXT_ID = Math.max(NEXT_ID, L.nextId);
+      buildings.filter(b => b.type === 'collectionDepot' && ofBase(HOME)(b)).forEach(f => { for (let i = 0; i < (f.harvesters || 0); i++) spawnHarvester(f); });
+      reclaim(simT);
+      if (S.actors) S.actors.forEach((p, i) => { if (actors[i] && p && ofBase(HOME)(actors[i])) Object.assign(actors[i], p); });
+      const byRid = new Map(FRIENDS().map(a => [a.rid, a]));
+      L.roster.forEach(r => {
+        let a = byRid.get(r.id);
+        if (!a && r.offer != null) { a = hire({ id: r.offer, gen: r.gen, hired: r.hired || '' }); if (a) { a.rid = r.id; byRid.set(r.id, a); } }
+        if (!a) { console.warn('the record names a Friend this page has no body for: roster row ' + r.id); return; }
+        const [cx, cy] = spotCentre(r.x, r.y); a.tx = cx; a.ty = cy;
+        if (!(S.actors && S.actors[actors.indexOf(a)])) { a.x = cx; a.y = cy; }
+        a.order = ORDERS[r.order];
+        if (r.post) { const b = buildings.find(o => o.id === r.post.building);
+          if (b) { if (r.post.kind === 'tower') b.occupant = a; else b.crew[r.post.slot] = a; } }
+      });
+      buildings.forEach(b => { if (b.crew) b.crew = b.crew.filter(Boolean); });
+      // The record's token is the Friend's. The page claimed tokens in its own order as it made bodies, and
+      // a hired Friend claimed a fresh one just now - so every restored body hands its token back to the
+      // pool (claimedTokens, the sprites' ledger of who holds what) and takes the recorded one, and the
+      // sprite set follows the token. No two bodies share a token afterwards, because the record's roster
+      // never did; a row with no token keeps the body it has.
+      const restored = L.roster.map(r => [r, byRid.get(r.id)]).filter(([, a]) => a);
+      restored.forEach(([, a]) => { if (a.token != null) claimedTokens.delete(a.token); });
+      restored.forEach(([r, a]) => {
+        if (r.token == null) { if (a.token != null) claimedTokens.add(a.token); return; }
+        a.token = r.token; claimedTokens.add(r.token);
+        // the set behind the token: a chain-read Friend (LIVE, M11) or the cached roster, by token either way
+        const set = LIVE.find(s => s.token === r.token) || ROSTER.find(s => s.token === r.token); if (set) a.set = set;
+      });
+      NEXT_RID = Math.max(NEXT_RID, ...L.roster.map(r => r.id + 1));
+      if (S.trees) S.trees.forEach((p, i) => { if (trees[i] && p) Object.assign(trees[i], p); });
+      if (S.seams) S.seams.forEach((p, i) => { if (nodes[i] && p) Object.assign(nodes[i], p); });
+      if (S.year) YEAR_CLOCK.set(HOME, Object.assign({}, S.year));
+    } finally { RESTORING = false; }
+  }
+  // OPENING. A record in the store is restored - after a draft left by a session that was abandoned halfway
+  // is offered to it, which takes only if the record has not moved on. No record means this is the base's
+  // first open: the page's own start is its genesis, written once, and the session starts from there.
+  function openRecord() {
+    // SAVING OFF MEANS NO SESSION. A page that is not the game (the hero reel, ?fresh=1, ...) opens none: with
+    // one open, the reel's free start-kit builds were noted as moves, refused ("cannot pay 3000 wood: holds 0")
+    // and logged as errors on every open of hero.html and start.html. With none, noteMove notes nothing and
+    // the fight reads the page's own view (ledgerOf).
+    if (!PERSIST) { sync(); return; }
+    if (SHARED) { sync(); openShared(); return; }
+    let rec = STORE.load(HOME);
+    if (rec) {
+      const d = STORE.loadDraft(HOME);
+      if (d && d.moves && d.moves.length) {
+        const r = STORE.commit({ id: Record.hashOf({ parent: d.parent, moves: d.moves, at: d.at, seen: d.seen }), base: HOME, parent: d.parent, moves: d.moves, at: d.at, seen: d.seen, after: d.after, scene: rec.scene });
+        if (r.ok) { rec = r.record; console.log('record: a session abandoned halfway was written (' + d.moves.length + ' moves)'); }
+        else { console.warn('record: a session abandoned halfway was dropped - ' + r.reason + ' (the record had moved on)'); LAST_WRITE = Object.assign({ why: 'draft', moves: d.moves.length }, r); }
+      }
+      STORE.clearDraft(HOME);
+      restoreRecord(rec);
+      SESSION = Record.session(rec.ledger, rec.head);
+    } else {
+      const L = viewLedger(HOME);
+      const seen = Date.now(), g = Record.genesis(L, sceneOf(), seen);
+      { const r = STORE.commit(g); if (!r.ok) console.warn('record: the genesis write was refused - ' + r.reason); else LAST_WRITE = { why: 'genesis', seen, moves: 0, ok: true, head: r.record.head, writes: r.record.writes }; }
+      SESSION = Record.session(g.ledger, g.after);
+    }
+    sync();
+  }
+  // THE WRITE: one batch at the session's end - the head it was built on, the moves, the head they replay
+  // to, the scene. A refusal is the design working (decision 9): this client's belief lost to the record,
+  // the moves are not written, and the console and the note bar say so. On a page that is only hidden the
+  // session continues from the new head, so what is played after is a session of its own.
+  function saveRecord(why) {
+    if (!SESSION || !PERSIST) return null;
+    if (SHARED) return saveShared(why);
+    recordSync();
+    // A session with no moves STILL writes - when the player was last on the map, and nothing else (the
+    // deployer, 2026-09-30: "time of last on map should be saved"; no idle-time move is invented). The one
+    // exception is the same close seen twice: a page that closes fires `hidden` and then `pagehide`, and a
+    // batch with no moves seconds after a write that took is that same close, not another session - decision
+    // 9 says ONE write, and the last-seen time it would carry is the one just written.
+    const seen = Date.now();
+    if (SESSION.moves.length === 0 && LAST_WRITE && LAST_WRITE.ok && seen - LAST_WRITE.seen < SAME_CLOSE_MS) return LAST_WRITE;
+    const batch = SESSION.batch(now(), sceneOf(), seen), r = STORE.commit(batch);
+    LAST_WRITE = Object.assign({ why, at: batch.at, seen, moves: batch.moves.length, id: batch.id, parent: batch.parent }, r.ok ? { ok: true, head: r.record.head, writes: r.record.writes } : r);
+    if (r.ok) { SESSION.advance(r.record.head); STORE.clearDraft(HOME); }
+    else { console.warn('the record refused this session\'s write: ' + r.reason + ' - ' + JSON.stringify(r)); flashNote('this session was not written: the record had moved on (' + r.reason + ')'); }
+    return LAST_WRITE;
+  }
+  // ---------- THE SHARED GAME (M7): this client's base on our server, the other base read off it ----------
+  // OPENING is the same as above, answered later: the server's record is restored, or this base's genesis is
+  // written. A client that opens while the server holds no records at all (a plain static server) says so
+  // once and plays unsaved, rather than throwing.
+  async function openShared() {
+    let rec;
+    try { rec = await STORE.load(HOME); }
+    catch (e) { SERVER_DOWN = String(e.message || e); console.warn('record: our server holds no records here (' + SERVER_DOWN + ') - this session is not saved'); return; }
+    if (rec) {
+      const d = STORE.loadDraft(HOME);
+      if (d && d.moves && d.moves.length) {
+        const r = await STORE.commit({ id: Record.hashOf({ parent: d.parent, moves: d.moves, at: d.at, seen: d.seen }), base: HOME, parent: d.parent, moves: d.moves, at: d.at, seen: d.seen, after: d.after, scene: rec.scene });
+        if (r.ok) { rec = r.record; console.log('record: a session abandoned halfway was written (' + d.moves.length + ' moves)'); }
+        else { console.warn('record: a session abandoned halfway was dropped - ' + r.reason + ' (the record had moved on)'); LAST_WRITE = Object.assign({ why: 'draft', moves: d.moves.length }, r); }
+      }
+      STORE.clearDraft(HOME);
+      restoreRecord(rec);
+      SESSION = Record.session(rec.ledger, rec.head);
+    } else {
+      const seen = Date.now(), g = Record.genesis(viewLedger(HOME), sceneOf(), seen), r = await STORE.commit(g);
+      if (r.ok) { LAST_WRITE = { why: 'genesis', seen, moves: 0, ok: true, head: r.record.head, writes: r.record.writes }; SESSION = Record.session(g.ledger, g.after); }
+      else {                                          // another client of this seat wrote the genesis first: its record stands
+        const won = await STORE.load(HOME).catch(() => null);
+        if (!won) { console.warn('record: the genesis write was refused - ' + r.reason); SESSION = Record.session(g.ledger, g.after); }
+        else { restoreRecord(won); SESSION = Record.session(won.ledger, won.head); }
+      }
+    }
+    sync();
+    pollShared();
+    setInterval(pollShared, STORE.pollMs);
+  }
+  // THE WRITE, SHARED. The server is the live game (M3 item 5), so a session's moves go to it every poll
+  // rather than once at the close - that is what lets the other player see them within one poll - and the
+  // chain still gets one write for many of these (the hourly sync, rulings 16 and 18). The write is answered
+  // later; a move noted while it is in flight stays pending for the next one (session.advance's `written`).
+  function saveShared(why) {
+    if (INFLIGHT) return INFLIGHT;
+    if (SERVER_DOWN) return Promise.resolve(null);
+    recordSync();
+    const seen = Date.now();
+    if (SESSION.moves.length === 0 && LAST_WRITE && LAST_WRITE.ok && seen - LAST_WRITE.seen < SAME_CLOSE_MS) return Promise.resolve(LAST_WRITE);
+    const batch = SESSION.batch(now(), sceneOf(), seen), n = batch.moves.length;
+    INFLIGHT = STORE.commit(batch, { keepalive: why === 'pagehide' || why === 'hidden' }).then(async (r) => {
+      LAST_WRITE = Object.assign({ why, at: batch.at, seen, moves: n, id: batch.id, parent: batch.parent }, r.ok ? { ok: true, head: r.record.head, writes: r.record.writes } : r);
+      if (r.ok) {
+        SESSION.advance(r.record.head, n);
+        if (SESSION.moves.length) STORE.draft(HOME, { parent: SESSION.parent, moves: SESSION.moves, at: SESSION.at, seen: SESSION.ledger.lastSeen, after: SESSION.head() });
+        else STORE.clearDraft(HOME);
+      } else if (r.reason === 'StaleParent' || r.reason === 'Replayed') await lostTo(r.reason);
+      else console.warn('the record refused this session\'s write: ' + r.reason + ' - ' + JSON.stringify(r));
+      return LAST_WRITE;
+    }).finally(() => { INFLIGHT = null; });
+    return INFLIGHT;
+  }
+  // WHICH BELIEF LOSES (M7 item 5, decision 9's other half). The server's record stands (ruling 3). A client
+  // whose base's record moved under it - the same seat open on a second machine, which is the only other
+  // writer a base has - is told so, on the console and in the note bar, and is put back on the record: what
+  // it had WRITTEN is all there, and only its moves since its last write (at most one poll of them) are
+  // dropped. Nothing another player holds is ever written by this client, so two seats cannot lose each
+  // other's buildings: each base has one record and each record one writer.
+  async function lostTo(reason) {
+    const rec = await STORE.load(HOME).catch(() => null);
+    if (!rec) return;
+    const lost = SESSION ? SESSION.moves.length : 0;
+    restoreRecord(rec); SESSION = Record.session(rec.ledger, rec.head); STORE.clearDraft(HOME);
+    LAST_RESYNC = { reason, lost, head: rec.head, writes: rec.writes };
+    console.warn('record: another client wrote this base first (' + reason + ') - the record stands, and ' + lost + ' unwritten move(s) here were dropped');
+    flashNote('another client wrote this base first: the record stands (' + lost + ' unwritten move' + (lost === 1 ? '' : 's') + ' dropped)');
+    sync();
+  }
+  // THE POLL: write what is pending, then ask the server for every record's head and read only what moved.
+  // POLL_MS (record.js, read off the store) is M7 item 3's time: one player's move reaches the other's
+  // screen within two polls of being made - one for it to be written, one for it to be read.
+  let POLLING = false;
+  async function pollShared() {
+    if (POLLING || SERVER_DOWN) return; POLLING = true;
+    try {
+      if (SESSION && SESSION.moves.length) await saveShared('poll');
+      // the head this client stood on when it asked: a write of its own that lands between the ask and the
+      // answer moves SESSION.parent and is not somebody else's write
+      const asked = SESSION ? SESSION.parent : null, heads = await STORE.heads();
+      for (const h of heads) {
+        if (!BASES.includes(h.id)) continue;
+        if (h.id === HOME) { if (SESSION && !INFLIGHT && SESSION.parent === asked && h.head !== asked) await lostTo('StaleParent'); continue; }
+        if (OTHERS.has(h.id) && OTHERS.get(h.id).head === h.head) continue;
+        const rec = await STORE.load(h.id);
+        if (rec) { OTHERS.set(h.id, rec); showOther(rec); }
+      }
+      POLLS++;
+    } catch (e) { console.warn('record: the poll could not reach our server - ' + (e.message || e)); }
+    finally { POLLING = false; }
+  }
+  // OTHER BASES: another player's base drawn from its record - its buildings, its harvesters, its purse, and
+  // its Friends walked to where the record says they stand and put on their posts. Each client's world runs
+  // on its own clock, so a recorded build time is moved onto this page's clock by the record's own (`at`,
+  // the clock its last write was made at); a build the other player has finished is finished here.
+  function showOther(rec) {
+    const id = rec.base, L = rec.ledger, shift = simT - (rec.at || 0);
+    RESTORING = true;
+    try {
+      razeBase(id);
+      L.buildings.forEach(b => place(rowOf(b, id, shift)));
+      NEXT_ID = Math.max(NEXT_ID, L.nextId);
+      buildings.filter(b => b.type === 'collectionDepot' && ofBase(id)(b)).forEach(f => { for (let i = 0; i < (f.harvesters || 0); i++) spawnHarvester(f); });
+      Object.assign(purse(id), { crystals: L.base.crystals, wood: L.base.wood });
+      const byRid = new Map(FRIENDS().filter(ofBase(id)).map(a => [a.rid, a]));
+      L.roster.forEach(r => {
+        const a = byRid.get(r.id); if (!a) return;
+        const [cx, cy] = spotCentre(r.x, r.y); a.tx = cx; a.ty = cy; a.order = ORDERS[r.order];
+        if (r.post) { const b = buildings.find(o => o.id === r.post.building && ofBase(id)(o));
+          if (b) { if (r.post.kind === 'tower') b.occupant = a; else b.crew[r.post.slot] = a; } }
+      });
+      buildings.forEach(b => { if (b.crew) b.crew = b.crew.filter(Boolean); });
+    } finally { RESTORING = false; }
+  }
+  window.addEventListener('pagehide', () => saveRecord('pagehide'));
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveRecord('hidden'); });
+  openRecord();
+  // THE FIGHT'S VIEW IS READ OFF THE RECORD (schema oneHome, "the base's recorded state": defense() was the
+  // only specification of the base, and it read this page's memory). The home base reads its session's
+  // ledger - the record as the moves have replayed it; any other base on an island reads the page's view in
+  // the record's shape. The ground is the page's (reclaim), the one input not in the ledger. Record.defense
+  // is what defense() used to be: a wall covers the two spots along its own edge, vert or not, and a crew
+  // spreads along the wall's own axis - combat.js and RareCombat.sol read `vert` the same way.
+  // On a shared island another player's base is read off ITS RECORD as our server holds it, not off this
+  // page's drawing of it - the record stands (ruling 3), and what this page simulates of a base it does not
+  // play between polls is a picture, not a claim.
+  const ledgerOf = (id = HOME) => (SESSION && id === HOME ? SESSION.ledger : OTHERS.has(id) ? OTHERS.get(id).ledger : viewLedger(id));
+  const defense = (id = HOME) => { recordSync(); return Record.defense(ledgerOf(id), now(), baseTiles(id)); };
+  const record = { get ledger() { return SESSION ? SESSION.ledger : null; }, get head() { return SESSION ? SESSION.head() : null; },
+    get parent() { return SESSION ? SESSION.parent : null; }, get moves() { return SESSION ? SESSION.moves : []; },
+    get refused() { return SESSION ? SESSION.refused : []; }, get lastWrite() { return LAST_WRITE; }, get persist() { return PERSIST; },
+    get claimed() { return [...claimedTokens]; },     // the sprites' pool of held tokens, so a check can see a restore kept it in step
+    get lastSeen() { return SESSION ? SESSION.ledger.lastSeen : null; },   // when the player was last on the map, as the record holds it
+    // the shared game (M7): which seat, the other bases' records as read, the last loss to the record, and a poll on demand
+    get seat() { return SEAT == null ? null : SEAT; }, get shared() { return SHARED; }, get others() { return Object.fromEntries(OTHERS); },
+    get lastResync() { return LAST_RESYNC; }, get serverDown() { return SERVER_DOWN; }, get polls() { return POLLS; }, poll: () => pollShared(),
+    view: viewLedger, scene: sceneOf, save: saveRecord, store: STORE,
+    // the page's view and the record must hash the same after every move; a difference names what the page changed that no move carries
+    parity() { recordSync(); const v = viewLedger(HOME); if (SESSION) { v.gathered = SESSION.ledger.gathered; v.seq = SESSION.ledger.seq; v.lastSeen = SESSION.ledger.lastSeen; }   // the three the page's view does not hold: counters and the last-seen time are the record's alone
+      return { same: !!SESSION && Record.head(v) === SESSION.head(), view: v, ledger: SESSION ? SESSION.ledger : null }; } };
   // ---------- THE CAPTURE WINDOW (Capture ownership; ruling 19 of 2026-09-30; M14 item 2) ----------
   // A building another player has claimed sits in a five-minute window. While it does, the base is
   // fightable and the intruder - the Friend that took it - is the one enemy inside it. The fight harms the
@@ -4758,7 +5625,7 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
   // checked against it.
   function fightBack(w, ctx, opts) {
     if (!captureOpen(w)) throw new Error('the capture window is closed');
-    const R = Combat.rulesFrom(ECON), D = defense(w.owner);
+    const R = Combat.rulesFrom(V), D = defense(w.owner);   // the chain's table, not the page's view of it
     const r = Combat.captureFight(R, D, w.intruder, ctx, opts);
     w.fought = r;
     if (r.fled) w.aborted = true;
@@ -4787,8 +5654,14 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
     intruder: { gen: 1, name: 'Siege', x: 0, y: -1 } }) };
   const capture = { CAPTURE, begin: beginCapture, fightBack, abort: abortCapture, isOpen: captureOpen, claimOn, onIntruderBeaten, fixtures };
 
-  window.base = { capture, defense, spotOf, trees, levelAt, heightAt, tileKey, onLand, TILES, WALLS, PLAN, WATER_SITES, WORLDGEN, get wood() { return purse().wood; }, purse, BASES, HOME, sendToChop, buildings, actors, nodes, drones, tiles, openPanel, startBuild, project, screenToWorld, CAM, reclaim,
-    route, bank, siloCap, demolish, refundOf, get crystals() { return purse().crystals; }, get fit() { return fitNow; }, get viewX() { return viewX; },
+  window.base = { capture, defense, record, spotOf, trees, levelAt, heightAt, tileKey, onLand, TILES, WALLS, PLAN, WATER_SITES, WORLDGEN, get wood() { return purse().wood; }, purse, BASES, HOME, sendToChop, buildings, actors, nodes, drones, tiles, openPanel, startBuild, project, screenToWorld, CAM, reclaim,
+    route, bank, siloCap, demolish, refundOf,
+    // M11 item 6: the toolkit's walking world as the page built it, and the prop placement API
+    nav: { get mode() { return navWorld().mode; }, get why() { return navWorld().why; }, get counts() { return navWorld().counts; },
+      get builds() { return NAV.builds; }, open: (x, y) => (navWorld(), navOpen(x, y)), toTk, fromTk, get world() { return navWorld().world; } },
+    props: { placed: placedProps, place: placeProp, remove: removeProp, ART: PROP_ART }, get crystals() { return purse().crystals; }, get fit() { return fitNow; }, get viewX() { return viewX; },
+    // M8 items 4 and 11, M10 items 4 and 5: the rules that read the registry, and the bar that reads charge, so a check can prove them by the row
+    lockReason, siteReason, sync, drawPower, energyTick,
     // The game's own clock in milliseconds, read-only, so a check can wait on the world rather than on
     // a stopwatch. `frame()` above advances it by AT MOST 100 ms per animation frame, so a Chrome
     // sharing a laptop with three other Chromes runs this world slower than the wall - and a check that
@@ -4799,6 +5672,7 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
     yearOf,                                   // the year's countdown as a base sees it (M10 item 8)
     get panelFor() { return panelFor; },
     armoury: AR, get armouryOn() { return armouryOn; }, WEAPONS, HP_OF,
+    VALUES: V,                                // the chain's table as this page read it, so a check or the deployer page reads back from where the game reads
     wallAware, zsort, get yaw() { return yaw; }, set yaw(v) { yaw = wantYaw = v; }, get zoom() { return ZOOM; }, get baseZoom() { return BASE_ZOOM; }, ECON,
     // Which frame a heading shows, and the frame itself. Exposed read-only for the same reason
     // simT is: the facing is the one thing about a sprite a screenshot cannot tell you apart from

@@ -8,7 +8,7 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
   const ch=spawn(CHROME,['--headless=new','--enable-unsafe-swiftshader','--hide-scrollbars','--remote-debugging-port='+PORT,
     '--user-data-dir='+prof,'--window-size=1100,800',(process.env.RF_SITE||'http://localhost:8765')+'/economy.html'],{stdio:'ignore'});
   let send, sock;
-  for(let i=0;i<40&&!send;i++){await sleep(250);try{
+  for(let i=0;i<160&&!send;i++){await sleep(250);try{
     const t=(await(await fetch(`http://127.0.0.1:${PORT}/json`)).json()).find(x=>x.type==='page');
     const ws=new WebSocket(t.webSocketDebuggerUrl);await new Promise((ok,no)=>{ws.onopen=ok;ws.onerror=no;});
     let id=0;const m=new Map();ws.onmessage=e=>{const o=JSON.parse(e.data);if(o.id&&m.has(o.id)){m.get(o.id)(o);m.delete(o.id);}};
@@ -43,7 +43,10 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
   const standing = E.groves * E.treesPerGrove * E.treeWood;
   ok('standing wood = groves × trees × wood (' + standing + ')', has(standing + '\n') || has(' ' + standing + ' '), 'missing');
   const l1Wood = Object.values(E.woodCost).reduce((a, b) => a + b, 0), l1Crys = Object.values(E.kinds).reduce((a, k) => a + k.cost[0], 0);
-  ok('level-1 totals match the code (' + l1Wood + ' wood, ' + l1Crys + ' crystals)', /One of each\s+150\s+335/.test(text) && l1Wood === 150 && l1Crys === 335, l1Wood + ' / ' + l1Crys);
+  // 635, not 335: the capacitor is the ninth row of the registry since M8 item 11 and its level 1 is the
+  // economist's PROPOSED 300 (values.js marks it so). The literal stays a literal on purpose - a page and a
+  // game that agree on a wrong total would pass a computed one.
+  ok('level-1 totals match the code (' + l1Wood + ' wood, ' + l1Crys + ' crystals)', /One of each\s+150\s+635/.test(text) && l1Wood === 150 && l1Crys === 635, l1Wood + ' / ' + l1Crys);
   const all = Object.values(E.kinds).reduce((a, k) => a + k.cost.reduce((x, y) => x + y, 0), 0);
   ok('every level of everything = ' + all.toLocaleString('en-US'), has(all.toLocaleString('en-US')), 'missing');
   ok('each generation\'s hit points are listed', [1,2,3,4,5,6].every(g => has(String(E.hp[g]))), JSON.stringify(E.hp));
@@ -63,13 +66,15 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
   const PW = await ev('JSON.stringify(economy.POWER)').then(JSON.parse);
   const rows = await ev('document.querySelectorAll("#power table")[1].querySelectorAll("tbody tr").length');
   const levelsAll = Object.values(E.kinds).reduce((a, k) => a + k.tiers.length, 0);
-  // + 1 harvester + the capacitor's levels. Read the count from the page's own table rather than
-  // hardcoding it: a hardcoded 3 is what let the page keep a three-level capacitor after the
-  // deployer decided four, and pass.
+  // + 1 harvester. The capacitor's levels are IN levelsAll now (it is the registry's ninth row, M8 item
+  // 11) and the page prints them once, from its own POWER table with what each level stores - so the
+  // registry's row and the page's table must agree on four, and that is asserted rather than assumed. A
+  // hardcoded 3 is what let the page keep a three-level capacitor after the deployer decided four, and pass.
   const capLevels = PW.capacitor.tiers.length;
+  ok('the registry\'s capacitor row has the same number of levels as the page\'s table (' + capLevels + ')', E.kinds.capacitor && E.kinds.capacitor.tiers.length === capLevels, JSON.stringify(E.kinds.capacitor && E.kinds.capacitor.tiers));
   ok('the capacitor has the four levels the deployer decided', capLevels === 4 && PW.capacitor.store.length === 4 && PW.capacitor.release.length === 4 && PW.capacitor.cost.length === 4, capLevels + ' tiers / ' + PW.capacitor.store.length + ' store / ' + PW.capacitor.release.length + ' release / ' + PW.capacitor.cost.length + ' cost');
   ok('capacitor IV leaks nothing, and the three below it leak by their own level', JSON.stringify(PW.capacitor.leak) === '[10,5,3,0]' && /none at all/.test(text), JSON.stringify(PW.capacitor.leak));
-  ok('the power table covers every building at every level, plus harvester and capacitor (' + (levelsAll + 1 + capLevels) + ' rows)', rows === levelsAll + 1 + capLevels, rows);
+  ok('the power table covers every building at every level, plus the harvester (' + (levelsAll + 1) + ' rows, the capacitor\'s ' + capLevels + ' among them)', rows === levelsAll + 1, rows);
   const need = E.startBuildings.reduce((a, b) => a + (b.type === 'generator' ? 0 : ((PW.run[b.type] || [])[b.tier - 1] || 0)), 0)
              + E.startBuildings.filter(b => b.type === 'collectionDepot').reduce((a, b) => a + b.harvesters, 0) * PW.harvester;
   ok('the starting estate\'s power is worked out from its real buildings (' + need + ' P)', text.includes('draws ' + need + ' P'), 'missing');

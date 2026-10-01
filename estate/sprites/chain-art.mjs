@@ -12,6 +12,11 @@
 // family / seed / familyName / generation are not touched here.
 // friendSprites is NOT covered: its 16 words match no token in the file and no attribution is recorded.
 //
+// `toolkit` - where the game's live reader (estate/sprites/friend-chain.js) finds a Friend - is held here too:
+// its registry against TOOLKIT.md, its generations against collector.py's GENERATIONS, its chainId against the
+// RPC, and its transferStartBlock against the chain (no Generations Transfer before it, one at it). --write
+// repairs the two addresses from those files; a wrong start block is reported, never guessed.
+//
 //   node estate/sprites/chain-art.mjs --check [file]   exit 1 on any difference, naming the token
 //   node estate/sprites/chain-art.mjs --write [file]   rewrite the cached fields in the file's own format
 //
@@ -35,6 +40,7 @@ const FILE = args.find(a => !a.startsWith('--')) || path.join(ESTATE, 'base-data
 const must = (re, file) => { const m = fs.readFileSync(file, 'utf8').match(re); if (!m) throw new Error(`${re} not found in ${file}`); return m[1]; };
 const REGISTRY = must(/`(0x246E[0-9a-fA-F]{36})`/, path.join(ROOT, 'TOOLKIT.md'));
 const GENESIS = must(/^GENESIS\s*=\s*"(0x[0-9a-fA-F]{40})"/m, path.join(ROOT, 'collector.py'));
+const GENERATIONS = must(/^GENERATIONS\s*=\s*"(0x[0-9a-fA-F]{40})"/m, path.join(ROOT, 'collector.py'));
 const RPCS = process.env.EVM_RPC ? [process.env.EVM_RPC]
   : JSON.parse(must(/const RPC = (\[[^\]]*\])/, path.join(ESTATE, 'chainlive.js')).replace(/'/g, '"'));
 
@@ -86,7 +92,29 @@ for (const g of [D.genesis, ...D.extraGenesis]) {
   else genOk++;
 }
 
+// ---- the toolkit manifest the live reader uses ----
+let toolkitOk = 0;
+{
+  const T = D.toolkit || {};
+  const same = (a, b) => typeof a === 'string' && a.toLowerCase() === b.toLowerCase();
+  if (!same(T.registry, REGISTRY)) { diffs.push(`toolkit.registry: file ${T.registry}, TOOLKIT.md ${REGISTRY}`); if (mode === 'write') T.registry = REGISTRY; } else toolkitOk++;
+  if (!same(T.generations, GENERATIONS)) { diffs.push(`toolkit.generations: file ${T.generations}, collector.py ${GENERATIONS}`); if (mode === 'write') T.generations = GENERATIONS; } else toolkitOk++;
+  const chainId = Number((await provider.getNetwork()).chainId), rpcId = Number(await provider.send('eth_chainId', []));
+  if (T.chainId !== rpcId) diffs.push(`toolkit.chainId: file ${T.chainId}, the RPC says ${rpcId}`); else toolkitOk++;
+  const S = T.transferStartBlock, topic = ethers.id('Transfer(address,address,uint256)');
+  if (!Number.isSafeInteger(S) || S < 1) diffs.push(`toolkit.transferStartBlock: ${S} is not a block`);
+  else {
+    let before = 0;
+    for (let f = 0; f < S; f += 10000000) before += (await provider.getLogs({ address: GENERATIONS, topics: [topic], fromBlock: f, toBlock: Math.min(S - 1, f + 9999999) })).length;
+    const at = (await provider.getLogs({ address: GENERATIONS, topics: [topic], fromBlock: S, toBlock: S })).length;
+    if (before || !at) diffs.push(`toolkit.transferStartBlock ${S}: ${before} Generations Transfer(s) before it, ${at} at it - it must be 0 before and at least 1 at`);
+    else toolkitOk++;
+  }
+  if (chainId !== rpcId) diffs.push(`provider network ${chainId} and eth_chainId ${rpcId} disagree`);
+}
+
 for (const d of drawn) console.log('drawn, skipped:', d);
+console.log(`${toolkitOk} of 4 toolkit fields match (registry, generations, chainId, transferStartBlock)`);
 console.log(`${clipsOk} chain clips match, ${genOk} Genesis px match, ${drawn.length} drawn clips skipped; friendSprites not covered (no token recorded)`);
 for (const d of diffs) console.log('DIFFERS:', d);
 if (mode === 'write') {

@@ -34,8 +34,10 @@
 //   A shot is ready again after the weapon's period; a step, or a wait, after stepMs.
 // A SHOT lands if roll < chance, in basis points:
 //   at a Friend   attacker HP × 10000 ÷ (attacker HP + defender HP)            (full HP, rounded down)
-//                 ÷ coverDiv if the target is in COVER: a standing wall spot right next to it that is
-//                 nearer the shooter than the target is
+//                 ÷ coverDiv if the target is ON A WALL: a defender standing on a spot a standing wall
+//                 section covers - the wall's crew (ruling 45, 2026-10-01). Standing BEHIND a wall is no
+//                 protection at all. A wall keeps its strength and can be broken, and its crew lose the
+//                 cover the moment it falls.
 //   at a wall     landVsBuildingBps (it doesn't dodge)
 // DAMAGE is the weapon's (× vsBuilding at a wall). A crossbow bolt carries on into the next enemy right
 // behind the target (within a spot of it, further from the shooter). A catapult stone that lands on a
@@ -43,8 +45,12 @@
 // quarter (damage >> distance, out to `area`). One that hits a wall stops there.
 // REACH is the weapon's range. Up a watchtower: + towerReach, except melee, which only reaches dropReach
 // (the foot of the tower). A catapult can't go up a tower.
-// THE END: every defender down, the attack wins. Every attacker down, or the clock out (maxMs), the
-// defence holds. The Genesis never fights.
+// THE END: every defender down, the attack wins. Every attacker down, the defence holds. THERE IS NO CLOCK
+// (ruling 47, 2026-10-01): a fight runs until one side wins. An attack always ends - every living attacker
+// shoots or steps on every turn, and every shot has a chance to land. The one fight that can stand still is a
+// SPARED capture fight (below) whose intruder cannot reach anyone: when every living Friend has had a turn
+// and nobody moved or shot, nothing can ever change again, and the defence holds ('held'). That is a
+// stalemate read off the field, not a time limit. The chain runs no spared fight. The Genesis never fights.
 (function (root) {
   'use strict';
   const Chance = root.Chance || (typeof require !== 'undefined' ? require('./chance.js') : null);
@@ -57,13 +63,14 @@
   const spots = (tiles) => Math.floor(tiles * 2 + 1e-9);
 
   // the game's numbers (base.ECON: hp, weapons, wallHp, combat) as the integer tables the fight reads.
-  // `proposed` are what the game hasn't decided yet (walking pace, the clock, how much cover counts, how far
-  // a DEFEND order may stray from its post).
+  // `proposed` overrides the three fight settings, DECIDED 2026-10-01 and each the deployer's to tune:
+  // speed 1 tile a second for every Friend (ruling 44), coverDiv 2 - a Friend ON a wall is hit half as
+  // often (ruling 45) - and defendTiles 5 (ruling 46). There is no clock to set (ruling 47).
   function rulesFrom(E, proposed) {
-    const P = Object.assign({ speed: 1, maxMs: 120000, coverDiv: 2, defendTiles: 5 }, proposed || {});
+    const P = Object.assign({ speed: 1, coverDiv: 2, defendTiles: 5 }, proposed || {});
     const R = { hp: [0], dmg: [0], reach: [0], period: [0], melee: [false], siege: [false], pierce: [false], area: [0], vsBuilding: [1],
       wallHp: E.wallHp, landVsBuildingBps: E.combat.landVsBuildingBps, towerReach: spots(E.combat.towerRange),
-      dropReach: spots(E.combat.dropRange), coverDiv: P.coverDiv, maxMs: P.maxMs, defendReach: spots(P.defendTiles),
+      dropReach: spots(E.combat.dropRange), coverDiv: P.coverDiv, defendReach: spots(P.defendTiles),
       stepMs: Math.round(1000 / (2 * P.speed)) };        // a spot is half a tile
     for (let g = 1; g <= 6; g++) {
       const w = E.weapons[g], melee = E.combat.melee.includes(w.k);
@@ -119,19 +126,13 @@
       for (const v of U) { if (v.att === u.att || v.hp <= 0) continue; const d = cheb(u.x, u.y, v.x, v.y); if (d < bd) { bd = d; best = v; } }
       return best;
     };
-    const inCover = (s, d) => {                           // a standing wall spot next to d, nearer s than d is
-      const sd = cheb(s.x, s.y, d.x, d.y);
-      for (const w of W) { if (w.hp <= 0) continue;
-        for (let e = 0; e < 2; e++) { const wx = w.x + (w.vert ? 0 : e), wy = w.y + (w.vert ? e : 0);
-          if (cheb(wx, wy, d.x, d.y) === 1 && cheb(s.x, s.y, wx, wy) < sd) return true; } }
-      return false;
-    };
+    const onWall = (d) => wallAt(d.x, d.y) >= 0;          // ruling 45: cover is standing ON a standing wall, never behind one
     let t = 0, shots = 0, hits = 0, reason;
     const hurt = (v, n, killed) => { v.hp = Math.max(0, v.hp - n); if (v.hp === 0) killed.push(tag(v)); };
 
     function shoot(u, tgt, wk) {                          // tgt a Friend, or wk a wall section's index
       u.ready = t + R.period[u.gen];
-      const atWall = wk >= 0, cover = !atWall && !tgt.att && inCover(u, tgt);
+      const atWall = wk >= 0, cover = !atWall && !tgt.att && onWall(tgt);
       let bps = atWall ? R.landVsBuildingBps : Math.floor(R.hp[u.gen] * 10000 / (R.hp[u.gen] + R.hp[tgt.gen]));
       if (cover) bps = Math.floor(bps / R.coverDiv);
       const roll = rolls(), landed = roll < bps, killed = [], also = [];
@@ -206,15 +207,23 @@
 
     const snap = () => trace && trace.push({ t, U: U.map(u => [u.x, u.y, u.hp]), W: W.map(w => w.hp) });
     snap();
+    // the stalemate (see THE END): the living Friends that have had a turn since anyone last moved or shot.
+    // Once it holds every living Friend the field is fixed for good. Unreachable while an attacker that is
+    // not spared lives, since such an attacker always shoots or steps - so RareCombat.sol needs no copy.
+    const still = new Set();
     for (;;) {
       if (!U.some(u => !u.att && u.hp > 0)) { reason = 'wiped'; break; }
       if (!U.some(u => u.att && u.hp > 0)) { reason = 'repelled'; break; }
       let next = Infinity; for (const u of U) if (u.hp > 0 && u.ready < next) next = u.ready;
       t = next;
-      if (t >= R.maxMs) { reason = 'held'; break; }
       if (t >= abortMs) { reason = 'fled'; break; }
-      for (const u of U) if (u.hp > 0 && u.ready <= t) act(u);
+      for (const u of U) if (u.hp > 0 && u.ready <= t) {
+        const x0 = u.x, y0 = u.y, s0 = shots;
+        act(u);
+        if (u.x !== x0 || u.y !== y0 || shots !== s0) still.clear(); else still.add(u);
+      }
       snap();
+      if (still.size === U.filter(u => u.hp > 0).length) { reason = 'held'; break; }
     }
     return { winner: reason === 'wiped' ? 'attack' : 'defence', reason, t, shots, hits, rolls: rolls.used,
       attackers: U.filter(u => u.att).map(u => u.hp), defenders: U.filter(u => !u.att).map(u => u.hp), walls: W.map(w => w.hp),
@@ -233,11 +242,12 @@
   }
 
   // a bare test ground for measuring one generation against another: the defender on a spot, with a wall
-  // in front of it (the attack comes from the north) and a watchtower if asked for
+  // in front of it (the attack comes from the north) and a watchtower if asked for - or, with onWall, the
+  // defender standing ON that wall as its crew (ruling 45: the only place cover counts)
   function proving(gen, opt) {
     const tiles = []; for (let x = -3; x <= 2; x++) for (let y = -3; y <= 2; y++) tiles.push([x, y]);
-    const walls = opt.wall ? [-6, -4, -2, 0, 2, 4].map(x => ({ x, y: -2 })) : [];
-    return { tiles, walls, defenders: [{ gen, x: 0, y: -1, tower: !!opt.tower }] };
+    const walls = opt.wall || opt.onWall ? [-6, -4, -2, 0, 2, 4].map(x => ({ x, y: -2 })) : [];
+    return { tiles, walls, defenders: [{ gen, x: 0, y: opt.onWall ? -2 : -1, tower: !!opt.tower }] };
   }
 
   // ---------- THE FIGHT'S HASH (BINDING.md §55; M13 item 7) ----------
@@ -254,7 +264,7 @@
     const v = [];
     for (const k of ['hp', 'dmg', 'reach', 'period', 'melee', 'siege', 'pierce', 'area', 'vsBuilding'])
       { v.push(R[k].length); for (const x of R[k]) v.push(sw(x === true ? 1 : x === false ? 0 : x)); }
-    for (const k of ['wallHp', 'landVsBuildingBps', 'towerReach', 'dropReach', 'coverDiv', 'maxMs', 'defendReach', 'stepMs']) v.push(sw(R[k]));
+    for (const k of ['wallHp', 'landVsBuildingBps', 'towerReach', 'dropReach', 'coverDiv', 'defendReach', 'stepMs']) v.push(sw(R[k]));   // maxMs left with the clock (ruling 47)
     return H(...v);
   }
   // setupHash: the line-ups, the entry, the walls, the standing orders (with the fall-back spots) and the word.

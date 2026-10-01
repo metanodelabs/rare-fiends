@@ -1,6 +1,6 @@
 // M20: deploy the game contracts to Robinhood Chain (4663). Run by the deployer, at their keyboard.
 //   DEPLOYER_KEY=... RF_TOKEN_ADDRESS=0x.. ATTESTOR_ADDRESS=0x.. TEAM_ADDRESS=0x.. FEE_TO_ADDRESS=0x.. node deploy.mjs [--dry-run]
-//   ... RARE_RULES=0x.. RULES_ID=0x<32 bytes> GAME_PLACES=n node deploy.mjs --game [--dry-run]   # the SIXTH, RareGame, after RareRules is frozen
+//   ... RARE_RULES=0x.. RULES_ID=0x<32 bytes> [GAME_PLACES=n] node deploy.mjs --game [--dry-run]   # the SIXTH, RareGame, after RareRules is frozen
 // The key is read from the environment only, never printed, never written. Every transaction needs a typed yes.
 // Each address is written to estate/bridge-config.json the moment its deploy is mined. --dry-run sends and writes nothing.
 import { writeFileSync } from 'node:fs';
@@ -21,9 +21,10 @@ const RULES    = GAME ? envAddress('RARE_RULES') : null;    // RareRules, deploy
 const RULES_ID = GAME ? process.env.RULES_ID : null;
 if (GAME && !/^0x[0-9a-fA-F]{64}$/.test(RULES_ID || '')) { console.error('RULES_ID is not a 0x-prefixed bytes32. Refusing.'); process.exit(2); }
 if (GAME && /^0x0{64}$/.test(RULES_ID)) { console.error('RULES_ID is zero - no ladder was frozen under it. Refusing.'); process.exit(2); }
-const PLACES   = GAME ? process.env.GAME_PLACES : null;
-if (GAME && !PLACES) { console.error('GAME_PLACES is unset - the number of paid places is the deployer\'s call and has no starting value. Refusing.'); process.exit(2); }
-if (GAME && !/^(10|[1-9])$/.test(PLACES)) { console.error('GAME_PLACES must be 1..10 (RareGame MAX_PLACES). Refusing.'); process.exit(2); }
+// places: the starting value is DECIDED - 3 (DESIGN ruling 32, 2026-10-01) - and lives in N below. GAME_PLACES
+// is now an override for a deployer who wants another start; unset means 3, and anything outside 1..10 refuses.
+const PLACES   = GAME ? (process.env.GAME_PLACES ?? null) : null;
+if (GAME && PLACES !== null && !/^(10|[1-9])$/.test(PLACES)) { console.error('GAME_PLACES must be 1..10 (RareGame MAX_PLACES). Refusing.'); process.exit(2); }
 
 // ---- decided numbers, each with its source ----
 const live  = chainlive();                                  // RPC, DICE, PROVIDER from estate/chainlive.js
@@ -35,13 +36,18 @@ const N = {
   maxFeeBps:    [1000, 'DESIGN.md question 13, decided 2026-09-30: 10% ceiling'],
   feeBps:       [150, 'DESIGN.md: marketplace fee 1.5%'],
   partners:     ['0x0000000000000000000000000000000000000000', 'no partnership layer deployed; RareMarket accepts zero'],
+  // Ruling 54: a planted terminal's cut, paid OUT OF the market fee, in bps OF THE FEE. Both are the economist's.
+  maxTerminalShareBps: [5000, 'PROPOSED (chain engineer, 2026-10-01) - ruling 54 ceiling: at most half our fee; IMMUTABLE once deployed'],
+  terminalShareBps:    [3333, 'PROPOSED (chain engineer, 2026-10-01) - ruling 54 size is the economist\'s: a third of the fee, ~0.5% of a sale at 1.5%; setTerminalShareBps changes it'],
   // RareGame (every one a PARAMETER with a starting value; setClocks / setDefaults change them after deploy)
   gameLength:   [168 * 3600, 'DESIGN.md Starting a game: a game is seven days (168 h)'],
   joinWindow:   [24 * 3600, 'DESIGN.md Starting a game: the join window is 24 h'],
   startDelay:   [3600, 'DESIGN.md Starting a game: the game starts 1 h after the join window'],
   cutBps:       [500, 'DESIGN.md Cost tracking, ruling 2026-09-30: the cut is 5% at launch (bounded 5%..10% in the contract)'],
   minPlayers:   [2, 'DECIDED - DESIGN.md Starting a game (L5125, L666); a parameter, settable'],
+  places:       [3, 'DECIDED - DESIGN.md ruling 32 (2026-10-01): a new game pays three places; cap 10; setDefaults / setPlaces change it'],
 };
+if (PLACES !== null) N.places = [+PLACES, 'env GAME_PLACES - the deployer overriding the decided 3 (ruling 32)'];
 
 const provider = await connect(live.rpcs);
 const wallet = new Wallet(KEY, provider);
@@ -89,6 +95,8 @@ async function step(key, c, args) {
   await sent.waitForDeployment();
   console.log('   deployed at ' + sent.target);
   cfg[key[0].toLowerCase() + key.slice(1)] = sent.target;
+  // the attestor's hourly recheck scans Claimed events from here rather than from block 0 (attestor.mjs recheckMain)
+  if (key === 'ShadowFriends') { const rc = await sent.deploymentTransaction().wait(); cfg.deployBlock = rc.blockNumber; console.log('   deployBlock ' + rc.blockNumber); }
   writeFileSync(cfgFile, JSON.stringify(cfg, null, 2) + '\n');
   nonce++; return sent.target;
 }
@@ -104,6 +112,8 @@ const ATTESTOR = envAddress('ATTESTOR_ADDRESS');            // attestor-keygen.m
 const TEAM     = envAddress('TEAM_ADDRESS');                // immutable in ShadowFriends; zero refused
 roles = await step('RareRoles', C.RareRoles, [A('deployer_', wallet.address, 'the sending wallet (DEPLOYER_KEY)')]);
 await step('RareFightLog', C.RareFightLog, [A('roles_', roles, 'RareRoles, step 1')]);
+// M20 item 10: the sealed orders' commit and reveal. Holds nothing, takes only Roles; grant.mjs gives the server role RECORD_ORDERS.
+await step('RareOrders', C.RareOrders, [A('roles_', roles, 'RareRoles, step 1')]);
 const shadow = await step('ShadowFriends', C.ShadowFriends, [A('attestor_', ATTESTOR, 'env ATTESTOR_ADDRESS'), A('team_', TEAM, 'env TEAM_ADDRESS (immutable)'), A('roles_', roles, 'RareRoles, step 1 (launch whitelist)')]);
 if (!DRY) { cfg.attestor = ATTESTOR; writeFileSync(cfgFile, JSON.stringify(cfg, null, 2) + '\n'); }
 await step('RareDuel', C.RareDuel, [
@@ -113,9 +123,13 @@ await step('RareDuel', C.RareDuel, [
   A('feeTo_', FEE_TO, 'env FEE_TO_ADDRESS'),
   A('answerWindow_', N.answerWindow[0], N.answerWindow[1]), A('revealWindow_', N.revealWindow[0], N.revealWindow[1]), A('rollWindow_', N.rollWindow[0], N.rollWindow[1]),
   A('roles_', roles, 'RareRoles, step 1')]);
+// Ruling 54: the market asks the 1/1 gate whether a terminal's shadow is a one-of-one, so the gate is deployed first.
+const gate = await step('RareDoopieGate', C.RareDoopieGate, [A('shadows_', shadow, 'ShadowFriends, step 4')]);
 await step('RareMarket', C.RareMarket, [
   A('rf_', RF, 'env RF_TOKEN_ADDRESS ($RF)'), A('roles_', roles, 'RareRoles, step 1'), A('partners_', N.partners[0], N.partners[1]),
-  A('maxFeeBps_', N.maxFeeBps[0], N.maxFeeBps[1]), A('feeBps_', N.feeBps[0], N.feeBps[1]), A('feeTo_', FEE_TO, 'env FEE_TO_ADDRESS')]);
+  A('maxFeeBps_', N.maxFeeBps[0], N.maxFeeBps[1]), A('feeBps_', N.feeBps[0], N.feeBps[1]), A('feeTo_', FEE_TO, 'env FEE_TO_ADDRESS'),
+  A('shadows_', shadow, 'ShadowFriends, step 4 (immutable: the terminal cut is paid to its ownerOf)'), A('gate_', gate, 'RareDoopieGate, step 6'),
+  A('maxTerminalShareBps_', N.maxTerminalShareBps[0], N.maxTerminalShareBps[1]), A('terminalShareBps_', N.terminalShareBps[0], N.terminalShareBps[1])]);
 }
 if (GAME) {
   // RareGame.sol:83 `currentRulesId` is written once per game: the ladder under it must already be frozen (RareRules.sol:45 `frozen`).
@@ -131,18 +145,19 @@ if (GAME) {
     A('roles_', roles, cfg.rareRoles ? 'RareRoles, from ' + path.basename(cfgFile) : 'RareRoles, step 1 (predicted, dry run)'),
     A('rf_', RF, 'env RF_TOKEN_ADDRESS ($RF), has code on 4663'), A('feeTo_', FEE_TO, 'env FEE_TO_ADDRESS'),
     A('length_', N.gameLength[0], N.gameLength[1]), A('joinWindow_', N.joinWindow[0], N.joinWindow[1]), A('startDelay_', N.startDelay[0], N.startDelay[1]),
-    A('cutBps_', N.cutBps[0], N.cutBps[1]), A('places_', +PLACES, 'env GAME_PLACES (the deployer\'s; no starting value in the code)'),
+    A('cutBps_', N.cutBps[0], N.cutBps[1]), A('places_', N.places[0], N.places[1]),
     A('minPlayers_', N.minPlayers[0], N.minPlayers[1]), A('rulesId_', RULES_ID, 'env RULES_ID, frozen on RareRules ' + RULES)]);
   if (!DRY) { cfg.rareRules = RULES; cfg.rulesId = RULES_ID; writeFileSync(cfgFile, JSON.stringify(cfg, null, 2) + '\n'); }
-  // Powers: grant.mjs already gives the server role RECORD_SYNC, which RareGame.declare accepts (RareGame.sol:215).
-  // DECLARE_PLACINGS has no decided holder (DESIGN.md M18 (a), "None recorded"); root holds it. Nothing is granted here.
+  // Powers: RareGame.declare accepts DECLARE_PLACINGS ONLY (deployer ruling 2026-10-01: the deployer or the game
+  // master, and no one else) - the server role's RECORD_SYNC does not declare. Root holds it; granting it to the
+  // game master role is a deployer transaction (RareRoles.grantPower), not this script's. Nothing is granted here.
 }
 
 const bal = await provider.getBalance(wallet.address);
 console.log(`\ntotal estimated ${eth(total)}  wallet ${eth(bal)}` + (DRY && bal < total ? '  <-- INSUFFICIENT, fund before running for real' : ''));
 if (DRY) { console.log('\nDRY RUN complete. Nothing sent, nothing written.'); process.exit(0); }
 console.log('\n' + path.basename(cfgFile) + ' written: ' + cfgFile + (cfgFile.endsWith('.local.json') ? ' (LOCAL FORK scratch, gitignored, never committed).' : ' (addresses only). Commit it.'));
-if (!GAME) console.log('\nNext, the sixth: RareRules (deployed and frozen first - see deploy/local-chain.sh), then RARE_RULES=0x.. RULES_ID=0x.. GAME_PLACES=n node deploy.mjs --game');
+if (!GAME) console.log('\nNext, the sixth: RareRules (deployed and frozen first - see deploy/local-chain.sh), then RARE_RULES=0x.. RULES_ID=0x.. node deploy.mjs --game (places starts at 3; GAME_PLACES=n overrides)');
 console.log('\nNext, grant the server key its powers (RECORD_FIGHT, RECORD_SYNC) on RareRoles ' + roles + ':');
 console.log('  DEPLOYER_KEY=... SERVER_ADDRESS=0x<server signing address> node grant.mjs');
 console.log('Then start the API server and attestor units, and run bridgecheck - see DEPLOY.md section 6.');

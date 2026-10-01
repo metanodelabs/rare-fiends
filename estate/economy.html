@@ -185,7 +185,7 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
   // which reads as breaching a 0.33 ceiling it actually clears by a third.
   const n2 = (v) => v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const secs = (ms) => (ms / 1000).toLocaleString('en-US', { maximumFractionDigits: 2 }) + ' s';
-  const NAMES = { keep: 'Keep', hut: 'Hut', silo: 'Silo', tower: 'Watchtower', wall: 'Wall', cell: 'Cell', generator: 'Generator', collectionDepot: 'Collection depot' };
+  const NAMES = { keep: 'Keep', hut: 'Hut', silo: 'Silo', tower: 'Watchtower', wall: 'Wall', cell: 'Cell', generator: 'Generator', collectionDepot: 'Collection depot', capacitor: 'Capacitor' };
   const fact = (k, v, s, tag) => '<div class="fact"><span class="k"><span>' + k + '</span>' + (tag || '') + '</span><span class="v">' + v + '</span>' + (s ? '<span class="s">' + s + '</span>' : '') + '</div>';
   const table = (head, rows, foot, words) => '<div class="tw' + (words ? ' words' : '') + '"><table><thead><tr>' + head.map(h => '<th>' + h + '</th>').join('') + '</tr></thead><tbody>' +
     rows.map(r => '<tr>' + r.map(c => '<td>' + c + '</td>').join('') + '</tr>').join('') + '</tbody>' +
@@ -349,9 +349,9 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
       '<p class="src">An estimate: each shot is a roll, so any single fight can go longer or shorter. Range decides whether the defender can shoot back at all.</p>' +
       '<h3>A BUILDING\'S HIT POINTS</h3>' +
       table(['Building', 'Level 1 (logs)', 'Level 2', 'Level 3', 'Status'],
-        kinds.map(k => [NAMES[k], ...BHP[k].map(n0), k === 'wall' ? T.game.replace('IN THE GAME', 'LEVEL 1 IN THE ARMOURY') : T.prop]).concat([['Harvester', '150', '—', '—', T.prop]])) +
+        kinds.map(k => [NAMES[k], ...(BHP[k] || ['—', '—', '—']).map(n0), k === 'wall' ? T.game.replace('IN THE GAME', 'LEVEL 1 IN THE ARMOURY') : T.prop]).concat([['Harvester', '150', '—', '—', T.prop]])) +
       '<p class="src">Only the level-1 wall (' + n0(E.wallHp) + ' HP) is in the code, as the armoury\'s target. The rest were proposed in our discussion: each level doubles.</p>' +
-      '<div class="note"><b>Two defence systems are in the code.</b> The watchtower\'s plaque still shows the first mockup\'s defence numbers (' + gens.map(g => 'Gen ' + g + ' ' + E.towerDef[g]).join(' · ') + ') and each body on a wall adds ' + E.wallSlot + '. These came before hit points and weapons, and should be replaced by them. ' + T.open + '</div>'));
+      '<div class="note"><b>One defence system is in the code.</b> The first mockup\'s defence numbers - the watchtower plaque\'s table by generation and a value for each body on a wall - are gone from the game (M8 items 9 and 12: defence is strength). A building\'s strength is its row\'s <code>strength</code> column in values.js; only the wall\'s level 1 (' + n0(E.wallHp) + ' HP) has a decided number, and every other row says so. ' + T.dec + '</div>'));
 
     // 6 ---------- the map
     const cell = 22, pad = 10 + 2 * cell;                // two tiles of margin each side: the wild seams sit past the edge
@@ -398,7 +398,7 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
     const buildWord = (lvl) => P.build[lvl] === 'power' ? '<b>needs power</b>' : 'by hand · ×' + P.speedup + ' faster with power';
     const levels = (k) => E.kinds[k].tiers.length;
     const powerRows = [];
-    kinds.forEach(k => {
+    kinds.filter(k => k !== 'capacitor').forEach(k => {   // the capacitor's rows come from P below, with what it stores
       for (let i = 0; i < levels(k); i++) powerRows.push([
         i === 0 ? '<b>' + NAMES[k] + '</b>' : '', E.kinds[k].tiers[i].toLowerCase(), buildWord(i), u(P.buildDraw[i]),
         k === 'generator' ? '<span style="color:var(--signal)">makes ' + u(P.supply.generator[i]) + '</span>' : u((P.run[k] || [])[i] || 0)]);

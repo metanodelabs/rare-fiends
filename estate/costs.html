@@ -127,6 +127,30 @@ tfoot td { color: #fff; border-top: 1px solid var(--faint); }
 (() => {
   'use strict';
   const $ = (id) => document.getElementById(id);
+  // WHY A READ FAILED, NAMED RATHER THAN GUESSED. ChainLive.read() reports only which reads failed. Two kinds:
+  // the chain's (fee, gasPrice, request gas - the RPC) and the site's own files (prices and ethUsd = stats.json,
+  // gas = gas.json). Only the second is about where the page was opened from. A chain failure is asked of the RPC
+  // once more: no answer at all is an unreachable chain; an answer that cannot read the Dice contract's state
+  // is, on ?rpc=local, a STALE FORK - anvil forked a block its upstream no longer serves ("historical state
+  // ... is not available"). The same words are in attack_defense.html; neither page may edit chainlive.js.
+  async function whyNotRead(errors) {
+    const CHAIN = ['fee', 'gasPrice', 'request gas'], chainBad = errors.filter((k) => CHAIN.includes(k)), fileBad = errors.filter((k) => !CHAIN.includes(k));
+    const out = [];
+    if (chainBad.length) {
+      const where = ChainLive.LOCAL ? 'THE LOCAL CHAIN AT ' + ChainLive.RPC[0].replace(/^https?:\/\//, '') : 'THE ROBINHOOD CHAIN RPC';
+      let cause;
+      try {
+        await ChainLive.rpc('eth_chainId', []);
+        try { await ChainLive.rpc('eth_getCode', [ChainLive.DICE, 'latest']); cause = where + ' ANSWERED BUT REFUSED THE READ'; }
+        catch (e) { cause = /historical state .* is not available|missing trie node|header not found/i.test(e.message)
+          ? where + (ChainLive.LOCAL ? ' IS A STALE FORK: ITS UPSTREAM NO LONGER SERVES THE BLOCK IT FORKED' : ' NO LONGER SERVES THAT STATE')
+          : where + ' ANSWERED BUT COULD NOT READ THE DICE CONTRACT (' + e.message.slice(0, 120) + ')'; }
+      } catch (_) { cause = where + ' DID NOT ANSWER'; }
+      out.push(cause + ' - FAILED: ' + chainBad.join(', ') + (ChainLive.LOCAL ? '. RESTART IT (deploy/local-chain.sh reset) OR OPEN WITH ?rpc=main' : ''));
+    }
+    if (fileBad.length) out.push("THE SITE'S OWN FILES DID NOT LOAD (" + [...new Set(fileBad.map((k) => k === 'prices' || k === 'ethUsd' ? 'stats.json' : k === 'gas' ? 'gas.json' : k))].join(', ') + '). OPEN THIS PAGE FROM THE SITE');
+    return out.join('. ') + '.';
+  }
   const T = { live: '<span class="tag live">LIVE</span>', meas: '<span class="tag meas">MEASURED</span>', est: '<span class="tag est">ESTIMATE</span>',
               prop: '<span class="tag prop">PROPOSED</span>', open: '<span class="tag open">NOT DECIDED</span>', sample: '<span class="tag sample">SAMPLE</span>',
               uncounted: '<span class="tag open">NOT COUNTED</span>' };
@@ -195,7 +219,7 @@ tfoot td { color: #fff; border-top: 1px solid var(--faint); }
     // says so, rather than falling back to a zero that would read as "no fighting happened".
     try { const r = await fetch('measured.json', { cache: 'no-store' }); if (r.ok) M = await r.json(); } catch (_) { M = { games: [] }; }
     if (!L.gas || L.fee == null || L.gasPrice == null || !L.ethUsd) {
-      $('status').textContent = 'COULD NOT READ EVERYTHING (' + L.errors.join(', ') + '). OPEN THIS PAGE FROM THE SITE.';
+      $('status').textContent = 'COULD NOT READ EVERYTHING. ' + await whyNotRead(L.errors);
       return;
     }
     // a count beats a guess: if a game has been played, the estimator starts from what happened.

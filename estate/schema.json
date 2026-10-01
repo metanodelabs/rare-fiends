@@ -29,7 +29,8 @@
   "homes": {
     "chain": "A slot, a mapping entry or an event on chain 4663. The only home a thing can be argued about from.",
     "map": "Frozen into a map at its seed. Reproducible from the seed and the generator version; never stored.",
-    "client": "A client belief. Redrawable, guessable, and worth nothing in a dispute. DESIGN's third home."
+    "client": "A client belief. Redrawable, guessable, and worth nothing in a dispute. DESIGN's third home.",
+    "server": "OUR SERVER'S LIVE RECORD - Redis where it helps - which decides every fight and is the authority for v1 (DESIGN, Fights resolve on our server, and we are the authority for v1; the deployer, 2026-09-30). THE FOURTH HOME, added for M3 item 5: the first three were written before that ruling and the schema had nowhere to put what our server holds. What lives here is the game AS IT IS PLAYED - a base, its tiles, buildings, crews, posts and fights. The chain holds that game's RECORD, not its state: a session's changes in one write (decision 9), a hash of every fight as it happens (fightHash, RareFightLog.commitFight, RECORD_FIGHT), and an hourly sync head (syncHead, RareFightLog.commitSync, RECORD_SYNC; rulings 16 and 18). On a mismatch the server's record stands and the deployer is alerted (ruling 3). A player signs nothing and pays nothing for a fight. V2 moves on chain (ruling 5). Server-homed state is ours to change at any time, which is why a power's Working power, Speed, Reach and Sight need nothing on chain."
   },
 
   "types": [
@@ -51,7 +52,7 @@
       "ordersCommitment": { "was": "Decided in approach, M20's to design, nothing built. No commitment, no reveal, no consequence for not revealing", "covered": "shape only", "entities": ["ordersCommitment"] },
       "rosterStorage": { "was": "The line-up row { collection, tokenId, gen, x, y, tower, order, fx, fy } has no home. §4.4 says every field of it is chain state; none of it is", "covered": true, "entities": ["rosterRow"] },
       "fightLifecycle": { "was": "No state machine, no fight id, no LinedUp/Rolling/Settled, no FightSealed", "covered": true, "entities": ["fight"] },
-      "disputeProcess": { "was": "No submitter, no bond, no challenge window, no deadline. 'Dispute' appears once in DESIGN. BINDING §18 says this is the largest hole in the whole file", "covered": false, "entities": [], "why": "A bond and a deadline are numbers and a policy, not a shape. Two fields are reserved on `fight` (bond, challengeDeadline) and marked undecided; the process itself needs the deployer, and BINDING §18 is right that a scoreboard nobody can challenge is a scoreboard we are asserting. THIS FILE DOES NOT CLOSE IT." },
+      "disputeProcess": { "was": "No submitter, no bond, no challenge window, no deadline. 'Dispute' appears once in DESIGN. BINDING §18 says this is the largest hole in the whole file", "covered": "declined in v1", "entities": ["fightHash", "syncHead"], "why": "DECLINED FOR V1 BY THE DEPLOYER, 2026-09-30 (Fights resolve on our server: 'None. No dispute machinery and no $RF bond escrow in v1. Both deferred, on purpose'), and the reason is No diamond's first tier: a contract custodying a bond is permanent, and a permanent contract for a deferred mechanism cannot be corrected and is not wanted yet. What stands in its place is AUDITABILITY, not trust: fightHash as the fight happens and syncHead every hour, so history cannot be quietly rewritten even though we decide it. fight.bond and fight.challengeDeadline stay reserved so V2 has a named place. The hole is not filled; it is declined, by a ruling and not by this file." },
       "rentedFriendOwner": { "was": "base.defense() marks defenders rented:true and the mockup fields three of them. Part one §2.1 checks ownerOf(tokenId) == msg.sender at join. Nothing in DESIGN says whether a rented Friend defends, or who counts as its owner for that check", "covered": "shape only", "entities": ["rosterRow", "hire"], "why": "`rosterRow.postedBy` and the `hire` entity give the question somewhere to land, but WHICH address the join guard checks is the deployer's (BINDING §13 item 7)." }
     }
   },
@@ -59,7 +60,8 @@
   "enums": {
     "note": "`members` is ordered; a member's on-chain value is its index, from zero. An enum with `decided: false` has an empty members list on purpose: nobody has said what belongs in it, and an empty list is countable where a guess is not.",
 
-    "home": { "decided": true, "members": ["chain", "map", "client"], "note": "DESIGN's three-way classification. Not on chain; this file's own vocabulary." },
+    "home": { "decided": true, "members": ["chain", "map", "client", "server"], "note": "DESIGN's classification - three homes, and a fourth since the ruling that fights resolve on our server (M3 item 5). Not on chain; this file's own vocabulary." },
+    "behaviour": { "decided": true, "members": ["strength", "workingPower", "speed", "reach", "sight", "ownership"], "note": "THE SIX BEHAVIOURS A POWER MAY TOUCH - a decided, closed list (decision 8), in the order DESIGN's 'Adding a power is data, not code' gives them: Strength, Working power, Speed, Reach / travel means, Sight, Ownership. power.amounts is indexed by this. A new ability needs new code only if it does something none of the six can say, and that is a new rule inside the fight - which is why the fight is replaceable and this list is closed. schemacheck holds the members and their order to DESIGN.md's table." },
 
     "order": { "decided": true, "members": ["hold", "engage", "defend", "fallback"], "note": "A defender's standing order. combat.js ORDERS and RareCombat.Defender.order read the index, so the ORDER OF THIS LIST IS CONSENSUS - moving a member changes every recorded fight." },
 
@@ -71,13 +73,13 @@
 
     "stakeCurrency": { "decided": "contested", "members": ["crystals", "rf"], "note": "COORDINATION POINT, NOT A DECISION MADE HERE. BINDING §20.1 as written says 'you bet with crystals not RF', crystals only. The deployer has since allowed a duel to be staked in EITHER, and a second chain-engineer is specifying it in BINDING. Two members are recorded so the schema has a place for a discriminator; which members survive is theirs and the deployer's, and §20.1 must be reconciled before M20." },
 
-    "buildingKind": { "decided": true, "notAnEnum": true, "members": ["keep", "hut", "silo", "tower", "wall", "cell", "generator", "collectionDepot"], "note": "THESE ARE THE SETTLED CODE NAMES (M2 item 6) AND THEY ARE NOT A SOLIDITY ENUM. M3 item 4 requires that adding a building be an identity and a row of numbers with no code change; a Solidity enum is a code change and an upgrade. So a building's kind is a `uint16 kindId` into the stored `buildingType` registry, and this list is the eight rows that registry starts with - not its ceiling. index.html's KIND object is the client's copy of those rows, and `oneHome` says so." },
+    "buildingKind": { "decided": true, "notAnEnum": true, "members": ["keep", "hut", "silo", "tower", "wall", "cell", "generator", "collectionDepot", "capacitor"], "note": "THESE ARE THE SETTLED CODE NAMES (M2 item 6) PLUS THE NINTH, THE CAPACITOR (M8 item 11, decided as a building of its own), AND THEY ARE NOT A SOLIDITY ENUM. M3 item 4 requires that adding a building be an identity and a row of numbers with no code change; a Solidity enum is a code change and an upgrade. So a building's kind is a `uint16 kindId` into the stored `buildingType` registry, and this list is the nine rows that registry starts with - not its ceiling. index.html's KIND object is the client's copy of those rows, and `oneHome` says so." },
 
     "job": { "decided": false, "members": [], "note": "M3 item 2 requires 'a Friend's job'. DESIGN names chopping, harvesting, standing watch, manning a wall and science at a cell, but never as a closed list, and a Friend posted at a cell for science is doing a job AND holding a post. Needs the game engineer plus the deployer; M8/M9/M11 territory." },
 
     "gameState": { "decided": "proposed", "built": "RareGame.State", "members": ["None", "Open", "Started", "Settled", "Abandoned"], "note": "BUILT as RareGame.State by the chain engineer from the decided clocks (join window, start delay, length) and the decided end (the winners are declared); `Abandoned` is joining closing short of the minimum with every stake refunded. The members are the contract's, not the deployer's: PROPOSED, and the steward owes the deployer the question. `None` is index zero so an unwritten slot is not a live state - the RareDuel.State pattern." },
 
-    "moveKind": { "decided": false, "members": [], "note": "The move log's discriminator. §17.2.2 makes every move an event folded into moveRoot, so THIS LIST IS THE DEFINITION OF WHAT COUNTS AS HISTORY - a move kind left off it is a thing that happened and is not in the record. Visible in the mockup today and not yet decided as a list: build, upgrade, claim ground, gather, chop, post a Friend, set an order, hire, fight, duel, list, buy, sell back. Needs the deployer. M6 writes it, M18 closes the game against it." },
+    "moveKind": { "decided": true, "members": ["build", "raise", "demolish", "harvester", "gather", "chop", "walk", "post", "unpost", "order", "hire", "release", "hands"], "note": "`hands` (M8 item 3) is how many Friends work a building going up, from a moment on - the action a player takes when they put Friends on a build or pull them off it. The move log's discriminator. §17.2.2 makes every move an event folded into moveRoot, so THIS LIST IS THE DEFINITION OF WHAT COUNTS AS HISTORY - a move kind left off it is a thing that happened and is not in the record. DECIDED (the deployer, 2026-09-30): 'all actions should be saved' - EVERY ACTION A PLAYER TAKES IS A MOVE. The members are estate/record.js's MOVES table, the actions the page gives a player today, and recordcheck holds the two lists equal; a later milestone that gives the player a new action (a fight, a duel, the market's verbs, a claim of ground) adds its kind to both, never an action the record does not carry. M18 closes the game against it. Not a move, by the same ruling: when the player was last on the map (base lastSeen in record.js), which a session with no moves still writes; what happens while a player is idle is recorded through other players' actions." },
 
     "closeReason": { "decided": false, "members": [], "note": "Why a game ended. BINDING §16.4 last bullet: an era must not close with fights still open, and what happens if it does is undecided." }
   },
@@ -185,12 +187,12 @@
 
     "rules": {
       "home": "chain",
-      "note": "THE RULES TABLE, and the largest gap BINDING found: today it is base.ECON in index.html, assembled by Combat.rulesFrom() - a client belief. BINDING §10 ranks forging it FIRST of seven, ahead of deleting the walls, because it is not one number about one body, it is all the numbers about all the bodies. Written once per game, frozen for it, addressed by rulesId, never a Solidity constant.",
+      "note": "THE RULES TABLE, and the largest gap BINDING found: it was base.ECON in index.html, assembled by Combat.rulesFrom() - a client belief - until M3 item 1 moved every number in it to estate/values.js, the one home it has until M20 writes it to chain; Combat.rulesFrom() now reads it from there and base.ECON is a view of it. BINDING §10 ranks forging it FIRST of seven, ahead of deleting the walls, because it is not one number about one body, it is all the numbers about all the bodies. Written once per game, frozen for it, addressed by rulesId, never a Solidity constant.",
       "gap": "rulesOnChain",
       "built": "RareCombat.Rules",
       "milestone": "M20",
       "fields": {
-        "hp": { "type": "uint32[]", "note": "By generation, 7 entries with index 0 unused. index.html HP_OF. gencheck.js already holds this table to one source." },
+        "hp": { "type": "uint32[]", "note": "By generation, 7 entries with index 0 unused. values.js HP_OF (it was index.html's). gencheck.js already holds this table to one source." },
         "dmg": { "type": "uint32[]", "note": "By generation. WEAPONS[g].dmg." },
         "reach": { "type": "uint32[]", "note": "By generation, IN SPOTS - a spot is half a tile, so a weapon's tile range doubles here. Integers only; the Solidity is a line-for-line copy." },
         "period": { "type": "uint32[]", "note": "By generation, ms between shots. COMBAT.periodMs by weapon class." },
@@ -214,30 +216,35 @@
 
     "buildingType": {
       "home": "chain",
-      "note": "THE BUILDING REGISTRY, and M3 items 3 and 4 in one row. A building's placement rule and its footprint are DATA THE ROW CARRIES, not code, so a new building is an identity and a row of numbers. Today this is index.html's KIND object plus WOOD_COST plus SILO_CAP plus CELL_REACH plus CELL_NEEDS plus lockReason() - five constants and a function, in five places. One row here.",
+      "note": "THE BUILDING REGISTRY, and M3 items 3 and 4 in one row. A building's placement rule and its footprint are DATA THE ROW CARRIES, not code, so a new building is an identity and a row of numbers. It WAS index.html's KIND object plus WOOD_COST plus SILO_CAP plus CELL_REACH plus CELL_NEEDS plus lockReason() - five constants and a function, in five places. Since M3 item 1 it is one row a kind in estate/values.js `kinds` - levelName, crystalCost, woodCost, capacity, reach, footprint, placement - and the page's five names read columns of it.",
       "gap": "rulesOnChain",
       "milestone": "M8",
       "fields": {
-        "kindId": { "type": "uint16", "note": "The identity. A NUMBER AND NOT AN ENUM MEMBER, which is the whole of M3 item 4's first case: a new building is a new row with a new id, and no contract is redeployed. The eight starting rows are `buildingKind`'s members." },
+        "kindId": { "type": "uint16", "note": "The identity. A NUMBER AND NOT AN ENUM MEMBER, which is the whole of M3 item 4's first case: a new building is a new row with a new id, and no contract is redeployed. The nine starting rows are `buildingKind`'s members - the ninth, the capacitor, landed in values.js on 2026-09-30 (M8 item 11) and is the first row the game reads that the contracts have never named: its kindId is the chain engineer's to number." },
         "codeName": { "type": "string", "note": "The settled name: keep, hut, silo, tower, wall, cell, generator, collectionDepot (M2 item 6)." },
         "levels": { "type": "uint8", "note": "How many levels the row defines. M3 item 4's second case: adding a level is a row of numbers, so every per-level field below is an array this long and nothing is a fixed-size struct." },
         "levelName": { "type": "string[]", "note": "Per level. KIND[k].tiers." },
         "crystalCost": { "type": "uint32[]", "unit": "hundredths", "note": "Per level. KIND[k].cost. No values. HOME: RareRules.setLadder/ladderOf, per rulesId, frozen by RareRules.freeze - M15 item 11's chain half." },
         "woodCost": { "type": "uint32[]", "unit": "hundredths", "note": "Per level. WOOD_COST - level 1 is built of logs, upgrades are paid in crystals, and that asymmetry is data rather than a rule in code. HOME: RareRules, beside crystalCost. Not refunded by a demolition (BINDING §46.4)." },
-        "buildMs": { "type": "uint32[]", "note": "Per level. ECON.buildMs is one number for every building today; per level per kind is the shape." },
-        "strength": { "type": "uint32[]", "note": "Per level. M3 item 2's 'strength'. A wall's is the one the fight reads (rules.wallHp today - see oneHome, it is declared in two places and one must go)." },
-        "capacity": { "type": "uint32[]", "note": "Per level, the one number the kind caps: a silo's crystals (SILO_CAP), a wall's crew (WALL_CAP), a depot's harvesters, a hut's Friends. One field because they are one concept, and the note on the row says which." },
+        "buildMs": { "type": "uint32[]", "note": "Per level: how long ONE Friend takes to raise this kind to that level (M8 item 2). Every row in values.js carries it; every value names BUILD_MS, the demo pace, held while the economist's figures are PROPOSED (question 21 row 24, in each row's `proposed.buildMs`). record.js raiseMs reads it; the top-level values.js buildMs is that one held number, kept readable." },
+        "hands": { "type": "uint8", "decided": false, "note": "The ceiling on Friends working one build (M8 item 3): each Friend up to it takes the time down linearly - buildMs / n - and past it another adds nothing. PROPOSED (question 21 rows 25 and 27): 4 for a one-tile building, 2 for a wall, 4 for the capacitor. record.js `ceiling` and `worked` read it." },
+        "strength": { "type": "uint32[]", "note": "Per level. M3 item 2's 'strength'. A wall's is the one the fight reads (rules.wallHp today - see oneHome, it is declared in two places and one must go). Since M8 item 5 every row in values.js carries it: the wall's level 1 names WALL_HP rather than typing a second 400, and 0 means NO NUMBER IS DECIDED and the building is not a target - which is what the fight does with every building but a wall today. The economist's per-level figures are PROPOSED (question 21 rows 6 and 7) and are not written." },
+        "energy": { "type": "uint32[]", "note": "Per level, in P: what the building DRAWS while it runs (M8 item 10). Every row in values.js carries it, and every value is 0 because the economist's figures are PROPOSED (question 21 rows 29 and 30) and a proposal is not written as a value. index.html's energy tick (M10 item 4) reads it: a base's demand is the sum of its standing buildings' draws, its supply the sum of their `supply`, and a building whose draw cannot be met is marked stalled and its bar reads the shortfall. NOT IN RareRules YET: the contract side is a spec for the chain engineer." },
+        "supply": { "type": "uint32[]", "note": "Per level, in P: what the building MAKES while it runs. Only the generator's row carries it; 0 at every level until the deployer decides (PROPOSED 10 / 25 / 60, question 21 row 31). A row without the column makes nothing." },
+        "release": { "type": "uint32[]", "note": "Per level, in P: the most a STORE lets out when the generator it serves is offline. Only the capacitor's row carries it (PROPOSED 15 / 40 / 100 / 250, question 21 row 32). A store's `capacity` is what it holds, in P·h - the same column a silo uses for crystals, because it is the one number the kind caps." },
+        "leak": { "type": "uint8[]", "note": "Per level, in percent of the store lost a day. Only the capacitor's row carries it, and it is DECIDED: 10, 5, 3, none (Energy, 'Two ladders, and they are independent'). How fast a store CHARGES is not a column: it is set by the source, and which generator level each of 48 h / 24 h / 6 h / 2 h belongs to is undecided, so nothing holds it." },
+        "capacity": { "type": "uint32[]", "note": "Per level, the one number the kind caps: a depot's crystals (what it holds), a silo's crystals (what it ADDS to the depot's reserve - How much you can hold; record.js storeCap), a wall's crew (WALL_CAP), a capacitor's store. One field because they are one concept, and the note on the row says which. A depot's harvesters are one a level, not this column; a hut holds no Friends (housing is not a thing)." },
         "reach": { "type": "uint32[]", "note": "Per level, in spots: a cell's claim (CELL_REACH), a tower's sight. Zero for a kind that reaches nowhere." },
         "footprint": { "type": "int16[]", "note": "RELATIVE TILE OFFSETS, x,y pairs. A one-tile building is a single [0,0]. DATA, so a building bigger than one tile needs no code change - which matters because wallsortcheck's uncovered column says 'buildings bigger than one tile, which do not exist yet' and this is the field that lets them." },
         "placement": { "type": "ref", "ref": "placementRule", "note": "The rule as data. M3 item 3." },
-        "abilityId": { "type": "uint16", "note": "M3 ITEM 4'S THIRD CASE, AND THE HONEST ANSWER TO IT. Adding a level is a row of numbers; adding a building is an identity and a row of numbers; ADDING AN ABILITY IS NEW BEHAVIOUR AND NO ROW CAN CARRY IT. So the row carries a pointer to behaviour, and what that pointer must point AT is a constraint on contract shape: it cannot be a library, because RareChance and RareCombat are libraries with internal functions, inlined at compile time, with no deployed address to re-point. An ability the deployer can add after launch must be reachable through an address this row names." },
+        "abilityId": { "type": "uint16", "decided": false, "note": "A POWER A BUILDING CARRIES - IF A BUILDING MAY CARRY ONE, which is the deployer's (Still open for the deployer: can a building carry a power, and can a power act on someone else - recommended yes, not decided). This note used to say adding an ability is NEW BEHAVIOUR THAT NO ROW CAN CARRY and that this field points at code; it was written before decision 8, which says the opposite: adding an ability is a ROW (the `power` entity), and only the fight and the dice that decide a fight ever need replacing. If the deployer says yes, this becomes a ref to power like item.abilityId; if no, the field goes and the growth table's two building examples with it. HELD BACK as (d) of What has to be replaceable until then - the type and the field are as they were, the claim is not." },
         "addedInGame": { "type": "uint64", "note": "The game id from which this row exists. A row added mid-game would change a running game's numbers, which the freeze forbids - so a new building becomes available to the NEXT game, and this field is what makes that enforceable instead of remembered." }
       }
     },
 
     "placementRule": {
       "home": "chain",
-      "note": "Where a building may stand, as data. Today this is lockReason() in index.html - two lines that know only about the keep - plus the water test for a generator, plus CELL_NEEDS for a cell's science, spread across the placement code. Every one of them is a field here.",
+      "note": "Where a building may stand, as data. It WAS lockReason() in index.html - two lines that knew only about the keep - plus the water test for a generator, plus CELL_NEEDS for a cell's science, spread across the placement code. Every one of them is a field here, and since M3 item 3 every kind's row in values.js carries one in exactly this shape (schemacheck holds the keys to these fields): lockReason() reads needsKeep, isKeep and maxPerBase and knows no building by name. onWater and onBaseEdge are still tested by the placement code in tap() rather than read off the row - M9's lock, not M3's.",
       "milestone": "M9",
       "fields": {
         "needsKeep": { "type": "bool", "note": "Nothing can stand until the keep does. lockReason()'s only real rule today." },
@@ -248,30 +255,90 @@
         "onClaimedGround": { "type": "bool", "note": "A cell may be placed on claimed ground to push further still." },
         "maxPerBase": { "type": "uint16", "note": "Zero for no limit. This is where a base's seventeenth wall section becomes a decided thing rather than a discovered one: RareCombat's MAX_WALLS is 16 and BINDING §10.2 says it becomes reachable by ordinary play the moment walls are read instead of supplied. No value - it is the deployer's, BINDING §13 item 5." },
         "scienceGen": { "type": "uint8[]", "note": "Per level, the worst generation that can run it - CELL_NEEDS. Zero where no posted Friend is needed. Per level because a cell's second level needs a Gen 3 and its fourth a Gen 1." },
-        "needsKind": { "type": "uint16", "note": "A kindId this one requires, or zero. Named rather than hard-coded so a partnership's building can require a partner's." }
+        "needsKind": { "type": "uint16", "note": "A kindId this one requires, or zero. Named rather than hard-coded so a partnership's building can require a partner's. index.html's lockReason() reads it since M8 item 4: a kind whose needsKind is not standing finished on the base is locked in the catalogue. No row sets it today." },
+        "nextToKind": { "type": "uint16", "note": "THE FOURTH PLACEMENT RULE (Energy): a kindId this one must stand TOUCHING - sharing a tile edge with - or zero. The capacitor's row names the generator, and touching is also what binds the store to the generator it serves ('What a capacitor backs up: the one it touches'). index.html's siteReason() reads it in tap(); the kind is written by codeName until M20 numbers the registry." }
       }
     },
 
-    "base": {
+    "economy": {
       "home": "chain",
-      "note": "THE BASE'S RECORDED STATE - the first of BINDING §12's eight gaps and the one the other five wait on. Today the ONLY specification of it is base.defense() inside index.html, which is a client belief describing the thing a fight is decided by. §10.2, §10.5.2, §10.6 and §10.7 all read it.",
+      "note": "THE ECONOMY'S TABLE - every number M4 item 4 puts on the deployer page that is neither the fight's (rules) nor a building's (buildingType). FOUND BY THE EXTRACTION, NOT BY THE FIRST PASS: M3 item 2's list of pieces named the purse and the rules and never the numbers the purse grows by, so when they left index.html for estate/values.js there was no entity to map them to. 'Anything the deployer page can change is stored state on chain, never a constant' (M3 item 1), and every one of these is on M4's page. Frozen per game like rules - No number changes under a running game - so its home is a row beside rules, addressed by the same rulesId. M4 item 4 also names a seam's yield per growth stage, the depot's cap and what a silo adds; those are not constants in the page today and are not invented here - the economist's to add when they are.",
+      "fields": {
+        "crystalUnit": { "type": "uint32", "note": "Crystals and wood are stored in hundredths; every display divides by this. values.js crystalUnit; index.html CRYSTAL_UNIT reads it." },
+        "startPurse": { "type": "uint128", "note": "What a base is created holding, in hundredths. values.js startPurse; the running purse is base.crystals, the record's base row (M6, record.js baseRow), restored on open and written with the session." },
+        "startWood": { "type": "uint128", "note": "Same, for wood. values.js startWood." },
+        "yearDiv": { "type": "uint8", "note": "A game year is the game's length divided by this - DECIDED a quarter (How long a game year is), and a divisor rather than a fraction because a chain cannot hold 0.25. Shown on the deployer page, not edited there: 'the year itself needs no field'. values.js yearDiv; index.html GAME_YEAR_OF is 1 / it." },
+        "growMs": { "type": "uint32", "note": "A seam's full growth cycle, stages every quarter. values.js growMs." },
+        "handYield": { "type": "uint32", "note": "Crystals a Friend cuts from a seam by hand. values.js handYield." },
+        "stageYieldBps": { "type": "uint16[]", "decided": false, "note": "What a seam gives by growth stage, in basis points of a full haul (M10 item 2: taking it young gives less). As many stages as entries, each an equal share of growMs. PROPOSED (question 21 row 16): 2500 / 5000 / 7500 / 10000. values.js stageYieldBps; record.js haulOf reads it for the harvester and the hand alike." },
+        "harvCost": { "type": "uint128", "note": "What a harvester costs to build, in hundredths. values.js harvCost." },
+        "treeWood": { "type": "uint32", "note": "Wood a tree gives when felled, in hundredths (three logs). values.js treeWood. NOT trees per grove - that is a map parameter, frozen at the seed, and mapgen.js carries it." },
+        "chopMs": { "type": "uint32", "note": "How long one chop takes. values.js chopMs." },
+        "regrowMs": { "type": "uint32", "note": "How long a felled tree takes to stand again. values.js regrowMs." }
+      }
+    },
+    "unlock": {
+      "home": "chain",
+      "note": "WHAT THE GAME YEAR OPENS, one row a thing. Today one row, the capacitor: a water mill (the generator's level 2) standing for one game year is its prerequisite (DESIGN, How long a game year is). index.html's UNLOCKS was the only copy; values.js `unlocks` is the home, keyed by what it opens, and the page turns afterYears into milliseconds of its own clock. A row and not a constant so that what the year opens next is a row added, not code.",
+      "fields": {
+        "opens": { "type": "string", "note": "What the row opens - 'capacitor' today. Becomes a kindId the day the capacitor is a buildingType row (M8 item 11)." },
+        "needsKind": { "type": "uint16", "note": "The kindId whose standing starts the countdown. values.js writes it by codeName (needs.type) because the registry is keyed by name until M20 numbers it." },
+        "needsLevel": { "type": "uint8", "note": "The level that building must have reached and finished. values.js needs.tier." },
+        "afterYears": { "type": "uint8", "note": "Game years after which the row opens. values.js afterYears; index.html multiplies by its game-year milliseconds." }
+      }
+    },
+    "power": {
+      "home": "chain",
+      "note": "A POWER IS A ROW (decision 8: Adding a power is data, not code), and this is the row - the five fields of The power template, plus its identity. A new ability is a row here and nothing is redeployed; only the fight and the dice that decide a fight ever need replacing (What has to be replaceable when an ability is added). NOTHING READS A POWER YET: neither copy of the fight has an input for one, and M14 item 2 builds that - every place that applies a behaviour must read its amount from this row and never from a fixed list. HELD BACK, both the deployer's: (d) whether a building may carry one - buildingType.abilityId stays as it is until that is answered - and (e) whether a game records the fight's address beside its rules id. And one question the template does not answer, asked in Still open for the deployer: ON WHOM a power acts - its carrier, its neighbours, or everyone on its side. No field for it until it is answered.",
+      "fields": {
+        "id": { "type": "uint16", "note": "The identity. A number, like buildingType.kindId, so a new power is a new row and no contract is redeployed. item.abilityId points here." },
+        "carrierTypeId": { "type": "uint16", "note": "WHAT CARRIES IT - the weapon, accessory, hat or other item the power lives on, as item.typeId. DECIDED: a power is attached to something, never a loose ability a Friend simply has. Whether that something may also be a building is (d), the deployer's." },
+        "amounts": { "type": "uint32[]", "note": "WHICH BEHAVIOURS IT TOUCHES, AND BY HOW MUCH - one entry per member of the `behaviour` enum, in its order, zero where the power touches none. A power may touch more than one: Hover is Reach and Speed, Portal is Reach and Sight. The unit of each amount is the economist's." },
+        "holders": { "type": "address[]", "decided": false, "note": "WHO MAY HOLD IT - 'which players are allowed it', the deployer's add-a-power row. Empty for everyone. THE SHAPE IS NOT DECIDED - a list, a role in RareRoles, or a collection; the template says only that the field exists." },
+        "usesPerDay": { "type": "uint8", "note": "USES PER DAY. DECIDED: one a day for every power there is; a power added later states its own on the add-a-power form. A starting value on the deployer page, so a row's field and not a constant." },
+        "worth": { "type": "uint128", "note": "WHAT IT IS WORTH - one number per power, not one per weapon. No value here; the economist's. item.power, the undecided number, was retired into this row." }
+      }
+    },
+    "fightHash": {
+      "home": "chain",
+      "built": "RareFightLog.Record",
+      "note": "THE CHAIN'S HALF OF A FIGHT, and the reason `fight` can live on the server: a hash of the fight's inputs and its result, published AT THE TIME THE FIGHT HAPPENS by the server's RECORD_FIGHT key (A hash of every fight, published as it happens; RareFightLog.commitFight; ruling 18). Write-once per (game, fightId): rewriting it is the one thing the contract exists to make impossible. It does not make the server trustworthy; it makes it auditable - anyone can hash the moves they are shown and compare with what was published on the day. The two fields that are not in the struct are the mapping's keys, marked `key`.",
+      "fields": {
+        "game": { "type": "ref", "ref": "game", "key": true, "note": "The mapping's first key. On the contract from its first line because it cannot be added after M20 deploys: a fight id repeats across games." },
+        "fightId": { "type": "uint64", "key": true, "note": "The mapping's second key: fight.id." },
+        "hash": { "type": "bytes32", "note": "keccak over the fight's inputs and result - combat.js fightHash, BINDING §55. Zero means nothing was committed, so zero may not be written." },
+        "blockNumber": { "type": "uint64", "note": "When it was committed, so 'published before the sync' is checkable rather than trusted." }
+      }
+    },
+    "syncHead": {
+      "home": "chain",
+      "note": "HOW THE SERVER'S RECORD AND THE CHAIN'S STAY IN STEP - M3 item 7's open half, as the rulings give it: one head per game-clock HOUR (rulings 16 and 18), BINDING §17's chained word over every move in the period, written once per (game, period) by the RECORD_SYNC key (RareFightLog.commitSync). The sync job backs up the moves and then checks the two records against this; on a mismatch that game's fight writes pause, the deployer is alerted, and the server's record stands until the deployer resolves it (ruling 3). ranking.recomputedScoreboard is the same redundancy from a reader's side. What BINDING.md still owes is the write-up of the fold itself; the shape is here. A bare mapping on the contract, so no struct to hold this to.",
+      "fields": {
+        "game": { "type": "ref", "ref": "game", "key": true, "note": "The mapping's first key." },
+        "period": { "type": "uint64", "key": true, "note": "The index of the hourly game-clock period being closed." },
+        "head": { "type": "bytes32", "note": "The chained word over the period's moves. Zero means none was written." }
+      }
+    },
+    "base": {
+      "home": "server",
+      "note": "HOME: THE SERVER, since M3 item 5 - the base as it is played is the server's live record, and the chain holds the record of it (see homes.server); four fields below are pinned to the chain because they are property or a commitment, not play. THE BASE'S RECORDED STATE - the first of BINDING §12's eight gaps and the one the other five wait on. It used to be specified only by base.defense() inside index.html, a client belief; since M6 the base has a RECORD in this shape (estate/record.js: ledger, head, moves, apply) and the fight's view is read off it (Record.defense). §10.2, §10.5.2, §10.6 and §10.7 all read it.",
       "gap": "baseState",
       "milestone": "M6",
       "fields": {
         "id": { "type": "uint64", "note": "The base. index.html already carries this: BASES, HOME and ofBase(id) exist because every building and every Friend belongs to a base." },
         "game": { "type": "ref", "ref": "game", "note": "A base is per game." },
-        "ownerCollection": { "type": "address", "note": "The Genesis collection. M3 item 8." },
-        "ownerTokenId": { "type": "uint256", "note": "The Genesis token that owns this base. NOT an address: the owner is the token, so selling the base is a token transfer." },
+        "ownerCollection": { "type": "address", "home": "chain", "note": "The Genesis collection. M3 item 8." },
+        "ownerTokenId": { "type": "uint256", "home": "chain", "note": "The Genesis token that owns this base. NOT an address: the owner is the token, so selling the base is a token transfer." },
         "purse": { "type": "address", "derived": true, "note": "tokenBoundAccount(ownerTokenId). Derived, never stored." },
         "crystals": { "type": "uint128", "unit": "hundredths", "note": "What the base holds. Capped by its silo's capacity, which is why the cap is a buildingType field and not a constant. CRYSTALS HAVE NO ON-CHAIN EXISTENCE TODAY - BINDING §20.1 grepped for it and found nothing in any .sol file - and this is the field that gives them one. See `oneHome` and the crystalLedger entity." },
         "wood": { "type": "uint128", "unit": "hundredths", "note": "Level 1 is built of logs. Same standing as crystals: nothing on chain holds it today." },
-        "ordersCommit": { "type": "bytes32", "note": "One word per base, the sealed standing orders - BINDING §11.3, and the commitment must predate any fight against it. Declared on the base and not on the fight for exactly that reason: a field on the fight row would be written after the fight exists." },
-        "ordersCommitAt": { "type": "uint64", "note": "When it was sealed. The ordering rule is 'the line-up is committed before the word is requested', and a timestamp is what lets that be checked rather than trusted." }
+        "ordersCommit": { "type": "bytes32", "home": "chain", "note": "One word per base, the sealed standing orders - BINDING §11.3, and the commitment must predate any fight against it. Declared on the base and not on the fight for exactly that reason: a field on the fight row would be written after the fight exists." },
+        "ordersCommitAt": { "type": "uint64", "home": "chain", "note": "When it was sealed. The ordering rule is 'the line-up is committed before the word is requested', and a timestamp is what lets that be checked rather than trusted." }
       }
     },
 
     "tile": {
-      "home": "chain",
+      "home": "server",
       "note": "A tile a base holds. The claim, not the terrain - the terrain's home is the seed. base.defense() returns baseTiles(id) mapped to x,y pairs and the fight derives its entry vector from the bounding box of exactly this list.",
       "gap": "baseState",
       "milestone": "M6",
@@ -284,7 +351,7 @@
     },
 
     "building": {
-      "home": "chain",
+      "home": "server",
       "note": "One building on one base. Every field BINDING §10.2 says a wall list must come from, and §19.1's row: kind, level, tile, direction for a wall, FINISHED-OR-BUILDING, progress. `!b.build` is load-bearing - an unfinished wall is not a wall - and it is a flag in a page today.",
       "gap": "baseState",
       "milestone": "M6",
@@ -299,12 +366,13 @@
         "finished": { "type": "bool", "note": "BINDING §10.2: '!b.build is load-bearing and an unfinished wall is not a wall'. A fight must not count it and the page's flag is not a record." },
         "startedAt": { "type": "uint64", "note": "When it went up. Progress is DERIVED from this plus buildingType.buildMs, not stored - a stored percentage is a second home for a clock." },
         "strengthLeft": { "type": "uint32", "note": "Damage taken, as what is left. A wall that survived a fight is not a fresh wall, and the record has to say so or the next fight replays against a wall that was already broken." },
-        "harvesters": { "type": "uint8", "note": "A collection depot only, capped by buildingType.capacity. index.html carries it on the building row already." }
+        "harvesters": { "type": "uint8", "note": "A collection depot only, one a depot level (record.js harvester). index.html carries it on the building row already." },
+        "hands": { "type": "uint64[]", "note": "M8 item 3. The log of how many Friends work this building's build, as pairs [[at, n], ...] in time order (on chain, flattened at, n, at, n), written by the `hands` move; before its first entry one Friend works. Progress is DERIVED from startedAt, buildingType.buildMs, buildingType.hands and this log (record.js worked), never stored. Left off the row when empty." }
       }
     },
 
     "towerWatch": {
-      "home": "chain",
+      "home": "server",
       "note": "Who is standing watch in a watchtower. §19.1: 'the watchtower's occupant'. One Friend to a tower, and their generation sets the defence while the level sets the reach - so this row is read by the fight and by nothing else.",
       "gap": "baseState",
       "milestone": "M6",
@@ -315,7 +383,7 @@
     },
 
     "wallCrew": {
-      "home": "chain",
+      "home": "server",
       "note": "A wall's crew, and EACH MEMBER'S SLOT. BINDING §10.6 is explicit that the slot is part of the truth, not a display detail: the crew stand side by side along the wall's own axis and the slot decides which spot each one occupies, so a fight fought with the slots shuffled is a different fight.",
       "gap": "baseState",
       "milestone": "M6",
@@ -327,7 +395,7 @@
     },
 
     "rosterRow": {
-      "home": "chain",
+      "home": "server",
       "note": "A posted Friend, per game. BINDING §19.1: { collection, tokenId, gen, x, y, tower, post slot }, and §12 says none of it has a home today. Part one §4.4 says every field of it is chain state. SNAPSHOT AT JOIN, DO NOT RE-READ EACH FIGHT (§4) - which is why gen is stored here having been READ at join, and is not a supplied value.",
       "gap": "rosterStorage",
       "milestone": "M7",
@@ -358,8 +426,7 @@
         "id": { "type": "uint64", "note": "The item itself, as distinct from its type: two swords of one type are two items." },
         "typeId": { "type": "uint16", "note": "A registry id, for the same reason buildingType.kindId is: a new item must not be a redeploy." },
         "holder": { "type": "address", "note": "Who has it. An address and not a Friend, until DESIGN says an item is carried rather than owned." },
-        "power": { "type": "uint32", "decided": false, "note": "NO VALUE, NO UNIT, AND NOT ONE SCALE DECIDED. 'An item and its power' is all DESIGN says. M14's and the economist's." },
-        "abilityId": { "type": "uint16", "note": "Where an item's behaviour lives, on the same footing as buildingType.abilityId and for the same reason." },
+        "abilityId": { "type": "ref", "ref": "power", "note": "THE POWER THIS ITEM CARRIES - (c) of What has to be replaceable when an ability is added: a reference to the power row, which is where the amounts and the worth live. The undecided number `item.power` that used to sit beside this was retired into power.amounts and power.worth. The name keeps `ability` because DESIGN's naming row (power / ability) is live and not decided; the row it points at is called power." },
         "uses": { "type": "uint32", "decided": false, "note": "Whether an item is consumed is not decided." }
       }
     },
@@ -380,7 +447,7 @@
     },
 
     "fight": {
-      "home": "chain",
+      "home": "server",
       "note": "A fight, and the lifecycle BINDING §12 says has no contract to put it in: a fight id, LinedUp/Rolling/Settled, and the sealing. The row is its INPUTS AND ITS RESULT TOGETHER, never the result alone (§17.2.4) - that is what makes 'fights resolve off chain and the chain records the result' safe rather than a promise, because the recorded result carries everything needed to reproduce it.",
       "gap": "fightLifecycle",
       "milestone": "M13",
@@ -401,8 +468,8 @@
         "ordersOpened": { "type": "bytes32", "note": "The revealed orders, checked against base.ordersCommit. WHO OPENS THEM AND WHAT A FIGHT THAT IS NEVER OPENED DOES IS UNDECIDED - BINDING §13 item 6 and §11.7, DESIGN's own named open problem." },
         "settleDeadline": { "type": "uint64", "decided": false, "note": "NO VALUE. BINDING §16.4 is blunt that a settlement that never arrives is the live failure, and the two precedents in RareDuel draw the line: where somebody failed to do their part the default punishes them (forfeit); where everybody did their part and the machinery failed the default awards nothing and hands the money back (refundStuck). WHAT A FIGHT'S DEFAULT OUTCOME IS is the deployer's." },
         "result": { "type": "bytes32", "note": "The outcome, hashed: who won, why, how long, and the hit points left on both sides and on every wall. RareCombat.Result is the shape. Stored as a hash and not a struct because the blow-by-blow is DERIVED - RareCombatLab.fight reproduces it from rulesId, word, line-up and snapshot, free, and it is the largest thing in the game and the most perfectly reproducible." },
-        "bond": { "type": "uint128", "decided": false, "note": "RESERVED FOR A DISPUTE PROCESS THAT DOES NOT EXIST. BINDING §18: a scoreboard updated from an off-chain replay that nobody can challenge is a scoreboard we are asserting. No submitter, no bond, no window, no deadline; 'dispute' appears once in DESIGN. THE FIELD IS HERE SO THE HOLE HAS A SHAPE, and the hole is NOT closed by this file." },
-        "challengeDeadline": { "type": "uint64", "decided": false, "note": "Same standing as `bond`. Reserved, undecided, and named so nothing reports the gap as covered." }
+        "bond": { "type": "uint128", "decided": false, "note": "RESERVED FOR A DISPUTE PROCESS THAT V1 DECLINES. The deployer, 2026-09-30 (Fights resolve on our server): no dispute machinery and no $RF bond escrow in v1, both deferred on purpose, because a contract custodying a bond is permanent and a permanent contract for a deferred mechanism is the worst of both. BINDING §18's sentence - a scoreboard nobody can challenge is one we assert - is answered by auditability instead: fightHash as the fight happens, syncHead each hour. THE FIELD STAYS SO V2 HAS A NAMED PLACE; it holds nothing in v1." },
+        "challengeDeadline": { "type": "uint64", "decided": false, "note": "Same standing as `bond`: reserved for V2, declined in v1 by the same ruling, and named so nothing reports the gap as filled rather than declined." }
       }
     },
 
@@ -434,7 +501,7 @@
 
     "scoreboard": {
       "home": "chain",
-      "note": "PER PLAYER PER GAME, MAINTAINED MOVE BY MOVE IN THE SAME TRANSACTION AS THE MOVE. Not derived privately off chain and pushed back - that is the natural cheap design and it reintroduces the missed-second-write failure permanently. The RANKING is not here: it is derived, because storing it means writing N players' ranks every time one player moves.",
+      "note": "PER PLAYER PER GAME, MAINTAINED MOVE BY MOVE IN THE SAME TRANSACTION AS THE MOVE. Not derived privately off chain and pushed back - that is the natural cheap design and it reintroduces the missed-second-write failure permanently. The RANKING is not here: it is derived, because storing it means writing N players' ranks every time one player moves. HOW THE SCOREBOARD AND THE MOVES STAY IN STEP (M3 item 7's open half, as the rulings give it): the server's session write folds the moves into game.moveRoot and credits this row in the same transaction (move); every fight's hash is public before any sync (fightHash); each hour's head is written once (syncHead) and the sync job checks the two records against it; on a mismatch ruling 3 applies - the server's record stands, the game's fight writes pause, the deployer is alerted. The fold's write-up in BINDING.md is still a chain engineer's; the shape is here.",
       "milestone": "M18",
       "fields": {
         "game": { "type": "ref", "ref": "game", "note": "Which game." },
@@ -550,24 +617,115 @@
 
   "oneHome": {
     "note": [
-      "M3 ITEM 1, MADE MECHANICAL. Each row is one piece of state that exists in more than one place today,",
-      "the single home it is going to have, and the copies that must leave. `stillThere` is what schemacheck",
-      "greps for: while a copy is still in the file, the row is live. When the extraction happens the row is",
-      "marked gone and the check stops looking. So the list cannot go stale by being forgotten - it goes red.",
+      "M3 ITEM 1, MADE MECHANICAL. Each row is one piece of state that existed in more than one place, the",
+      "single home it has, and the copies that had to leave. Every COPY carries its own state, because a row",
+      "can be half done: `stillThere` is the copy's exact text, and while the copy is live schemacheck greps",
+      "for it and goes red if it has quietly gone. A copy marked `gone` is held the other way - its text must",
+      "be ABSENT, and `nowReads` names the text that must be PRESENT in its place, so a copy that creeps back",
+      "and a reader that is deleted both go red. A copy that is live and `waitsOn` something says what: M6",
+      "(the state index.html holds in memory is M6's lock), M12 (mapgen.js is M12's), M20 (the chain record),",
+      "or the deployer (a ruling the schema cannot make).",
       "",
-      "EVERY ROW WHOSE FILE IS estate/index.html IS THE CONTENDED WORK. A front-end agent is in that file.",
-      "Nothing in this file touched it."
+      "THE EXTRACTION LANDED 2026-09-30. The chain-homed numbers left index.html for estate/values.js, the one",
+      "home, in the same change that re-pointed contracts/paritycheck.js, gencheck.js and hashcheck.js at it",
+      "(DESIGN M3: 'the extraction and re-pointing paritycheck are one change, not two'). What is still live",
+      "below is RUNNING STATE and RULINGS, not numbers: nothing left can move until a persistence layer, a",
+      "chain record or a deployer decision exists, and each copy says which."
     ],
     "rows": [
-      { "what": "the rules table", "home": "chain", "entity": "rules", "todayAlso": [{ "file": "estate/index.html", "stillThere": "const ECON = {", "why": "assembled from 25 live constants into one object the page hands to Combat.rulesFrom(); a client belief describing what a fight is decided by" }, { "file": "estate/combat.js", "stillThere": "function rulesFrom(E, proposed)", "why": "the assembler. It stays as the READER of the chain's table; what must stop is it reading ECON" }], "gone": false },
-      { "what": "the building registry", "home": "chain", "entity": "buildingType", "todayAlso": [{ "file": "estate/index.html", "stillThere": "const KIND = {", "why": "names, level names and crystal costs" }, { "file": "estate/index.html", "stillThere": "const WOOD_COST = {", "why": "the wood half of the same row, in a second place" }, { "file": "estate/index.html", "stillThere": "const SILO_CAP = [", "why": "one kind's capacity, in a third place" }, { "file": "estate/index.html", "stillThere": "const CELL_REACH = [", "why": "one kind's reach, in a fourth place" }, { "file": "estate/index.html", "stillThere": "const CELL_NEEDS = {", "why": "one kind's placement rule, in a fifth place" }, { "file": "estate/index.html", "stillThere": "function lockReason(k)", "why": "the placement rule AS CODE - M3 item 3 says it must be data the building carries" }], "gone": false },
-      { "what": "the base's recorded state", "home": "chain", "entity": "base", "todayAlso": [{ "file": "estate/index.html", "stillThere": "function defense(id = HOME)", "why": "THE ONLY SPECIFICATION OF THE BASE THAT EXISTS, and it is a page function. It reads buildings, actors, crews, occupants and posts and returns what a fight is decided by" }, { "file": "estate/index.html", "stillThere": "const buildings = WORLDGEN", "why": "the building rows themselves" }, { "file": "estate/index.html", "stillThere": "const PURSE = new Map(", "why": "the crystals and the wood" }], "gone": false },
-      { "what": "a crystal balance", "home": "chain", "entity": "crystalLedger", "todayAlso": [{ "file": "estate/schema.json", "stillThere": "\"balance\": { \"type\": \"uint128\"", "why": "DECLARED TWICE ON PURPOSE - base.crystals and crystalLedger.balance. Exactly one survives and `crystalLedger.shape` decides which. Recorded so it cannot be forgotten once rather than found twice" }, { "file": "estate/index.html", "stillThere": "crystals: id === HOME", "why": "the purse, a client belief. Nothing on chain holds a crystal today" }], "gone": false },
-      { "what": "the entry gap", "home": "chain", "entity": "fight", "todayAlso": [{ "file": "estate/schema.json", "stillThere": "\"entryGap\"", "why": "DECLARED TWICE ON PURPOSE - rules.entryGap and fight.gap. If the attacker picks it, it is a fight field; if the game fixes it, it is a rules field. BINDING §13 item 4 is the deployer's, and one of the two must go when it is answered" }, { "file": "estate/attack_defense.html", "stillThere": "data-gap", "why": "three mockup buttons and a default, which is a value in a page standing in for a ruling" }], "gone": false },
-      { "what": "the standings record", "home": "chain", "entity": "scoreboard", "todayAlso": [{ "file": "estate/standings-data.json", "stillThere": "\"players\"", "why": "M3 item 7's own words: a sample file full of invented owners. The deploy script already refuses to stage it; the schema is what replaces it" }], "gone": false },
-      { "what": "a defender's standing order", "home": "chain", "entity": "rosterRow", "todayAlso": [{ "file": "estate/index.html", "stillThere": "const ORDERS = [", "why": "the four orders and their on-chain indices. The LIST is consensus and belongs in the schema; the page keeps a reader, not the definition" }], "gone": false },
-      { "what": "the hit-point table", "home": "chain", "entity": "rules", "todayAlso": [{ "file": "estate/index.html", "stillThere": "const HP_OF = {", "why": "ALREADY HELD TO ONE SOURCE BY gencheck.js, which reads it through paritycheck's readConst and compares it with the table the Solidity is held to. So this row is the one piece of the rules table that ALREADY has a single-home check - and it proves the pattern the rest of the table needs" }], "gone": false }
+      { "what": "the rules table", "home": "chain", "entity": "rules", "todayAlso": [
+        { "file": "estate/index.html", "stillThere": "const ECON = {", "why": "assembled from 25 live constants into one object the page handed to Combat.rulesFrom(); a client belief describing what a fight is decided by", "gone": true, "nowReads": { "file": "estate/index.html", "text": "const ECON = Object.assign({}, V, {" }, "now": "ECON is a VIEW: values.js spread in first, then only what the page alone knows - the map it draws, the clock derived from the length, the plaque's numbers. It defines no chain-homed number." },
+        { "file": "estate/index.html", "stillThere": "Combat.rulesFrom(ECON)", "why": "the page handed its own view to the assembler. rulesFrom() stays in combat.js as the READER of the chain's table; what had to stop was it being handed ECON", "gone": true, "nowReads": { "file": "estate/index.html", "text": "Combat.rulesFrom(V)" } }
+      ] },
+      { "what": "the building registry", "home": "chain", "entity": "buildingType", "todayAlso": [
+        { "file": "estate/index.html", "stillThere": "const KIND = {", "why": "names, level names and crystal costs", "gone": true, "nowReads": { "file": "estate/index.html", "text": "const KIND = V.kinds" } },
+        { "file": "estate/index.html", "stillThere": "const WOOD_COST = {", "why": "the wood half of the same row, in a second place", "gone": true, "nowReads": { "file": "estate/index.html", "text": "[k, r.wood[0]]" } },
+        { "file": "estate/index.html", "stillThere": "const SILO_CAP = [", "why": "one kind's capacity, in a third place", "gone": true, "nowReads": { "file": "estate/index.html", "text": "V.kinds.silo.capacity" } },
+        { "file": "estate/index.html", "stillThere": "const CELL_REACH = [0, 2, 3, 4, 5]", "why": "one kind's reach, in a fourth place (the anchor is the whole literal: the page still builds a tier-indexed CELL_REACH, off the row)", "gone": true, "nowReads": { "file": "estate/index.html", "text": "V.kinds.cell.reach" } },
+        { "file": "estate/index.html", "stillThere": "const CELL_NEEDS = {", "why": "one kind's placement rule, in a fifth place", "gone": true, "nowReads": { "file": "estate/index.html", "text": "V.kinds.cell.placement.scienceGen" } },
+        { "file": "estate/index.html", "stillThere": "function lockReason(k)", "why": "the placement rule AS CODE - M3 item 3 says it must be data the building carries", "gone": true, "nowReads": { "file": "estate/index.html", "text": "V.kinds[k].placement" }, "now": "lockReason(k, id) reads the row's placement (isKeep, needsKeep, maxPerBase) and knows no building by name" }
+      ] },
+      { "what": "the base's recorded state", "home": "server", "entity": "base", "todayAlso": [
+        { "file": "estate/index.html", "stillThere": "function defense(id = HOME)", "why": "THE ONLY SPECIFICATION OF THE BASE THAT EXISTED, and it is a page function. It reads buildings, actors, crews, occupants and posts and returns what a fight is decided by", "gone": true, "nowReads": { "file": "estate/index.html", "text": "Record.defense(" }, "now": "M6: the base has a RECORD (estate/record.js - the ledger in this schema's shape, its head, the session's moves and the one rule that takes a write). Record.defense(ledger, clock, tiles) is the fight's view read off the record; the page's defense() is one line that hands it the home base's session ledger. The ground (tiles) is still the page's derivation from its cells - the one input not in the ledger" },
+        { "file": "estate/index.html", "stillThere": "const buildings = WORLDGEN", "why": "the START PLAN - the rows a new base is created holding - typed into the page", "gone": true, "nowReads": { "file": "estate/index.html", "text": "V.startBase.buildings" }, "now": "the running `buildings` array is in-memory state and stays (see defense); only its starting contents moved" },
+        { "file": "estate/index.html", "stillThere": "const PURSE = new Map(", "why": "the crystals and the wood", "gone": true, "nowReads": { "file": "estate/index.html", "text": "Record.baseRow(" }, "now": "M6: the purse is the record's base row (record.js baseRow - this schema's base.crystals and base.wood), restored from the store on open and written back as part of the session's one batch; nothing in the page holds a crystal the record does not" }
+      ] },
+      { "what": "a crystal balance", "home": "chain", "entity": "crystalLedger", "todayAlso": [
+        { "file": "estate/schema.json", "stillThere": "\"balance\": { \"type\": \"uint128\"", "why": "DECLARED TWICE ON PURPOSE - base.crystals and crystalLedger.balance. Exactly one survives and `crystalLedger.shape` decides which. Recorded so it cannot be forgotten once rather than found twice", "waitsOn": "deployer", "because": "crystalLedger.shape is the deployer's (needsDeployer 3)" },
+        { "file": "estate/index.html", "stillThere": "crystals: id === HOME", "why": "the purse, a client belief. Nothing on chain holds a crystal today", "gone": true, "nowReads": { "file": "estate/index.html", "text": "crystals: L.base.crystals" }, "now": "M6: the page's purse is restored from the record's base row and every change to it is a move the record replays (build, raise, harvester, gather, demolish). Still a client-and-server belief: nothing on chain holds a crystal, which is crystalLedger.shape's question" }
+      ] },
+      { "what": "the entry gap", "home": "chain", "entity": "fight", "todayAlso": [
+        { "file": "estate/schema.json", "stillThere": "\"entryGap\"", "why": "DECLARED TWICE ON PURPOSE - rules.entryGap and fight.gap. If the attacker picks it, it is a fight field; if the game fixes it, it is a rules field. BINDING §13 item 4 is the deployer's, and one of the two must go when it is answered", "waitsOn": "deployer", "because": "needsDeployer 2" },
+        { "file": "estate/attack_defense.html", "stillThere": "data-gap", "why": "three mockup buttons and a default, which is a value in a page standing in for a ruling", "waitsOn": "deployer", "because": "which entity the gap belongs to IS the ruling; until it is made there is no field in values.js to move the three buttons' values to without choosing for the deployer" }
+      ] },
+      { "what": "the standings record", "home": "chain", "entity": "scoreboard", "todayAlso": [
+        { "file": "estate/standings-data.json", "stillThere": "\"players\"", "why": "M3 item 7's own words: a sample file full of invented owners. The deploy script already refuses to stage it; the schema is what replaces it", "waitsOn": "M20", "because": "standings.html's only source until the chain record exists; M20 writes the record and the page is re-pointed then" }
+      ] },
+      { "what": "a defender's standing order", "home": "chain", "entity": "rosterRow", "todayAlso": [
+        { "file": "estate/index.html", "stillThere": "const ORDERS = [", "why": "the four orders and their on-chain indices. The LIST is consensus and belongs in the schema; the page keeps a reader, not the definition", "gone": true, "nowReads": { "file": "estate/index.html", "text": "const ORDERS = Combat.ORDERS" }, "now": "combat.js declares the list once and schemacheck holds it to the `order` enum; the page reads it" }
+      ] },
+      { "what": "the hit-point table", "home": "chain", "entity": "rules", "todayAlso": [
+        { "file": "estate/index.html", "stillThere": "const HP_OF = {", "why": "ALREADY HELD TO ONE SOURCE BY gencheck.js, which reads it through paritycheck's readConst and compares it with the table the Solidity is held to. So this row was the one piece of the rules table that ALREADY had a single-home check - and it proved the pattern the rest of the table needed", "gone": true, "nowReads": { "file": "estate/index.html", "text": "const HP_OF = V.hp" }, "now": "values.js declares it; gencheck, paritycheck and hashcheck read it there with the same parser" }
+      ] },
+      { "what": "the gathering numbers the map generator defaults to", "home": "chain", "entity": "economy", "todayAlso": [
+        { "file": "estate/mapgen.js", "stillThere": "const ECON_DEFAULT = {", "why": "FOUND BY THE EXTRACTION, not on the first list of 18: generate()'s fallback econ types growMs 36000 and regrowMs 45000 a second time, and treeWood in a different unit (3 logs against values.js's 300 hundredths). mapgen.html already prefers base.ECON when it can reach it, so the copy is a fallback - and a fallback copy is the second declaration all over again", "waitsOn": "M12", "because": "mapgen.js is M12's lock. The fix is generate() reading values.js's economy and keeping only the MAP parameters (homeSeams, wildSeams, groves, treesPerGrove) as its own defaults - those are frozen at the seed and belong to the map" }
+      ] }
     ]
+  },
+
+  "values": {
+    "file": "estate/values.js",
+    "note": [
+      "THE ONE HOME'S INDEX. values.js carries every chain-homed number; this says which schema field each",
+      "one is, so a value with no field in the schema cannot be added quietly (schemacheck resolves every",
+      "entry here against `entities`) and the schema cannot describe a value that nothing holds. A key that",
+      "maps to an entity rather than a field is a table whose shape the entity gives (kinds, weapons,",
+      "combat, startBase). `kindRow` does the same for the columns of a kind's row; `sub` is display copy and",
+      "says so. `readers` are the places that must READ the file - the proof that M3 items 1 and 3 are code",
+      "and not a drawing: if any of these strings leaves its file, the check goes red."
+    ],
+    "keys": {
+      "crystalUnit": "economy.crystalUnit", "startPurse": "economy.startPurse", "startWood": "economy.startWood",
+      "gameLengthH": "game.length", "yearDiv": "economy.yearDiv", "unlocks": "unlock",
+      "growMs": "economy.growMs", "handYield": "economy.handYield", "harvCost": "economy.harvCost",
+      "treeWood": "economy.treeWood", "chopMs": "economy.chopMs", "regrowMs": "economy.regrowMs",
+      "buildMs": "buildingType.buildMs", "kinds": "buildingType", "stageYieldBps": "economy.stageYieldBps",
+      "hp": "rules.hp", "wallHp": "rules.wallHp", "weapons": "rules", "combat": "rules",
+      "startBase": "base"
+    },
+    "kindRow": {
+      "tiers": "buildingType.levelName", "cost": "buildingType.crystalCost", "wood": "buildingType.woodCost",
+      "capacity": "buildingType.capacity", "reach": "buildingType.reach", "footprint": "buildingType.footprint",
+      "placement": "buildingType.placement", "sub": "client",
+      "strength": "buildingType.strength", "energy": "buildingType.energy", "supply": "buildingType.supply",
+      "release": "buildingType.release", "leak": "buildingType.leak", "proposed": "client",
+      "buildMs": "buildingType.buildMs", "hands": "buildingType.hands"
+    },
+    "readers": {
+      "the page loads it": { "file": "estate/index.html", "text": "<script src=\"values.js\">" },
+      "the page reads it": { "file": "estate/index.html", "text": "const V = window.VALUES" },
+      "the placement rule is read (M3 item 3)": { "file": "estate/index.html", "text": "V.kinds[k].placement" },
+      "the footprint is read (M3 item 3)": { "file": "estate/index.html", "text": "grid.footprintOf(b)" },
+      "the parity check fights with it": { "file": "estate/contracts/paritycheck.js", "text": "'../values.js'" },
+      "gencheck holds the HP table to it": { "file": "estate/gencheck.js", "text": "'values.js'" },
+      "hashcheck hashes it": { "file": "estate/hashcheck.js", "text": "'values.js'" },
+      "combatcheck reads the HP table and the shot clock from it": { "file": "estate/combatcheck.js", "text": "'values.js'" },
+      "capturecheck reads the wall's HP from it": { "file": "estate/capturecheck.js", "text": "'values.js'" }
+    }
+  },
+
+  "pieces": {
+    "note": "M3 ITEM 2'S LIST, item by item, each pointed at the entity that holds it - so 'every piece on the list has a home' is a check and not a sentence. What the list did NOT name and the extraction found is `economy` and `unlock`: the numbers the purse grows by and what the year opens had no entity until values.js needed one.",
+    "who a player is and what they hold": ["player", "genesis", "friend", "hire"],
+    "a base, its tiles and its owner": ["base", "tile"],
+    "a building's kind, level, position, footprint, strength and progress": ["building", "buildingType"],
+    "a Friend's generation, family, seed, position, job and what it carries": ["friend", "rosterRow"],
+    "an item and its power": ["item"],
+    "the purse": ["base", "crystalLedger", "economy"],
+    "a map's seed and the parameters frozen with it": ["map"],
+    "a game's state, its players and its pot": ["game"],
+    "a partnership and its split": ["partnership"],
+    "a marketplace listing": ["listing"]
   },
 
   "needsDeployer": [
@@ -581,7 +739,9 @@
     "A fight's default outcome when it is never settled or never opened, and who opens sealed orders.",
     "A base with more than 16 finished wall sections: which 16 are fought, or whether the cap rises.",
     "Whether a rented Friend defends, and whose ownership check it passes.",
-    "The dispute process - submitter, bond, window, deadline. NOT COVERED BY THIS FILE and BINDING §18 is right that without it the scoreboard is asserted.",
-    "Where an overflowing duel prize goes when the winner's depot is full."
+    "The dispute process - submitter, bond, window, deadline - FOR V2. The deployer declined it for v1 (Fights resolve on our server: no dispute machinery, no bond escrow), so it is not a v1 question; it is here so V2's question is not lost, and fight.bond and fight.challengeDeadline hold its place.",
+    "Where an overflowing duel prize goes when the winner's depot is full.",
+    "M3 item 4 (d): may a building carry a power, and may a power act on someone other than its carrier - recommended yes to both, not decided. Decides whether buildingType.abilityId becomes a ref to power or leaves the schema, and whether power gains an 'on whom' field.",
+    "M3 item 4 (e), PROPOSED: a game records the fight's address when it is made, beside its rules id, so a fight from an old game is still checked against the fight it was fought under after the fight has been re-pointed."
   ]
 }

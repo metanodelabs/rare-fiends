@@ -355,6 +355,11 @@ tile/s), the clock (120 s), the cover number (2), the splash falling off by half
 `stepMs`, `maxMs`, `coverDiv` and the splash rule — plus `defendReach`, written as *"`defendTiles`
 (PROPOSED 5)"*. Five `Rules` fields are proposals. **The deployer decides them; a contract must not.**
 
+**DECIDED 2026-10-01 (DESIGN rulings 44 to 47), see §63:** `maxMs` is gone from `Rules` (no fight clock);
+`coverDiv` is 2 and now applies to a Friend standing ON a wall, never behind one; `stepMs` stays
+1000 / (2 x 1 tile a second) and is the deployer's to tune; `defendReach` stays 5 tiles. The splash rule
+is still undecided.
+
 **Cost, and whether it changes the answer.** Packed, the table is about 208 bytes — seven words — so
 seven cold `SLOAD`s, **14,700 gas, 0.71% of `fightAvg`**. Arithmetic on Cancun constants, not a
 measurement (§4.3). **It changes nothing.** The alternative is an attacker who sets his own hit points.
@@ -1731,6 +1736,36 @@ Labelled so they are not quoted as part of the above.
    Doopie — the same shape of defect as §26.2's fund-lock. The gas figure is still arithmetic and still
    wants a real node.
 
+### B2.6 The replay after `revoke` — found by the bridge proof, fixed before deploy (2026-09-30)
+
+**The defect.** `claim` checked three things: `shadowed[mint]` (false again after a revoke), the deadline
+(a claim lives `CLAIM_TTL` = 900 s) and the signature (still the attestor's). So a seller who bridged, sold
+on Solana and was revoked by the hourly run still held calldata the attestor had signed while they owned the
+Doopie, and could **re-send it** for up to fifteen minutes after signing: the shadow came back to the wallet
+that no longer held the original, until the next hour revoked it again. `estate/bridge-proof.mjs` (the
+bridge engineer, `b590636`) printed it as a FINDING against the compiled contract, not a mock.
+
+**The fix, in the contract.** `revoke` stamps `revokedAt[mint] = block.timestamp`, and `claim` refuses
+`c.deadline <= revokedAt[c.solMint] + CLAIM_TTL` with `ClaimPredatesRevoke()`. The only clock a claim
+carries is its deadline, and the attestor signs `deadline = now + CLAIM_TTL`, so `deadline - CLAIM_TTL` is
+when it was signed; anything signed **at or before the revoke's second** is refused. The contract cannot tell
+"same second, before" from "same second, after", so it refuses both, and a buyer asking the attestor one
+second later is unaffected. A mint never revoked has `revokedAt = 0`, and a deadline that small has already
+failed `ClaimExpired`, so nothing changes for a first claim.
+
+**What it ties together, on purpose.** `CLAIM_TTL` is now a constant **in the contract** (`uint64 public
+constant CLAIM_TTL = 15 minutes`), the same 900 the attestor exports, and the parity check asserts the two
+equal before it asserts the refusal. A shorter TTL in the attestor would only delay a buyer's fresh claim; a
+longer one would let a replay through for the difference. Like the `Claim` struct and the EIP-712 domain, it
+is permanent the moment M20 item 9 deploys.
+
+**Proved three ways, all re-runnable without a browser:** `paritycheck.js` — TTL equal, the replay refused by
+name, a claim signed one second after the revoke lands; `bridge-proof.mjs` — the FINDING line reads `ok`
+(the file now travels one second before the buyer bridges, with the reason written beside it); and the fix
+was broken on purpose for one run, which brought the FINDING back, and restored. Cost: `shadowClaim`
+1,884,541 → 1,887,038 (+2,497, the cold read of `revokedAt`), the contract 16,039 → 16,309 bytes, in
+memory, floors.
+
 ## B3. Three comments in `ShadowFriends.sol` contradict the code, and **the code is right**
 
 **FIXED 2026-09-30.** All three comments are corrected in `ShadowFriends.sol`, and — the half that matters
@@ -2740,7 +2775,9 @@ difficulty is the other currency.
 `grep -i` for `crystal` and for `ore` over `RareChance.sol`, `RareCombat.sol`, `RareDuel.sol`,
 `ShadowFriends.sol` and `test/Mocks.sol` returns **nothing at all**. There is no token, no balance and no
 ledger. `grep` for `gameId` over the same five files also returns **nothing**, and that second absence turns
-out to matter more than the first (§38.4).
+out to matter more than the first (§38.4). **MARKED 2026-09-30: the second absence is closed — `gameId` landed
+in `c071894` (§54's marker), and `grep -n gameId` over `estate/contracts/*.sol` now returns `RareDuel`,
+`RareFightLog` and `RareGame`. The first absence stands: still no crystal on chain.**
 
 **In the client they are a per-base purse, not a global number.** `index.html:574-576` builds
 `const PURSE = new Map(BASES.map(id => [id, { crystals: …, wood: 0 }]))` and `:579` reads it through
@@ -2900,7 +2937,8 @@ not a parameter added to `challenge`; it is that **the money verb becomes indire
    not today and should not be made to.
 3. **The duel needs a `gameId`, and `Duel` has no field for one.** A crystal balance is keyed by game
    (§19.1) and `grep` finds no `gameId` in any `.sol`. So `challenge` gains a game and `Duel` gains a field.
-   **This is the field that cannot be added later** — §38.4.
+   **This is the field that cannot be added later** — §38.4. **LANDED, `c071894`: `Duel.gameId`,
+   `challenge(gameId, ..)`, `Challenged(id, gameId indexed, ..)` — §54's marker has the proof.**
 4. **`_payOut` can partially succeed, and the remainder needs a decided destination.** `credit` returns what
    the depot accepted. A winner whose depot is nearly full wins a pot that does not fit. §21 item 12 asked
    where it goes and it still has no answer — **but it has changed status: it was a consequence to note, and
@@ -3312,8 +3350,11 @@ they are to add later:**
    `grep` finds **no `gameId` in any `.sol` file**. An $RF duel does not need one; a crystal duel cannot exist
    without one. **This is the field that cannot be added later, and it is the single most important sentence
    in this section.** Ship it and an $RF duel carries a game id it barely uses; omit it and crystals need a
-   new contract. **STILL NOT LANDED as of 2026-09-30, and re-verified rather than recalled: `grep -n gameId`
-   over every `.sol` file in `estate/contracts/` still returns nothing.** M20 items 4 and 13 were built
+   new contract. ~~**STILL NOT LANDED as of 2026-09-30, and re-verified rather than recalled: `grep -n gameId`
+   over every `.sol` file in `estate/contracts/` still returns nothing.**~~ **LANDED later the same day, in
+   `c071894`, and re-verified rather than recalled on 2026-09-30 (this pass): `grep -n gameId` returns
+   `RareDuel.sol` (the struct field, the `challenge` parameter, the indexed event argument), `RareFightLog.sol`
+   and `RareGame.sol`, which mints it; `fixcheck` part 15 reads it back off `Challenged` and `getDuel`.** M20 items 4 and 13 were built
    without it, deliberately — a game id has no meaning until games exist, adding a parameter to `challenge`
    changes the ABI the page calls, and item 13 asked for a gate rather than a currency. **That is a reason for
    not forcing it into this round, not a reason it can wait: it is still the one field that cannot be added
@@ -3804,8 +3845,9 @@ nothing in the game can ever be changed again. It is four lines and it is assert
 5. **The crystal leg.** §37.1 permits a crystal duel in demo mode and it cannot be built, because crystals
    have no on-chain existence. The error is already named for the day it can be — `PaidDuelsClosedInDemoMode`
    fires on the `$RF` branch — but **the branch it would sit beside is Part five's and is not built.**
-6. **`gameId`.** Not landed, re-verified by `grep`, and §38.4's marker now says so in place. **It is the only
-   thing on either of these two lists that cannot be added after M20 deploys.**
+6. **`gameId`.** ~~Not landed, re-verified by `grep`, and §38.4's marker now says so in place.~~ **Landed,
+   `c071894`; §38.4's marker and §54's say so in place.** It was the only thing on either of these two lists
+   that could not be added after M20 deploys, and it no longer waits on anything.
 
 **And one thing that is not owed by either item but is owed by somebody.** `estate/DESIGN.md` says the four
 parked contracts are *"1,079 lines in all"* and that M20 item 4 is *"partly delivered — `ShadowFriends.sol`
@@ -4622,9 +4664,16 @@ constant that fails loudly rather than silently is the acceptable kind.
   counts*, and two authorities is the state §16 exists to warn about.
 - **No `commitSync`.** See §56.
 
-## 54. `gameId` in `RareDuel` — specified, not yet built, and it must land before M20
+## 54. `gameId` in `RareDuel` — specified here, and LANDED (`c071894`) exactly as specified
 
-**Finding:** `gameId` appears in no `.sol` today. `RareDuel.Duel` has no game field, `challenge(opponent,
+**MARKED 2026-09-30, re-verified rather than recalled:** the table below was built line for line in
+`c071894` — `Duel.gameId`, `challenge(uint256 gameId, address opponent, uint128 stake, bytes32 commit)`,
+`Challenged(uint256 indexed id, uint256 indexed gameId, ..)`, `commitment` and the roll unchanged — and
+`RareGame` (§60) now mints the number. `fixcheck` part 15 reads `gameId` back off the `Challenged` event and
+off `getDuel`. The "open" paragraph at the end is answered the way it predicted: `RareGame.create` assigns it,
+and the duel and the fight log carry the same one. The finding below is kept as the record of why it mattered.
+
+**Finding (2026-09-30, earlier):** `gameId` appears in no `.sol` today. `RareDuel.Duel` has no game field, `challenge(opponent,
 stake, commit)` takes none, and no event carries one. A duel struck on chain today cannot be attributed to a
 game — and after M20 the struct cannot grow.
 
@@ -4750,7 +4799,7 @@ The deployer is whitelisted in the constructor. The list starts closed.
 
 | Contract | Verbs | Gate |
 | --- | --- | --- |
-| `RareMarket` | `list`, `reprice`, `buy`, `offer`, `acceptOffer` | `requireMayPlay` |
+| `RareMarket` | `list`, `reprice`, `buy`, `offer`, `acceptOffer`, and ruling 54's `buyVia` and `acceptOfferVia` (§65) | `requireMayPlay` |
 | `RareDuel` | `challenge`, `accept` | `requireAllowed` |
 | `ShadowFriends` | `claim` | `requireAllowed` |
 
@@ -4776,7 +4825,7 @@ a settled game cannot be declared twice, an abandoned game cannot be started.
 | `start(id)` | **Anyone** | `Open`, `block.timestamp >= startsAt`, `players >= minPlayers` |
 | `restart(id)` | **Anyone** | `Open`, `joinClosesAt` passed, `players < minPlayers` (`EnoughPlayers` otherwise) — **DESIGN L5125: "the join clock simply starts again"**: the three clocks are laid out again from now; players and stakes stay in |
 | `abandon(id)` | **Root only** (`ROOT_POWER`) | `Open`, `startsAt` passed, `players < minPlayers` — the escape for a game nobody will ever fill; a stake needs an exit. Never the default: the rule is `restart` |
-| `declare(id, placings)` | A holder of `DECLARE_PLACINGS` **or** `RECORD_SYNC` (root holds both; grantable through `RareRoles.grantPower`) | `Started`; `1..places` placings, every one a player, no duplicates (`BadPlacings`, `NotAPlayer`) |
+| `declare(id, placings)` | A holder of `DECLARE_PLACINGS` **only** - the deployer (root) or the game master once root grants it through `RareRoles.grantPower`. `RECORD_SYNC` is refused (deployer ruling 2026-10-01, §60.6 item 1) | `Started`; `1..places` placings, every one a player, no duplicates (`BadPlacings`, `NotAPlayer`) |
 
 Demo mode gates entry (`create`, `join`) and never exit (`start`, `declare`, `abandon`) — §26.
 
@@ -4814,9 +4863,13 @@ without moving anyone.
 
 ### 60.6 The four spec choices awaiting the deployer
 
-1. **Declare power.** `DECLARE_PLACINGS | RECORD_SYNC` is the chain engineer's line; DESIGN says only
-   that fights settle on our server. Alternatives: `RECORD_SYNC` alone (the server is the only writer), or
-   a dispute window (§18) before pay.
+1. ~~**Declare power.**~~ **RULED by the deployer, 2026-10-01:** declaring the placings belongs to the
+   deployer or the game master, and to no one else. `declare` asks `requirePower(DECLARE_PLACINGS)` and
+   nothing else; root holds it and may grant it to the game master role. The server's sync key
+   (`RECORD_SYNC`) used to be accepted here as a chain engineer's line and is now refused; `RareGame` no
+   longer names `RECORD_SYNC` at all. fixcheck part 14 proves both halves (a `RECORD_SYNC` holder is
+   `PowerNotHeld`; the same key, its role granted `DECLARE_PLACINGS`, reaches the state check). A dispute
+   window (§18) before pay remains a separate, unasked question.
 2. **Dust.** Wei left by the equal split goes to first place. It could go to `feeTo`, or stay in the
    contract. It is at most `n - 3` wei per game; the choice is a rule, not money.
 3. ~~**Abandon vs restart.**~~ **Settled against DESIGN L5125:** `restart(id)`, callable by anyone, is the
@@ -4843,3 +4896,442 @@ startDelay, cutBps, places, minPlayers, rulesId)`, so the script needs:
   the script passes that id in. `RareGame` therefore deploys last, after `RareRules`.
 
 Nothing in this section is deployed. `bridge-config.json` is unchanged.
+
+## 61. M20 items 11, 2 and 8 — the duel's numbers as state a running game freezes, the dice behind an address, and a gas file that says when it is stale (2026-09-30)
+
+### 61.1 Item 11: nothing the deployer page can change is `immutable` — built, and the rule has both halves
+
+**What was true.** `RareDuel` declared `counterBps`, `sameBps`, `feeBps`, `feeTo`, `answerWindow`,
+`revealWindow` and `rollWindow` **`immutable`** — read in the file at `9bed65a`, not recalled. A fee of zero
+that cannot change is still a constant, and the deployer page could change none of them.
+
+**What is built.** The six are stored state in one slot, each behind its own getter (the pages read them by
+name, so six named variables and not a struct), and four setters, every one guarded on chain and every one
+logging `by`:
+
+| Setter | Power | Refuses |
+| --- | --- | --- |
+| `setOdds(counterBps, sameBps)` | `ROOT_POWER` (`MANAGE_ROLES`, never grantable) — the money | above 10,000 |
+| `setFee(feeBps, feeTo)` | root — together, so a fee above zero can never point at nobody | above 10,000; fee > 0 with a zero `feeTo` |
+| `setWindows(answer, reveal, roll)` | `SET_GAME_PARAMS` — the same grantable power `RareGame.setClocks` uses, so whoever may set a game's clocks may set the duel's | any zero |
+| `setDice(address)` | root — the rule itself (61.2) | an address with no code |
+
+**The rule's second half, on chain.** DESIGN, *No number changes under a running game*: "a guarded setter
+refuses it too — the page is a convenience and the guard is on chain." Every setter above, and `RareGame`'s
+own `setClocks` and `setDefaults`, asks the power FIRST (a stranger learns nothing about the game from the
+refusal) and then `roles.requireNoGameRunning()`, which reverts `GameRunning(n)` while `n` games are Started
+and not declared. **The pointer lives in `RareRoles`**, where `RareGame.sol`'s header said it should: `setGame`
+(root only; zero and codeless addresses refused, so the rule cannot be switched off by pointing it at nothing;
+once set it only moves to another contract) and `runningGames()` read through `IRunningGames`. `RareGame`
+answers from a counter `start` raises and `declare` lowers (`abandon` only leaves Open, so it never touches
+it). **Zero means no games contract yet** — the state of the first five deploys — and the honest answer then is
+that nothing is running. **Deploy order gains one call:** after `RareGame` deploys, `RareRoles.setGame(game)`
+from the deployer; until it is made the setters are open to root between games, which is also what they are
+after it. Not added to `deploy.mjs --game` in this pass: it is a transaction, not a deploy, and the script's
+`step` deploys; it is written here and in the DEPLOY checklist instead.
+
+**The rule's first half, per duel.** "A game holds the numbers it was created with — a running game reads its
+own table, not the current one." A duel is the game here: `challenge` writes a `Sealed` row — the dice, the
+two odds and the fee, 26 bytes in one slot, one extra SSTORE — and `settle` reads that row and never the live
+values. So a setter landing between a challenge and its settle moves nothing already struck, and a replay of
+the duel (word, picks, its row) gives the same answer for ever. The windows are not in the row: each sets a
+deadline at its own transition from the live value, and the live value cannot move while a game runs, so a
+duel inside a game sees one clock. `sealedOf(id)` shows the row; `oddsBps` still answers under the LIVE odds,
+which is what the next duel gets. `getDuel`'s tuple is unchanged, so no page's decoder moves.
+
+**Proved — `fixcheck` part 15, eleven assertions, and broken once on purpose.** With game 2 Started and never
+declared the count reads 1; `setGame` refuses a stranger, zero and an EOA and root points it; every setter in
+both contracts is `GameRunning` from root and `PowerNotHeld` from a stranger; declaring game 2 drops the count
+to 0; a duel struck under 70/50/250 seals exactly that and `Challenged` carries `gameId` 7; root then sets
+60/50, 301/601/601 and 100 bps and every getter reads the new value; the earlier duel settles at odds 3000 and
+fee 250 — not the live 4000 and 100. Removing `requireNoGameRunning` from `setOdds` for one run turned exactly
+three lines red (the setter moved, and the two sealed rows after it carried the moved odds); restored.
+
+**Cost, in memory, floors:** `challenge` 164,759 → 187,654 (+22,895, the row), `settle` 33,558 → 34,953
+(+1,395, the row read and the dice call), `accept` +159. `RareDuel` 9,452 → 11,937 bytes (it carries
+`RareDice`'s creation code), `RareRoles` 6,289 → 6,884, `RareGame` 12,268 → 12,409.
+
+### 61.2 Item 2: the dice roll at an address a registry can re-point — built for the dice; the fight has no caller to re-point
+
+DESIGN's no-diamond decision makes two exceptions, the fight and the dice roll, and gives each "its own
+deployed address behind a re-pointable registry"; both were libraries, inlined, un-pointable (M20 item 2).
+**The dice:** `RareDice.sol` is a deployable contract whose `roll` is the library's line; `RareDuel` holds
+`IRareDice public dice` as stored state, **born in the constructor as a fresh `RareDice`** so the constructor
+signature and the deploy order do not change, re-pointed by `setDice` (root, no-code refused, refused under a
+running game), and **sealed into every duel at `challenge`** — the re-point reaches the next duel and never one
+in flight. The roll is salted with the duel contract's own address, which is stable across re-points
+(`RareChance.sol`'s note foresaw this). The parity check settles all 36 duel pairs through the address and they
+match `duel.js` as before — no roll changed. Part 15 proves the re-point: a `FixedDice` that always rolls 9999
+is set; a duel struck before it settles with the original dice (sealed address, roll not 9999), one struck
+after it rolls 9999 and the challenged wins. **The fight:** `RareCombat` stays a library behind the view
+wrapper `RareCombatLab`, because **nothing in the game calls it** — v1 fights resolve on the server (ruling 7)
+and the chain holds their hashes (§51). There is no caller to re-point until a fight contract exists; the day
+one does, it takes the same shape as the dice: an address, sealed per fight. Recorded, not invented.
+
+### 61.3 Item 8, the second half: `gas.json` says when it is stale
+
+`paritycheck.js` now writes `sourcesHash` — a SHA-256 over every `.sol` it compiles, `test/` included, since
+the duel's figures include `MockRF`'s transfers — beside the figures, and **`npm run gas:fresh`**
+(`gasfresh.js`, under a second, compiles and runs nothing) recomputes it and the solc version and exits 1 with
+the sentence to run when either moved, 2 when the file predates the digest. Proved green, then red by
+appending one comment line to `RareChance.sol`, then green again from a copy. **What it does not say:** that
+the figures are right, or prices — they are execution gas on an in-memory Ethereum with the chain id swapped,
+floors until a real node measures them, which is item 8's other half and still owed. It is in `estate/contracts`
+and not in `checkall.js`: registering it there is the check-writer's, and `countcheck` holds DESIGN's count.
+
+## 62. M20 item 3 — the building registry on chain, built in `RareRules` beside the ladders (2026-09-30)
+
+**The schema it implements, agreed before a line was written:** `estate/schema.json` `entities.buildingType`
+(home: chain) and `entities.placementRule` (home: chain) — fourteen and nine fields. The ladders already in
+`RareRules` were the row's `crystalCost[]` / `woodCost[]`; `setKind(rulesId, kindId, Kind)` now carries the
+rest: `codeName`, `levelName[]` (its length IS `levels` — the schema says nothing is a fixed-size struct),
+`buildMs[]`, `strength[]`, `capacity[]`, `reach[]`, `footprint[]` (x,y pairs), `placement` (the nine fields,
+`scienceGen[]` per level), `abilityId`, `addedInGame`. `kindOf` and `levelsOf` read it; `KindSet` is the
+record; `freeze(rulesId)` freezes the rows with the ladders; a row and a ladder under one id must agree on
+the number of levels (`LevelsDisagree`, checked from both sides). **No number lives in the bytecode**;
+`fixcheck` part 16 reads `KIND.tiers`, `SILO_CAP`, `CELL_REACH`, `WALL_CAP`, `WALL_HP` and `BUILD_MS` off
+`index.html` and writes the eight rows from them. What the page has no number for is written as **zero and
+said so** in the run: hut, tower and depot capacity, tower reach, every strength but the wall's level 1. The
+schema names those fields; the game has not decided the values, and this contract does not invent them.
+
+**Two conventions this fixed, and one defect it found.** `kindId` **counts from 1**: the schema's
+`needsKind: a kindId this one requires, or zero` makes 0 mean "none", so `setLadder` and `setKind` refuse
+it (`KindZero`); part 12's ladders moved from `indexOf(k)` to `indexOf(k) + 1`. `abilityId` is stored as the
+schema's `uint16` and nothing dereferences it: the schema says it must point at behaviour **at an address**
+(a library cannot be re-pointed), no ability table exists, and the slot is there so the row has it. **The
+defect:** `deploy/local-chain.sh` multiplied `KIND.cost` and `WOOD_COST` by 100 when it set the fork's
+ladders, but both are already in hundredths on the page (a 25.00-crystal wall is `2500`, which is what part
+12 proves `refundFor` halves to 12.50) — every rung on the fork was 100x high. Fixed in the script, with the
+reason beside it, and its ids moved to 1-based. Not re-run on a fork in this pass: an anvil was already
+listening on 8599 and it was not this pass's to restart.
+
+**What "a new building is data rather than a release" means, proved:** part 16's last assertion writes a
+ninth kind — `lighthouse`, id 9, a two-tile footprint, `needsKind` = the generator, reach 6/8, on water — and
+a fourth hut level, under the next game's `rulesId`, with no `.sol` changed and nothing redeployed; `levelsOf`
+reads 2 and 4, and `kindOf(9)` under the old id is `NoSuchKind`. The row reaches a game through
+`RareGame.setDefaults(.., rulesId)` for the next game, which is what `addedInGame` records and the freeze
+enforces. Seven assertions in all; `LevelsDisagree` removed from `setKind` for one run turned exactly one
+red, and was restored. `RareRules` 2,960 → 8,476 bytes.
+
+**What the registry still does not reach.** Nothing on chain READS a row yet: the game's building, placement
+and fight code is in `index.html` (ruling 7, v1 fights resolve on the server), and `RareCombat` takes its
+wall HP from the fight's own rules struct. The day a chain-side verb needs a building's numbers (§46.4's
+`demolish`, a fight contract), `kindOf(game.rulesId, kindId)` is where it reads them — frozen, per game.
+Until then the registry is the deployer's table of record and the page's numbers are what the game runs on.
+
+## 63. The fight rules of 2026-10-01 - no clock, cover on the wall, speed and reach decided (M13 items 9 and 10)
+
+DESIGN rulings 44 to 47 changed the fight, which is the parity check's subject, so both halves moved in one
+commit: `estate/combat.js` and `RareCombat.sol`.
+
+63.1 **No clock (ruling 47).** `Rules.maxMs` is removed from the struct, from `Combat.rulesFrom` and from
+`rulesHash`'s scalar list, which is now `wallHp, landVsBuildingBps, towerReach, dropReach, coverDiv,
+defendReach, stepMs`. Every `rulesHash` taken before this changes, but none was ever committed (nothing is
+deployed). The loop ends only on `WIPED` (0) or `REPELLED` (1). Code 2 (`HELD`) is no longer a Solidity
+constant. **Why the attack fight always ends:** every living attacker shoots, breaks a wall or steps on
+every turn, every shot has a non-zero chance (`hp_a x 10000 / (hp_a + hp_d)` with both hit points above
+zero, and 9000 bps at a wall), and every landed shot takes hit points. So the fight ends with probability 1.
+Its length is not bounded. In gas that is no change from before, because v1 does not settle a fight on chain
+(ruling 7) and the declared maximum was already 197% of the 32M ceiling.
+
+63.2 **The one fight that can stand still is JS-only.** A spared capture fight (`opts.spare`, ruling 19)
+forbids the intruder to break a wall, so an intruder walled off from every defender can never act again.
+The clock used to end that fight. Now `combat.js` ends it by a STALEMATE read off the field: once every
+living Friend has had a turn and nobody moved or shot, the state can never change, so the fight ends as
+`held` (the defence holds). This is exact rather than a timer. While an attacker that is not spared lives,
+it cannot trigger (63.1), so `RareCombat` needs no copy and runs no spared fight. **Who wins a stalemate is
+the old `held` answer carried over, not a new ruling.** If the deployer wants the intruder to keep the
+building instead, that is a one-line change, and it is his call.
+
+63.3 **Cover is on the wall (ruling 45).** `_inCover` / `inCover` (a standing wall spot next to the target,
+nearer the shooter) is removed. A shot at a DEFENDER standing on a spot that a standing wall section covers is
+`bps / coverDiv`, read as `_wallAt(target) != NONE` / `wallAt(d.x, d.y) >= 0`. This is exactly where
+`Record.defense` posts a wall's crew (slot i at `i % 2` along the wall's own axis). Standing behind a wall
+is no cover. A wall keeps `wallHp` and can be broken; `_wallAt` skips a fallen section, so the crew lose the
+cover the moment it falls. "50% protection" is read, as DESIGN states, as halving the chance a shot lands.
+
+63.4 **Speed and reach (rulings 44, 46).** Unchanged numbers: 1 tile a second (`stepMs` 500) and 5 tiles
+(`defendReach` 10 spots). Both stay fields of `Rules`, a per-fight parameter, so tuning them is a new table
+and not a redeploy.
+
+63.5 **Proof (`npm run check`).** The corpus gains the proving ground ON the wall (36 line-ups), giving **420
+fights**, all matching field for field. Four new assertions:
+- no `maxMs` in `rulesFrom` or in the lab's ABI, and every fight in both engines ends wiped or repelled
+  (the longest runs 170.2 s; with the old clock put back, 3 of the 420 end `held`, and the line goes red);
+- on the wall, `coverDiv` 1 against 2 changes the fight in both engines for all six generations; behind the
+  same wall it changes nothing in either engine;
+- three clubs break the section the crew stands on, and no shot at the crew after it falls is in cover;
+- the spared stalemate ends at once as `held`, and unspared the same field is fought out. With the
+  stalemate line removed, the check hangs at exactly that line.
+
+63.6 **Owed by others, outside this lane's lock.** `combatcheck.js:111` asserts *"HOLD ends on the clock"*
+(check writer). `attack_defense.html` still offers the clock and labels cover "behind a wall" (front end).
+`deployer.html` has a `maxMs` row and labels `coverDiv` "Cover behind a wall" (economist, M4 item 5).
+`schema.json` still lists `maxMs` as an undecided rules field, which `schemacheck` allows as a documented
+gap, and `values.js`'s header comment names it.
+
+
+## 64. M20 items 13, 1 and 10, M19 items 8 and 10, ruling 32, and M6's question (2026-10-01)
+
+### 64.1 M20 item 13 - the gate, counted off the contracts
+
+The row said *"the gate has one real call site and needs eight"*. That is stale. **§26.3's "allowed only" rows
+that have a contract are four entry points in eight functions, and all eight are gated:** `RareGame.create`,
+`RareGame.join`, `RareMarket.list`, `.reprice`, `.buy`, `.offer`, `.acceptOffer` (§26.3's marketplace row, ruled
+allowlist-only), and `RareDuel.challenge` (§26.1, `PaidDuelsClosedInDemoMode`). The other **38** state-changing
+functions of the seven game contracts (`RareGame`, `RareMarket`, `RareDuel`, `RareOrders`, `RarePartners`,
+`RareFightLog`, `RareRules`) are exits, in-game verbs or role-guarded setters, and none of them answers with
+the mode's name. **46 in all, and none unaccounted.** That count is taken off the compiled ABIs by fixcheck part
+19, so a function added later goes red until it joins one list or the other. The "inherited" rows of §26.3
+(post, build, gather, claim ground, create a fight) have **no contract yet**, so they have no call site to
+count. `ShadowFriends.claim` is behind the launch whitelist (ruling 21), not §26.3. **One divergence, stated
+rather than fixed:** §26.3 says partnerships are *"inherited at creation"*, but `RarePartners.propose` has no
+game to inherit from. It is open, and ownership is its guard.
+
+### 64.2 M20 item 1 - the four parked contracts, re-judged against `estate/schema.json`
+
+| Contract | What the schema says | Judgement |
+| --- | --- | --- |
+| `RareChance` (30 lines, library) | No entity. The roll is reached through `fight.id` (*"also the roll's batch id"*) and `fight.word` / `duel.word` | **Consistent, kept, not extended.** `keccak256(abi.encode(word, game, chainId, batchId, playId)) % 10000` is what both schema rows assume. It is inlined, so it is frozen into each caller (today `RareDuel`, and the lab). A new formula means a new caller, never a re-pointed address. **Gap:** the schema records no formula version beside `rulesId`, so a later formula change would not show in a recorded fight |
+| `RareCombat` (404 lines, library + `RareCombatLab`) | `rules` is `built: RareCombat.Rules`. All 16 struct fields are in the schema, in order (schemacheck). The schema adds `maxMs` (struct dropped it, ruling 47, §63), `splashFalloff` and `entryGap`, all undecided | **Consistent as a reference, and it is not a deployable rule.** `Setup` takes generations as *supplied* `uint8`s, which `friend.gen` (*"READ, never supplied"*) and `fight.attackerTokens` forbid for anything that commits. It is acceptable only because nothing commits on it: v1 fights resolve on the server (ruling 7), the chain holds `fightHash`, and gencheck proves the lab is `view`. **The schema's `rules.maxMs` row is now stale** (schema.json is outside this lane) |
+| `RareDuel` (460 lines) | `duel` is `built: RareDuel.Duel`, field for field (schemacheck). `gameId` decided and present | **Consistent.** The one open thing is the schema's `duel.currency` (*contested*). The contract stakes one immutable ERC-20, and DESIGN says a duel is staked in crystals, which do not exist on chain (question 15). No code answers that |
+| `ShadowFriends` (382 lines) | **No entity at all.** The schema has `friend` (a Friend token, `gen` read) and nothing for a shadow, a Solana mint, an attestor or a revocation | **Cannot be judged against the schema, because the schema has no row for it.** That is a schema gap, not a contract finding. The contract predates the schema and is M21's (the bridge engineer's). Its `traitOf` is now read on chain by `RareDoopieGate`, so the gap has a consumer. **Owed:** a `shadow` entity, by whoever holds `schema.json` |
+
+### 64.3 M20 item 10 - the sealed orders, one change since §64's first commit
+
+`RareOrders` now carries the orders as **`bytes`, one byte a Friend**, not `uint8[]`. gencheck reads any
+`uint8[]` handed to a state-changing function as a generation (that is how line-ups arrive), so it turned red on
+`reveal`. An order is not a generation. An enum would have the ABI decoder refuse a 4 *with no name*, and
+§10.5.4 wants `OrderOutOfRange` by name, so it is bytes. The commitment's preimage changed with it, which costs
+nothing because nothing is deployed. **Its home differs from the schema's in place, not in shape:** the schema
+puts the word on `base` (`base.ordersCommit`, `.ordersCommitAt`). No base contract exists, so `RareOrders` keys
+the same two fields by `(gameId, baseId)`. **Who opens the box is still not decided:** whoever holds the salt
+opens it, and that is policy.
+
+### 64.4 M19 item 8 - the switch mechanism: specified, NOT built
+
+DESIGN calls three things *"the same switch"* (a tradeable asset, more than one partnership, the technology
+centre) and adds a whole collection on or off. **One instance is built:** `RareMarket.tradeable[collection]`
+behind `SET_TRADEABLE`. **The general mechanism is not built, because the schema has no row for it**, and this
+role does not write a contract before the schema it implements (the parked four are the reason). The shape it
+would take, for whoever writes that row:
+
+- **A switch is a name and a bit:** `bytes32 key -> bool on`, read by the contract that obeys it
+  (`requireSwitchOn(key)`). It is not a flag inside that contract, so one mechanism serves all four.
+- **Each switch is its own narrow power,** `keccak256("rarefriends.switch." + name)`, grantable through
+  `RareRoles.grantPower` (§64.5). That way the gamemaster can be given the partnership switch without the
+  trade switches.
+- **It logs `SwitchSet(key, on, by)` and refuses a no-op** (`SwitchUnchanged`), like `DemoModeUnchanged`.
+- **Undecided, and not this role's:** whether a switch may change while a game runs (the duel's numbers may
+  not, `requireNoGameRunning`). That is the deployer's call.
+
+**Owed:** a `switch` entity in `schema.json`. Once it exists, this is about 40 lines in `RareRoles`, plus a
+fixcheck part on the pattern of parts 6 and 7.
+
+### 64.5 M19 item 10 - granting: built, and now it honours the delay
+
+**Granting is the mechanism, and it exists:** root (`DEPLOYER`) holds every power. Root adds and removes
+gamemasters (`setRoleMember(GAMEMASTER, who, on)`), grants any grantable power to that role (`grantPower`), and
+marks a power root-only irreversibly (`registerRootPower`). Each is guarded, logged and proved in fixcheck (the
+appointment in part 6, `registerRootPower` in part 12). **New this round:** a grant and a membership wait `roleChangeDelay` (zero for v1, so they land in the same
+block) and a revoke or removal lands at once. `DECLARE_PLACINGS` is the first power the deployer has said the
+gamemaster may be granted (ruling 2026-10-01), and fixcheck part 14 grants it and takes it back.
+**What item 10 cannot have yet:** a named power for each of M19's items 1 to 7 (a resource, a power, an
+accessory, a project, a meme attack, hidden resources, drops). None of those has a contract or a schema row, so
+there is nothing to name a power after. Each arrives with its own `keccak256("rarefriends.power.<verb>")` on
+the same pattern, with no change to `RareRoles`.
+
+### 64.6 Ruling 32 - `places` starts at 3
+
+`deploy.mjs` no longer refuses without `GAME_PLACES`. The decided 3 sits in its `N` table beside `cutBps` and
+`minPlayers`, with its source. `GAME_PLACES` overrides it, and anything outside 1..10 is still refused. This
+was proved on a probe copy cut off before `connect()`: unset gives `[3, ruling 32]`, 5 gives `[5, override]`,
+and 11 refuses. **Owed outside this lane:** `deploy/local-chain.sh:118` still refuses without `GAME_PLACES`.
+
+### 64.7 M6's question - is the record head the same word as §17's `moveRoot`? **No.**
+
+| | The record head (`record.js` `head`) | §17's `moveRoot` |
+| --- | --- | --- |
+| What it hashes | **State**: the base's whole ledger (`v, base, gathered, seq, nextId, lastSeen, buildings, roster`) | **History**: the previous root and one move |
+| How | `keccak256(utf8(JSON.stringify(canon(ledger))))`: canonical JSON text, keys sorted | `keccak256(abi.encode(moveRoot, move))`: ABI words, folded from zero |
+| Scope | **One base** (one ledger per base) | **One game** |
+| Chained | No. Two histories that reach the same state give the same head | Yes. Order, insertion and removal all change it |
+| An idle session (ruling 49) | **Changes it**, because `lastSeen` is in the ledger | **Leaves it unchanged**: no move, nothing folded |
+| What a player can do with it | Recompute it only by replaying the moves into a ledger and serialising it exactly as `canon` does. That is a JSON contract, and Solidity cannot hash it | Fold the move events and compare: §17.3, steps 1 to 4, free |
+
+**They do the same job in one place,** optimistic concurrency: `record.js` refuses a batch whose `parent` is not
+the current head (`StaleParent`), and §17.2.3 refuses one whose parent is not the current `moveRoot`. Even
+there they are different words, so a batch's `parent` must say which one it means. **What follows for the chain:**
+`RareFightLog.commitSync(gameId, period, head)` is specified (schema `syncHead`) as *"§17's chained word over
+every move in the period"*. That is a `moveRoot`, **not** the record head. If the server publishes `record.js`'s
+head there, §17.3's free check fails for every reader, and it fails silently: the word is well-formed and
+merely incomparable. **Recommended, for whoever writes M6's sync job:** keep both words and name them apart.
+The per-base state head stays the concurrency token and the server's integrity check. The per-game `moveRoot`
+is folded from the batches' moves in order (they are already in each batch) and is what `commitSync` publishes.
+`lastSeen` changes the first and not the second. That is correct: a visit is not a move.
+
+## 65. Ruling 54, M20 item 20 - a planted 1/1 terminal's cut, built into `RareMarket` (2026-10-01)
+
+**The ruling.** A trade made through a planted terminal that is a 1/1 Doopie pays the terminal's owner a cut. The
+owner is whoever holds the 1/1's shadow on 4663. **Deploy-blocking:** `RareMarket` is permanent (§49), so the cut
+had to be in it before M20 item 9 deploys it. **The size is the economist's and is open.**
+
+### 65.1 What the chain could not see, and what was there to work with
+
+Nothing in a sale recorded where it was made, and `_settle` paid three parties (partner, fee, seller). Where a
+Friend stands is server state (decision 9), so the chain cannot see a terminal on its own. A `host` argument the
+caller types in is a host anyone can name themselves as. A wrapper contract fails, because `list` and `acceptOffer`
+require the token's owner and `requireMayPlay(msg.sender)` would ask about the wrapper, not the player. What
+exists: `ShadowFriends` (token id = the raw mint, `ownerOf`), `RareDoopieGate.isOneOfOne`, the attestor's
+signed-claim pattern (`CLAIM_TTL`, replay refused), and `RareRoles` powers.
+
+### 65.2 The two options weighed
+
+| | **A. Server-signed authorization, cut out of OUR fee** (built) | **B. Server-signed authorization, cut out of the SELLER's proceeds**, as the partner's is |
+| --- | --- | --- |
+| Who can fake a host | Nobody without a key holding `SIGN_TERMINAL`. The signature binds terminal, actor, sale, nonce and deadline | Same |
+| What a buyer at their own terminal can do | Take part of **our** fee as a rebate, bounded by the immutable ceiling | Take part of **the seller's** money, with no consent from the seller. **This is the reason B is rejected** |
+| What a leaked server key can do | Send part of our fee to the holder of a live 1/1 shadow, on sales that really happen. It cannot name a payee | The same, but it comes out of sellers |
+| `quote()` and the parties' numbers | Unchanged: the buyer pays and the seller receives exactly what a plain trade gives | The seller's line changes depending on where the **buyer** stood |
+| Gas | +19,603 execution gas over `buy` (§65.6) | About the same |
+| Permanent | The source of the cut (the fee), its ceiling, the shadow token, the signed form | The same, plus a seller-facing deduction nobody agreed to |
+
+**A was chosen** because of one property: under A, no abuse of the terminal path, faked or authorized, can move
+a player's money. The worst case is that our own fee is spent, and the ceiling bounds that. Paying from the fee
+also keeps *"the fee is pinned at the moment the party who pays it acts"* (§48) true without a new rule: the cut
+is a share of whatever fee the sale already pays.
+
+### 65.3 The mechanism, as built
+
+- **Two new ways in, the same two as before.** `buyVia(collection, tokenId, t, sig)` and
+  `acceptOfferVia(collection, tokenId, offerer, amount, t, sig)` run exactly the checks `buy` and `acceptOffer`
+  run (moved into `_takeListing` / `_takeOffer`, unchanged and in the same order, with `requireMayPlay` first),
+  then `_spendTerminal`, then the one `_settle`.
+- **What the server signs.** EIP-712, domain `("RareMarket", "1", 4663, the market's address)`:
+  `TerminalSale(uint256 shadowId, address actor, address collection, uint256 tokenId, address counterparty,
+  uint128 price, bool fromOffer, uint256 nonce, uint64 deadline)`. `actor` is `msg.sender` (the buyer for
+  `buyVia`, the seller for `acceptOfferVia`); `counterparty` is the listing's seller or the offerer. Only
+  `shadowId`, `nonce` and `deadline` travel in the call; everything else comes from the sale itself, so any
+  difference makes the digest recover to a stranger. `terminalSaleDigest(...)` is public so the server and a
+  page compute the same bytes.
+- **Who may sign.** Any key for which `RareRoles.hasPower(signer, SIGN_TERMINAL)` holds, **read live at
+  settlement**. `SIGN_TERMINAL = keccak256("rarefriends.power.signTerminal")` is grantable; `grant.mjs` now gives
+  it to the server role as the fourth sibling of RECORD_FIGHT, RECORD_SYNC and RECORD_ORDERS. Revoking it kills
+  every outstanding authorization at once.
+- **Lifetime and replay.** `deadline >= now` (`TerminalAuthExpired`) and `deadline <= now + TERMINAL_AUTH_TTL`
+  (`TerminalAuthTooLong`); `TERMINAL_AUTH_TTL` is 15 minutes, the same as `ShadowFriends.CLAIM_TTL`. Each digest
+  is spent in `terminalAuthUsed` before any money moves (`TerminalAuthUsed`). The nonce lets two identical sales
+  each carry their own authorization.
+- **Who is paid.** `terminalCut(shadowId, fee)`: if `gate.isOneOfOne(shadowId)` holds **now**, the payee is
+  `shadows.ownerOf(shadowId)` **now**, and the sum is `fee * terminalShareBps / 10000`. Both reads are in
+  `try`/`catch`, so a revoked shadow, an unknown id, an ordinary Doopie or a broken gate pays nobody **and the
+  sale still settles**. **The signature never carries a payee.** A 1/1 sold on Solana is revoked, then re-claimed
+  under the same id by its new holder, and from then on pays the new holder.
+- **The money order.** Partner first (unchanged), then `feeTo` receives `fee - hostPaid`, then the host
+  `hostPaid`, then the seller `price - fee - owed` (unchanged), then the token. `Sold` is unchanged, byte for
+  byte. A terminal sale also emits `TerminalCut(collection, tokenId, shadowId, host, paid)`, with host and paid
+  zero when the terminal paid nobody. It is emitted before `Sold`, inside the scope that holds the host's two
+  words; the stack would not take both.
+- **The setters.** `setTerminalShareBps` (≤ `maxTerminalShareBps`, `TerminalShareUnchanged` on a no-op) and
+  `setGate` (code required, `GateUnchanged` on a no-op), both behind `SET_TERMINAL =
+  keccak256("rarefriends.power.setTerminal")`, both logged. **No setter names a payee or the shadow token.**
+  `setGate` exists because `RareDoopieGate` is the repairable tier by its own design (a collection can rename a
+  trait). The worst a bad gate can do is say yes for a shadow whose live holder is then paid out of our fee, and
+  only on a sale the server signed.
+- **The constructor** takes four more arguments: `shadows_` (immutable, must hold code), `gate_` (must hold
+  code), `maxTerminalShareBps_` (immutable, ≤ 10000) and `terminalShareBps_` (≤ the ceiling). `deploy.mjs` now
+  deploys `RareDoopieGate` (it deployed no gate before) between `RareDuel` and `RareMarket`, and writes
+  `rareDoopieGate` to the config.
+- **Size.** 13,981 deployed bytes, up from 8,402. That is ECDSA, EIP-712 and the two new routes, against the
+  24,576 limit.
+
+### 65.4 The numbers, PROPOSED and not decided
+
+| | Value | Where | Status |
+| --- | --- | --- | --- |
+| `terminalShareBps` | 3333 bps **of the fee**, a third: 0.49995% of a sale at the 1.5% fee | `deploy.mjs` `N.terminalShareBps` | **PROPOSED**, the economist's. A setter changes it |
+| `maxTerminalShareBps` | 5000 bps of the fee, at most half | `deploy.mjs` `N.maxTerminalShareBps` | **PROPOSED**, and **IMMUTABLE** once deployed |
+| `TERMINAL_AUTH_TTL` | 900 s | a constant in `RareMarket.sol` | Mirrors `CLAIM_TTL`. A safety window, not an economy number |
+
+`fixcheck` reads both bps figures out of `deploy.mjs`, so the test deploys what M20 would, and asserts the
+share's line is marked PROPOSED.
+
+### 65.5 The proof - `test/fixcheck.js` part 20, 26 assertions, and each guard broken once
+
+Against the real `ShadowFriends`, the real `RareDoopieGate` and the real `RareRoles`:
+
+- a terminal trade pays the 1/1's owner (`buyVia` and `acceptOfferVia`), out of the fee only: the buyer's and
+  the seller's numbers are identical to a plain `buy`;
+- a faked host is refused: a forger's signature, a real signature with the shadow id edited, a signature lifted
+  by another actor, no signature, and a signature for a price the seller has since changed;
+- an expired signature, an over-long one and a replayed one are all refused, and the same sale with a fresh
+  nonce settles;
+- a non-1/1 shadow, and an id that is no shadow, get nothing; the sale settles;
+- a revoked 1/1 pays nobody and the sale settles; re-claimed by a new holder, it pays the new holder;
+- an ordinary `buy` moves exactly two `$RF` transfers (no partner on that market), pays the whole fee, and
+  emits no `TerminalCut`. Part 9's partner sale, unchanged, still passes on the new bytecode;
+- both setters are guarded, the ceiling holds, deploy-time refusals hold, no setter names a payee, revoking
+  `SIGN_TERMINAL` kills what it signed, and the market's `$RF` balance stays zero.
+
+Part 19's demo-mode audit counts `buyVia` and `acceptOfferVia` as gated entry points (refused by the mode's name
+before the signature is read) and the two setters as open-to-the-mode, role-guarded. Its ABI sweep has nothing
+unaccounted.
+
+**Broken once each.** A scratch runner applied one mutation at a time to `RareMarket.sol`, ran `fixcheck`, and
+restored the file:
+
+- **M0:** the market as it was at the parent commit. 23 failures; the file runs to the end.
+- **M1:** the cut is never paid.
+- **M2:** the signer is not checked.
+- **M3:** `buyVia` never verifies.
+- **M4:** no deadline check.
+- **M5:** no TTL cap.
+- **M6:** never spent.
+- **M7:** the 1/1 test is skipped.
+- **M8:** a non-1/1 terminal reverts the sale.
+- **M9:** the payee is not the live `ownerOf`.
+- **M10:** an ordinary trade emits a terminal record.
+- **M11:** the cut is charged on top of the fee.
+- **M12:** the share setter is unguarded.
+- **M13:** no ceiling.
+- **M14:** the gate setter is unguarded.
+- **M15:** any recovered signer is accepted.
+
+Every mutation turned at least one part-20 row red, and each of the six rows asked for went red under at least
+one mutation.
+
+### 65.6 Gas, and what it is not
+
+Execution gas on the in-memory EVM, **Ethereum Cancun rules with the chain id swapped, floors, not prices**:
+`buy` 69,409, `buyVia` 89,012 (+19,603: one `ecrecover`, a `hasPower` walk, one SSTORE to spend the digest, two
+reads of the shadow, a fourth transfer). `gas.json` was re-measured (`npm run check`) and `gas:fresh` passes, but
+**`gas.json` carries no marketplace figure at all**: `paritycheck.js` does not deploy `RareMarket` (§50 item 7).
+**Nothing was measured on a real node.** That is still M20 item 8's other half.
+
+### 65.7 What becomes permanent when `RareMarket` deploys
+
+- **That the cut comes out of the market fee.** It never comes out of the seller's proceeds or on top of the
+  buyer's price. Changing that is a new market.
+- **`maxTerminalShareBps`**, the ceiling on the share (PROPOSED 5000 of the fee).
+- **`shadows`**, the `ShadowFriends` address whose `ownerOf` is paid.
+- **The signed form**: the `TerminalSale` type string, the EIP-712 domain `("RareMarket", "1")`,
+  `TERMINAL_AUTH_TTL` of 900 s, and the name of the `SIGN_TERMINAL` power.
+- **That a 1/1's holder is paid on their own trades.** Nothing stops a 1/1 holder standing at their own terminal
+  from taking the cut on a sale they are party to. A check for `host == buyer || host == seller` would be cheap,
+  but a second wallet defeats it. It was **not** added, because the ruling does not address it, and because it
+  costs only our fee. **This is permanent if left out. It is a question for the deployer, not a decision made
+  here.**
+
+**What stays changeable:** the share (under the ceiling), the gate, and who holds `SIGN_TERMINAL`.
+
+### 65.8 What this leaves owed, outside this lane
+
+- **The server** must sign a `TerminalSale` only when the actor's Friend is at that terminal. The chain proves the
+  server said so; it cannot prove the server was right. That is the same trust the fight log rests on (§52).
+- **The economist:** the share and the ceiling, both PROPOSED (§65.4).
+- **The deployer:** whether a 1/1 holder is paid on their own trades (§65.7).
+- **The front end:** a page that offers *trade through this terminal* calls `buyVia` / `acceptOfferVia` with the
+  server's authorization, and can show the split with `quote()` plus `terminalCut()`.
+- **`deploy/local-chain.sh`** is outside this lane. It runs `deploy.mjs`, which now deploys one more contract
+  (`RareDoopieGate`) and passes `RareMarket` four more arguments. No change to the script is needed, but it has
+  not been re-run against a fork here.

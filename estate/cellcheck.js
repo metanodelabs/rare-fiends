@@ -9,7 +9,7 @@ async function open(url, port){
   const ch=spawn(CHROME,['--headless=new','--enable-unsafe-swiftshader','--hide-scrollbars',
     '--remote-debugging-port='+port,'--user-data-dir='+prof,'--window-size=1100,800',url],{stdio:'ignore'});
   let send, sock;
-  for(let i=0;i<40&&!send;i++){await sleep(250);try{
+  for(let i=0;i<160&&!send;i++){await sleep(250);try{
     const t=(await(await fetch(`http://127.0.0.1:${port}/json`)).json()).find(x=>x.type==='page');
     const ws=new WebSocket(t.webSocketDebuggerUrl);await new Promise((ok,no)=>{ws.onopen=ok;ws.onerror=no;});
     let id=0;const m=new Map();ws.onmessage=e=>{const o=JSON.parse(e.data);if(o.id&&m.has(o.id)){m.get(o.id)(o);m.delete(o.id);}};
@@ -50,13 +50,22 @@ async function open(url, port){
   let p=await open((process.env.CELL_ORIGIN||'http://localhost:8765')+'/base.html?fresh=1',9421);
   await p.ev('document.getElementById("buildBtn").click()'); await sleep(300);
   const locked=await p.ev('JSON.stringify([...document.querySelectorAll("#pbody .cell")].map(c=>c.dataset.k+":"+(c.disabled?"L":"o")))');
-  ok('fresh: only the keep can be picked', locked==='["keep:o","hut:L","silo:L","tower:L","wall:L","cell:L","generator:L","collectionDepot:L"]', locked);
+  // The expected lists are built from the registry the game reads (base.ECON.kinds, in its order) and its
+  // `unlocks` table, not typed: a typed eight-row list went red the day M8 added the capacitor as a ninth.
+  // A kind with an `unlocks` row waits on the game year, not on the keep, so it stays locked after the keep.
+  const KINDS=JSON.parse(await p.ev('JSON.stringify(Object.keys(base.ECON.kinds))'));
+  const GATED=JSON.parse(await p.ev('JSON.stringify(Object.keys(base.ECON.unlocks||{}))'));
+  ok('fresh: the catalogue is the registry, every row once ('+KINDS.length+')', JSON.stringify(JSON.parse(locked).map(s=>s.split(':')[0]))===JSON.stringify(KINDS), locked+' vs '+JSON.stringify(KINDS));
+  ok('fresh: only the keep can be picked', locked===JSON.stringify(KINDS.map(k=>k+':'+(k==='keep'?'o':'L'))), locked);
   await p.ev('document.querySelector("#pbody .cell[data-k=keep]").click()');
   await p.tapWorld(0.5,0.5);
   ok('fresh: tapping ground raises the keep', await p.ev('base.buildings.filter(b=>b.type==="keep").length')===1, await p.ev('base.buildings.length'));
   await p.ev('base.openPanel(null)'); await sleep(200);
   const after=await p.ev('JSON.stringify([...document.querySelectorAll("#pbody .cell")].map(c=>c.dataset.k+":"+(c.disabled?"L":"o")))');
-  ok('fresh: the rest unlock, the keep locks', after==='["keep:L","hut:o","silo:o","tower:o","wall:o","cell:o","generator:o","collectionDepot:o"]', after);
+  ok('fresh: the rest unlock, the keep locks'+(GATED.length?' - all but '+GATED.join(', ')+', which wait'+(GATED.length===1?'s':'')+' on the game year':''),
+    after===JSON.stringify(KINDS.map(k=>k+':'+(k==='keep'||GATED.includes(k)?'L':'o'))), after);
+  for(const k of GATED){ const why=await p.ev('base.lockReason('+JSON.stringify(k)+')');
+    ok('fresh: and '+k+' is locked by its unlock row, not by the keep ('+why+')', /^OPENS .* AFTER THE /.test(why), why); }
   ok('fresh: nothing 404d and nothing was logged as an error', p.watch.clean(), p.watch.why());
   await p.close();
   // ---- 2. the cell: science gates, reach claims

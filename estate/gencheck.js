@@ -33,7 +33,8 @@
 //      verify ownership. Today none does, so part 3 asserts over an empty set - IT IS VACUOUS, and it
 //      says the word "vacuous" in its own output every run, because an assertion that looks
 //      meaningful and covers nothing is worse than no assertion at all.
-//   4. The HP table has ONE source. `HP_OF` in `estate/index.html` is read through
+//   4. The HP table has ONE source. `HP_OF` in `estate/values.js` - the one home every chain-homed
+//      number moved to in M3 item 1; it was `index.html` before that - is read through
 //      `contracts/paritycheck.js`'s OWN `readConst` parser - the same brace matcher, lifted out of
 //      that file rather than written a second time here - and compared with `E.hp`, the table
 //      paritycheck holds the Solidity to. No third copy is typed into this file, and no .sol file may
@@ -62,7 +63,8 @@ const fs = require('fs'), path = require('path');
 
 const HERE = __dirname;
 // HOW THIS CHECK IS PROVED. `--dir=` points it at a copy of `contracts/` and `--page=` at a copy of
-// `index.html`. Every assertion below was made to go red by breaking a scratch copy - `library` to
+// `values.js` (the argument keeps its name from when the page held the table). Every assertion below
+// was made to go red by breaking a scratch copy - `library` to
 // `contract`, a bogus `generation(` call planted in the library, `view` taken off the Lab, an HP value
 // changed on one side only - and green again with the copy put back. That is why the paths are
 // arguments and not constants: a check nobody can break on purpose is a check nobody has tested, and
@@ -72,7 +74,7 @@ const arg = (k, d) => {
   return hit ? path.resolve(hit.slice(k.length + 3)) : d;
 };
 const DIR = arg('dir', path.join(HERE, 'contracts'));
-const PAGE = arg('page', path.join(HERE, 'index.html'));
+const PAGE = arg('page', path.join(HERE, 'values.js'));   // M3 item 1: the one home; it was index.html
 const SHOW = process.argv.includes('--show');
 
 let bad = 0;
@@ -386,11 +388,11 @@ if (!tokFns.length) {
 // =================================================================================================
 // PART 4 - the HP table has one source
 // =================================================================================================
-console.log('\n  4. one HP table, read from the page through the parity check\'s own parser');
+console.log('\n  4. one HP table, read from values.js through the parity check\'s own parser');
 const parityPath = path.join(DIR, 'paritycheck.js');
 const parity = fs.existsSync(parityPath) ? fs.readFileSync(parityPath, 'utf8') : '';
 // `readConst` is LIFTED from paritycheck.js rather than written again here - it is the one parser
-// that reads a whole `const NAME = <expr>;` out of index.html across lines, counting brackets and
+// that reads a whole `const NAME = <expr>;` out of values.js across lines, counting brackets and
 // stepping over strings. A second copy of it in this file would be a second thing to keep right.
 // It closes over a variable called `src`, so it is rebuilt as a function OF `src`.
 function liftReadConst(js) {
@@ -403,18 +405,18 @@ function liftReadConst(js) {
   return L.slice(i, end + 1).join('\n');
 }
 const lifted = liftReadConst(parity);
-ok('`contracts/paritycheck.js` still has the `readConst` parser this check reads the page with',
-  !!lifted, parity ? 'no `function readConst(name)` in it: this check cannot read index.html without it'
+ok('`contracts/paritycheck.js` still has the `readConst` parser this check reads values.js with',
+  !!lifted, parity ? 'no `function readConst(name)` in it: this check cannot read values.js without it'
     : 'paritycheck.js is not at ' + parityPath);
-ok('and still reads `HP_OF` out of index.html itself, so the page remains the source',
-  /'HP_OF'|"HP_OF"/.test(parity) && /readConst\(/.test(parity),
-  'paritycheck.js no longer names HP_OF: the sync this part asserts has no path left');
+ok('and still reads `HP_OF` out of values.js itself, so the one home remains the source',
+  /'HP_OF'|"HP_OF"/.test(parity) && /readConst\(/.test(parity) && /values\.js/.test(parity),
+  'paritycheck.js no longer names HP_OF, or no longer reads values.js: the sync this part asserts has no path left');
 
 if (lifted) {
   const readIn = (src) => new Function('src', lifted + '\nreturn readConst;')(src);
   const pageSrc = fs.readFileSync(PAGE, 'utf8');
   let pageHp = null, parityHp = null, err = '';
-  try { pageHp = new Function('return (' + readIn(pageSrc)('HP_OF') + ');')(); } catch (e) { err += 'index.html: ' + e.message + ' '; }
+  try { pageHp = new Function('return (' + readIn(pageSrc)('HP_OF') + ');')(); } catch (e) { err += path.basename(PAGE) + ': ' + e.message + ' '; }
   try { parityHp = new Function('return (' + readIn(parity)('E') + ');')().hp; } catch (e) { err += 'paritycheck.js: ' + e.message; }
   ok('reads `HP_OF` out of ' + path.basename(PAGE) + ' and `E.hp` out of paritycheck.js, by pattern and never by line number',
     !!pageHp && !!parityHp, err);

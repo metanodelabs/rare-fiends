@@ -13,13 +13,21 @@
 //   8. ruins     scarce patches of rubble, well away from bases, each with 1–3 glitching terminals
 //  8b. resources every base gets what the economy says an estate starts with: its home crystal seams on
 //                its own dry ground, its wild seams out in the frontier, and its groves of trees just
-//                outside it. The numbers come from the game (the page passes base.ECON); the defaults
-//                below are the same numbers, so the generator also runs on its own.
+//                outside it. HOW MANY of each is the map's number (ECON_DEFAULT below, or what the page
+//                passes in opts.econ); what a tree is worth, how long a seam's cycle is and how long a
+//                stump takes to regrow are the chain's numbers and are read from values.js, never held here.
 //   9. steps     THE RULE: a change of two or more levels is a cliff, and a Friend can't climb it. Every
 //                raised area must have at least one way up in steps of one level. Any area without one
 //                gets a staircase cut into its side.
 (function (root) {
   'use strict';
+  // THE RULE (M4 item 9): a game stores only its seed and this number, so ANY change to what a seed
+  // draws - a number in MAP_DEFAULT, ECON_DEFAULT or PLAN, or the code of generate() - raises VERSION
+  // by one, or every recorded map silently redraws as a different island. It is enforced, not trusted:
+  // deployer.html generates seed 1 at these defaults in the game's own window, fingerprints the ground
+  // it draws (heights, water, forest, ruins, plots, trees, seams, seam depths - and none of the chain's
+  // numbers, which values.js may change freely), and says DISAGREES when the fingerprint is not the one
+  // its DRAWS table records for this VERSION. A bump is one line here and one row there.
   const VERSION = 1;
   // The estate's plot. THIS IS THE ONE DECLARATION - M12 item 4. It used to be written out here
   // and again in estate/index.html, which read "exactly as the game draws a home estate" and was
@@ -29,8 +37,30 @@
   const PLAN = ['..####..', '.######.', '########', '########', '.######.', '..####..'];
   const LEVELS = ['shore', 'lowland', 'plain', 'hill', 'high ground', 'peak'];
   const W_NONE = 0, W_SEA = 1, W_LAKE = 2, W_RIVER = 3, W_CREEK = 4;
-  // what one estate starts with, as base.ECON has it (4 home seams + 2 wild, 7 groves of 3 trees, 3 wood a tree, a 36 s crystal cycle)
-  const ECON_DEFAULT = { homeSeams: 4, wildSeams: 2, groves: 7, treesPerGrove: 3, treeWood: 3, growMs: 36000, regrowMs: 45000 };
+  // THE MAP'S NUMBERS, and only the map's: what one estate's ground holds, as the home estate's plan
+  // lays it out (4 home seams + 2 wild, 7 groves of 3 trees). A page may pass its own counts in
+  // opts.econ (mapgen.html passes the game's, read off base.ECON). It used to hold treeWood, growMs
+  // and regrowMs as well - treeWood as 3 whole logs while the game counts hundredths - which was the
+  // second home for three chain numbers; those are read from values.js in generate(), and passing one
+  // of them in opts.econ is an error rather than a quiet override.
+  const ECON_DEFAULT = { homeSeams: 4, wildSeams: 2, groves: 7, treesPerGrove: 3 };
+  const MAP_KEYS = Object.keys(ECON_DEFAULT);
+  // how big a map is for how many players: an estate (36 tiles) plus its frontier, and the share of
+  // the square that is land. Exported so the deployer page can read them, which it could not while
+  // they were argument defaults and a constant inside generate().
+  const MAP_DEFAULT = { players: 100, tilesPerPlayer: 170, landShare: 0.52 };
+  // the chain's table, read when a map is made and not when this file loads: the game loads this file
+  // before values.js, and the deployer page loads it without values.js and only reads the defaults
+  // above. No fallback copy - that would be the second home all over again - so a map asked for
+  // without the table fails loudly.
+  const ECON_KEYS = ['treeWood', 'growMs', 'regrowMs', 'chopMs', 'crystalUnit', 'handYield'];
+  function valuesTable() {
+    const V = root.VALUES || (typeof require === 'function' ? require('./values.js') : null);
+    if (!V) throw new Error('mapgen.js: values.js is not loaded, so the map has no economy to read');
+    const missing = ECON_KEYS.filter(k => typeof V[k] !== 'number');
+    if (missing.length) throw new Error('mapgen.js: values.js has no ' + missing.join(', '));
+    return V;
+  }
 
   // ---------- a seeded random source and value noise ----------
   function mulberry32(a) {
@@ -217,11 +247,16 @@
   function generate(opts) {
     const t0 = (typeof performance !== 'undefined' ? performance : Date).now();
     const seed = (opts && opts.seed != null ? opts.seed : 1) >>> 0;
-    const players = Math.max(2, Math.min(200, (opts && opts.players) || 100));
-    const perPlayer = (opts && opts.tilesPerPlayer) || 170;          // an estate (36) plus its frontier
-    const LAND_SHARE = 0.52;
+    const players = Math.max(2, Math.min(200, (opts && opts.players) || MAP_DEFAULT.players));
+    const perPlayer = (opts && opts.tilesPerPlayer) || MAP_DEFAULT.tilesPerPlayer;
+    const LAND_SHARE = MAP_DEFAULT.landShare;
     const rand = mulberry32(seed ^ 0x9E3779B9);
+    // the map's counts, then the chain's numbers: E is what the page may set, T is what it may not
+    const passed = Object.keys((opts && opts.econ) || {}).filter(k => !MAP_KEYS.includes(k));
+    if (passed.length) throw new Error('mapgen.js: opts.econ carries ' + passed.join(', ') + ' - the chain\'s numbers are read from values.js and cannot be passed in');
     const E = Object.assign({}, ECON_DEFAULT, opts && opts.econ);
+    const V = valuesTable();
+    const T = Object.fromEntries(ECON_KEYS.map(k => [k, V[k]]));
     const S1 = seed % 100000, S2 = S1 + 7919, S3 = S1 + 15731, S4 = S1 + 28657;
 
     // 1. size
@@ -488,7 +523,7 @@
       // Crystal seams grow in clusters of touching cells; only a few stand alone (about 3%). A cluster's
       // cells ripen close together, so it grows as a group.
       const grow = (start, n, ok, plot, wild) => {                      // grow a cluster of n touching cells from start
-        const cells = [start], t0 = Math.floor(rand() * E.growMs);
+        const cells = [start], t0 = Math.floor(rand() * T.growMs);
         while (cells.length < n) {
           const edge = [];
           cells.forEach(c => { const x = c % W, y = (c / W) | 0; for (let k = 0; k < 4; k++) { const xx = x + N8[k][0], yy = y + N8[k][1];
@@ -496,7 +531,7 @@
           if (!edge.length) break;
           cells.push(edge[Math.floor(rand() * edge.length)]);
         }
-        cells.forEach(c => { seamAt[c] = seams.length + 1; seams.push({ x: c % W, y: (c / W) | 0, plot, wild, t0: (t0 + Math.floor(rand() * E.growMs * 0.12)) % E.growMs }); });
+        cells.forEach(c => { seamAt[c] = seams.length + 1; seams.push({ x: c % W, y: (c / W) | 0, plot, wild, t0: (t0 + Math.floor(rand() * T.growMs * 0.12)) % T.growMs }); });
         return cells.length;
       };
       const lonely = (q) => [0, 1, 2, 3].every(k => { const xx = q % W + N8[k][0], yy = ((q / W) | 0) + N8[k][1]; return !inb(xx, yy) || !seamAt[idx(xx, yy)]; });
@@ -589,19 +624,24 @@
     const ms = (typeof performance !== 'undefined' ? performance : Date).now() - t0;
     return {
       version: VERSION, seed, players, W, H, elev, level, water, forest, ruin, plotAt, flowDir, N8, plots, rivers, creeks, ruins, core,
-      trees, seams, seamAt, seamDepth, econ: E,
+      // econ: the map's counts and the chain's numbers the map was made with, in the game's units
+      // (wood in hundredths, times in ms) - for the page to show, not a place anything is declared
+      trees, seams, seamAt, seamDepth, econ: Object.assign({}, E, T),
       LEVELS, PLAN,
       stats: { side, land, landPerPlayer: land / players, forest: forestN / land, hills: hillN / land, lakes: lakeN,
                riverTiles: riverN, creekTiles: creekN, plots: plots.length, plotsWithCreek: plots.filter(p => p.creek).length,
                ruins: ruins.length, terminals: ruins.reduce((a, r) => a + r.terminals.length, 0), spacing, stairs, stranded, ms,
                homeSeams: seams.filter(q => !q.wild).length, wildSeams: seams.filter(q => q.wild).length,
-               crystalsPerHour: seams.filter(q => !q.wild).length * 3600000 / (E.growMs * 0.75),
-               trees: treeN, groveTrees: plots.reduce((a, p) => a + p.groves * E.treesPerGrove, 0), wood: treeN * E.treeWood,
-               woodPerMinuteMax: treeN * E.treeWood / (E.treeWood * 1400 + E.regrowMs) * 60000 },
+               // by hand: a seam is cut once it is three quarters through its cycle, for handYield crystals
+               crystalsPerHour: seams.filter(q => !q.wild).length * T.handYield * 3600000 / (T.growMs * 0.75),
+               // wood in hundredths, like the purse. A tree is felled one log (crystalUnit hundredths)
+               // per chopMs, so it takes treeWood / crystalUnit chops, then regrows after regrowMs.
+               trees: treeN, groveTrees: plots.reduce((a, p) => a + p.groves * E.treesPerGrove, 0), wood: treeN * T.treeWood,
+               woodPerMinuteMax: treeN * T.treeWood / (T.treeWood / T.crystalUnit * T.chopMs + T.regrowMs) * 60000 },
     };
   }
 
-  const api = { generate, unreachable, ensureSteps, crystalBed, bedFor, seamDepths, VERSION, PLAN, LEVELS, ECON_DEFAULT, WATER: { NONE: W_NONE, SEA: W_SEA, LAKE: W_LAKE, RIVER: W_RIVER, CREEK: W_CREEK } };
+  const api = { generate, unreachable, ensureSteps, crystalBed, bedFor, seamDepths, VERSION, PLAN, LEVELS, ECON_DEFAULT, MAP_DEFAULT, ECON_KEYS, WATER: { NONE: W_NONE, SEA: W_SEA, LAKE: W_LAKE, RIVER: W_RIVER, CREEK: W_CREEK } };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.MapGen = api;
 })(typeof window !== 'undefined' ? window : globalThis);

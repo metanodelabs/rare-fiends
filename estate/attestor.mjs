@@ -370,7 +370,10 @@ export const SHADOW_ABI = [
 ];
 
 /** What `recheck` exits with. Named so the timer's journal reads without this file open. */
-export const RECHECK_EXIT = { OK: 0, UNREADABLE: 1, NOT_DEPLOYED: 2, CHAIN_LACKS: 3 };
+// Exit 3 (CHAIN_LACKS) is gone with ruling 22: it was the stop for a contract that stored keccak256(mint), which
+// this adapter could not reverse. The contract stores the raw key now, nothing throws "ShadowFriends lacks", and
+// an exit code nothing can produce is a line in a journal nobody will ever read.
+export const RECHECK_EXIT = { OK: 0, UNREADABLE: 1, NOT_DEPLOYED: 2 };
 
 /**
  * The hourly re-check. Every live shadow is read FROM THE CHAIN - never from a file, because a file can be
@@ -435,8 +438,8 @@ export async function recheck(io = {}) {
  * The mint is read straight off the chain: `ShadowFriends` stores `solMint` (and `solOwner`) as the RAW
  * 32-byte Solana key - `attest` puts `keyToBytes32(mint)` into the claim - so `mintOf` is `bytes32ToKey`,
  * a lossless decode, and the chain alone says WHICH Doopie a shadow shadows. (It used to store
- * `keccak256(mint)`, one-way, and this adapter had to stop at exit 3 rather than guess; the deployer ruled
- * for the raw key on 2026-09-30.)
+ * `keccak256(mint)`, one-way, and this adapter had to stop - the old exit 3, since removed - rather than
+ * guess; the deployer ruled for the raw key on 2026-09-30.)
  */
 export function chainFromRpc(ethers, { rpc, contract, chainId, signer, fromBlock = 0 }) {
   const provider = new ethers.JsonRpcProvider(rpc, chainId, { staticNetwork: true });
@@ -484,14 +487,15 @@ function signerFromEnv(ethers) {
  * wrong contract by leaving a shell variable set.
  */
 function configuredContract() {
-  let contract = null, chainId = 4663;
+  let contract = null, chainId = 4663, deployBlock = 0;
   try {
     const j = JSON.parse(readFileSync(new URL('./bridge-config.json', import.meta.url), 'utf8'));
     contract = j.shadowFriends || null;
     if (j.chainId) chainId = j.chainId;
+    if (j.deployBlock) deployBlock = Number(j.deployBlock);    // written by contracts/deploy.mjs at the ShadowFriends step
   } catch (e) { /* no config is the same as no deployment */ }
   if (!contract && process.env.SHADOWFRIENDS_ADDRESS) contract = process.env.SHADOWFRIENDS_ADDRESS.trim();
-  return { contract, chainId };
+  return { contract, chainId, deployBlock };
 }
 
 /** `node estate/attestor.mjs recheck` - the hourly run. Exit codes are RECHECK_EXIT; the key is read from
@@ -508,11 +512,12 @@ async function recheckMain(ethers) {
   if (!signer) { process.stderr.write('recheck: ATTESTOR_KEY is not set - revoke could not be sent, so nothing was read\n'); process.exit(RECHECK_EXIT.NOT_DEPLOYED); }
   const rpc = process.env.EVM_RPC || 'https://rpc.mainnet.chain.robinhood.com';
   const chain = chainFromRpc(ethers, { rpc, contract: cfg.contract, chainId: cfg.chainId, signer,
-    fromBlock: Number(process.env.SHADOWFRIENDS_FROM_BLOCK || 0) });
+    // the event scan starts where the contract was born: deploy.mjs writes `deployBlock` beside the address,
+    // and a scan from 0 on a chain 77 million blocks deep is the kind of request a public RPC refuses
+    fromBlock: Number(process.env.SHADOWFRIENDS_FROM_BLOCK || cfg.deployBlock || 0) });
   let out;
   try { out = await recheck({ ethers, chain, readAsset: readerFromEnv() }); }
   catch (e) {
-    if (/^ShadowFriends lacks/.test(e.message)) { process.stderr.write('recheck: ' + e.message + '\n'); process.exit(RECHECK_EXIT.CHAIN_LACKS); }
     process.stderr.write('recheck: failed: ' + e.message + '\n');
     process.exit(RECHECK_EXIT.UNREADABLE);
   }

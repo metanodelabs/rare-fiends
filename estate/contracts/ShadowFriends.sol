@@ -78,8 +78,19 @@ contract ShadowFriends is ERC721, EIP712 {
     address public attestor;            // the bridge's checker: signs claims, revokes when a re-check fails
     IRareRoles public immutable roles;  // the launch whitelist: claim asks roles.requireAllowed FIRST (deployer, 2026-09-30)
 
+    /// @notice how long a signed claim lives: the attestor signs `deadline = now + CLAIM_TTL` (attestor.mjs
+    /// `CLAIM_TTL`, held equal to this by the parity check). It is a constant HERE because `revoke` needs it:
+    /// a claim signed BEFORE a revoke must not land AFTER it, and the only clock a claim carries is its
+    /// deadline, so "signed at or before the revoke" is `deadline <= revokedAt + CLAIM_TTL`. Permanent, like
+    /// the Claim struct it is tied to - a shorter TTL in the attestor would only delay a fresh claim, a
+    /// longer one would let a replay through for the difference, which is why the two are checked equal.
+    uint64 public constant CLAIM_TTL = 15 minutes;
+
     mapping(uint256 => Shadow) private shadows;
     mapping(bytes32 => bool) public shadowed;          // one LIVE shadow per Solana mint (its raw 32-byte key); revoke frees it for the next owner
+    /// @notice when a mint's shadow was last revoked (zero if never): the seller's still-valid claim is
+    /// refused against it, so a Doopie sold on Solana cannot be shadowed again by the wallet that sold it
+    mapping(bytes32 => uint64) public revokedAt;
 
     event Claimed(uint256 indexed tokenId, address indexed to, bytes32 indexed solMint, bytes32 artHash);
     event Rechecked(uint256 indexed tokenId, uint64 when);
@@ -100,6 +111,9 @@ contract ShadowFriends is ERC721, EIP712 {
     error BadTraitKey();
     error TooManyTraits();
     error BadArt();
+    /// @notice the claim was signed at or before this mint's last revoke: the seller re-sending calldata
+    /// that is still inside its deadline. Found by estate/bridge-proof.mjs on 2026-09-30, before deploy.
+    error ClaimPredatesRevoke();
 
     /// @dev The ERC721 name and the EIP-712 domain are DELIBERATELY the same string. They were two
     /// different spellings on this one line, and the domain is frozen into every signature the attestor
@@ -136,6 +150,13 @@ contract ShadowFriends is ERC721, EIP712 {
         if (msg.sender != c.to) revert NotYours();
         if (block.timestamp > c.deadline) revert ClaimExpired();
         if (shadowed[c.solMint]) revert AlreadyShadowed();
+        // A revoke frees the mint, but not for the claim that was signed before it: the seller still holds
+        // calldata the attestor signed while they owned the Doopie, good for CLAIM_TTL. Its deadline says
+        // when it was signed (deadline - CLAIM_TTL), so anything signed at or before the revoke's second is
+        // refused. The contract cannot tell "same second, before" from "same second, after", so it refuses
+        // both; a buyer asking the attestor a second later is unaffected. Never revoked: revokedAt is 0 and a
+        // deadline that small has already failed ClaimExpired above.
+        if (c.deadline <= revokedAt[c.solMint] + CLAIM_TTL) revert ClaimPredatesRevoke();
         uint256 nt = c.traitKeys.length;
         if (nt != c.traitValues.length) revert TraitsMismatch();
         if (nt > MAX_TRAITS) revert TooManyTraits();
@@ -194,6 +215,7 @@ contract ShadowFriends is ERC721, EIP712 {
         bytes32 mint = shadows[tokenId].solMint;
         delete shadows[tokenId];
         shadowed[mint] = false;
+        revokedAt[mint] = uint64(block.timestamp);   // from here only a claim signed AFTER this second lands
         _burn(tokenId);
         emit Revoked(tokenId, reason);
     }

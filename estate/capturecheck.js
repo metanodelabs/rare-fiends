@@ -24,7 +24,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     '--user-data-dir=' + prof, '--window-size=1200,900', (process.env.CAP_ORIGIN || 'http://localhost:8765') + '/base.html'], { stdio: 'ignore' });
   let send, sock, bad = 0;
   try {
-  for (let i = 0; i < 40 && !send; i++) { await sleep(250); try {
+  for (let i = 0; i < 160 && !send; i++) { await sleep(250); try {
     const t = (await (await fetch(`http://127.0.0.1:${PORT}/json`)).json()).find(x => x.type === 'page');
     const ws = new WebSocket(t.webSocketDebuggerUrl); await new Promise((ok, no) => { ws.onopen = ok; ws.onerror = no; });
     let id = 0; const m = new Map(); ws.onmessage = e => { const o = JSON.parse(e.data); if (o.id && m.has(o.id)) { m.get(o.id)(o); m.delete(o.id); } };
@@ -74,7 +74,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
       claimOn: base.capture.claimOn ? base.capture.claimOn(b) === null : 'no claimOn', returned: w.returned,
       closes: w.closes, beatenAt: w.beatenAt, opened: w.opened }; })()`);
   // a wall's full hp, read from the game's own source (WALL_HP), not typed here
-  const fullHp = Number((fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8').match(/const WALL_HP = (\d+)/) || [])[1]);
+  const fullHp = Number((fs.readFileSync(path.join(__dirname, 'values.js'), 'utf8').match(/const WALL_HP = (\d+)/) || [])[1]);   // values.js, the one home (M3 item 1)
   ok('the intruder is repelled: reason "repelled", hp 0', f1 && f1.reason === 'repelled' && f1.intruderHp === 0 && f1.beaten, JSON.stringify(f1));
   ok('the fight had walls to spare (' + (f1 && f1.nWalls) + ' sections) - or the next line would prove nothing', f1 && f1.nWalls > 0, JSON.stringify(f1));
   ok('no wall lost a point: every section at ' + fullHp + ' before and after', f1 && Array.isArray(f1.walls) && fullHp > 0 && f1.walls.every(h => h === fullHp),

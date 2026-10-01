@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Rare Fiends — your page</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Silkscreen:wght@400;700&family=Sometype+Mono:wght@400;500&display=swap" rel="stylesheet">
+<!-- M5 item 3: a page showing everything a player holds. READ ONLY - nothing on this page writes anything.
+       crystals, wood, buildings -> M6's record (record.js): Record.browserStore('rarefriends').load(base), the
+                                    base row (the purse, in hundredths) and the ledger's buildings. The record is
+                                    the BROWSER's store, a stand-in for the server's (record.js says so), and it is
+                                    keyed by BASE, not by address: nothing in it says which wallet a base belongs
+                                    to yet. So these three cards show the base played in this browser, whoever is
+                                    connected, and the card says exactly that rather than pretending otherwise.
+                                    A draft (an open base tab's moves not yet written) is replayed over the record
+                                    with Record.apply - which returns a new record and stores nothing.
+       Friends                   -> M11's FriendChain.owned(address), sprites/friend-chain.js, at one block.
+       items                     -> nothing. The record has no items in it and nothing else holds them. "—".
+     The address is ?wallet=0x... when typed (it PINS the page, as on the base - the wallet is not followed),
+     else the one wallet.js holds.
+     Deliberately absent: a name (M5 item 2 contradicts schema.json's `player` entity - not built). The crystals
+     ever gathered are the record's own `gathered` (M5 item 4 is not built: record.js already counts it). -->
+<style>
+:root {
+  --ink: #FFFFFF; --paper: #000000; --signal: #CCFF00;
+  --dim: rgba(255,255,255,.62); --faint: rgba(255,255,255,.28);
+  --display: Silkscreen, monospace; --mono: "Sometype Mono", ui-monospace, monospace;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; background: #090B09; color: var(--ink); overflow-x: hidden; }
+body { font-family: var(--mono); font-size: 18px; line-height: 1.45; min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column; }
+a { color: var(--signal); }
+header { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid rgba(204,255,0,.4); background: #000; flex-wrap: wrap; }
+.brand { display: flex; align-items: center; gap: 9px; font-family: var(--display); font-size: 19px; letter-spacing: .12em; }
+.brand i { width: 8px; height: 8px; background: var(--signal); border-radius: 50%; }
+.brand span { color: var(--dim); }
+header nav { margin-left: auto; display: flex; gap: 6px; }
+header nav a { font-family: var(--display); font-size: 14px; letter-spacing: .1em; color: #fff; text-decoration: none; border: 1px solid var(--faint); padding: 5px 7px; }
+header nav a:hover { border-color: var(--signal); color: var(--signal); }
+main { width: 100%; max-width: 900px; margin: 0 auto; padding: 16px; display: grid; gap: 14px; }
+
+.who { border: 1px solid var(--faint); background: #000; padding: 12px; display: grid; gap: 8px; }
+.who .k, .card .k { font-family: var(--display); font-size: 13px; letter-spacing: .12em; color: var(--signal); }
+.who .addr { font-family: var(--mono); font-size: 17px; overflow-wrap: anywhere; min-height: 1.45em; }
+.who .addr.none { color: var(--dim); }
+.who .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.btn { font-family: var(--display); font-size: 15px; letter-spacing: .08em; background: var(--signal); color: #000;
+  border: 0; padding: 9px 12px; cursor: pointer; }
+.btn[data-wallet="connected"] { background: none; color: var(--signal); border: 1px solid var(--signal); cursor: default; }
+.btn[disabled] { opacity: .6; cursor: default; }
+.why { font-size: 15px; color: var(--dim); }
+.pin { font-family: var(--display); font-size: 12px; letter-spacing: .1em; color: #000; background: var(--signal); padding: 2px 5px; }
+
+.hold { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+.card { border: 1px solid var(--faint); background: #000; padding: 10px; display: grid; gap: 4px; align-content: start; min-width: 0; }
+.card .v { font-family: var(--display); font-size: 26px; color: var(--dim); overflow-wrap: anywhere; }
+.card .v.read { color: var(--signal); }
+.card .src { font-size: 13px; line-height: 1.35; color: var(--dim); overflow-wrap: anywhere; }
+.card .src b { font-weight: 500; color: var(--ink); }
+.foot { font-size: 15px; color: var(--dim); margin: 0; }
+.recnote { font-size: 14px; color: var(--dim); margin: 0; overflow-wrap: anywhere; }
+.recnote b { font-family: var(--display); font-weight: 400; font-size: 13px; letter-spacing: .1em; color: var(--signal); }
+
+@media (max-width: 720px) {
+  body { font-size: 16px; }
+  header { padding: 8px 12px; flex-wrap: nowrap; }
+  .brand { font-size: 15px; letter-spacing: .08em; gap: 7px; white-space: nowrap; }
+  main { padding: 12px; gap: 10px; }
+  .who { padding: 10px; gap: 6px; }
+  .who .addr { font-size: 14px; }
+  .why { display: none; }               /* the sentence; the address and the button are what a phone keeps */
+  .foot { font-size: 13px; }
+  .recnote { font-size: 12px; line-height: 1.35; }
+  .hold { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .hold .card:last-child { grid-column: 1 / -1; }
+  .card { padding: 8px; }
+  .card .v { font-size: 20px; }
+  .card .src { font-size: 12px; }
+}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><i></i>RARE FIENDS <span>· YOUR PAGE</span></div>
+  <nav><a href="base.html">BASE</a></nav>
+</header>
+<main>
+  <section class="who" aria-label="who you are">
+    <div class="k">ADDRESS</div>
+    <div class="addr none" id="addr">no wallet connected</div>
+    <div class="row">
+      <button class="btn" id="connect" type="button" data-wallet>CONNECT WALLET</button>
+      <span class="pin" id="pinned" hidden>FROM ?wallet=</span>
+      <span class="why" id="why">A player is an address. Nothing else identifies you here.</span>
+    </div>
+  </section>
+
+  <p class="recnote" id="recnote">reading the saved record…</p>
+  <section class="hold" id="hold" aria-label="what you hold"></section>
+
+  <p class="foot" id="foot">Read only: nothing on this page writes to any record. A card with nothing to read says so
+    and shows no number.</p>
+</main>
+<script src="chance.js"></script>
+<script src="chainlive.js"></script><!-- the RPC list, and ?rpc=local remembered for the tab -->
+<script src="values.js"></script><!-- the crystal unit and the building names -->
+<script src="record.js"></script><!-- M6: the base's saved record, read here and never written -->
+<script src="sprites/friend-chain.js"></script><!-- M11: which Friends an address holds -->
+<script src="wallet.js"></script>
+<script>
+(function () {
+  'use strict';
+  const $ = (id) => document.getElementById(id);
+  const V = window.VALUES, UNIT = V.crystalUnit;
+  const fmt = (n) => (n / UNIT).toFixed(2);              // hundredths to shown, the base's own fmtC
+  const Q = new URLSearchParams(location.search);
+
+  // THE ADDRESS. A typed ?wallet= pins the page, exactly as it pins the base: the wallet is not followed.
+  const TYPED = Q.get('wallet');
+  const PINNED = TYPED != null ? (RFWallet.isAddr(TYPED) ? TYPED : 'bad') : null;
+
+  // THE BASE'S RECORD. The base the player runs is id 0 on a hand-built base (index.html's HOME = BASES[0]),
+  // and the store's namespace is the base's own ('rarefriends'). Read only: load and loadDraft, never commit.
+  const BASE_ID = 0;
+  const STORE = Record.browserStore('rarefriends');
+  function readRecord() {
+    const rec = STORE.load(BASE_ID);
+    if (!rec) return null;
+    const d = STORE.loadDraft(BASE_ID);
+    let pending = 0;
+    if (d && d.moves && d.moves.length) {
+      // an open base tab's moves since its last write - replayed the way the base will replay them, on a copy
+      const r = Record.apply(rec, { id: Record.hashOf({ parent: d.parent, moves: d.moves, at: d.at, seen: d.seen }), base: BASE_ID,
+        parent: d.parent, moves: d.moves, at: d.at, seen: d.seen, after: d.after, scene: rec.scene });
+      if (r.ok) return { rec: r.record, pending: d.moves.length, refused: null };
+      return { rec, pending: 0, refused: r.reason };
+    }
+    return { rec, pending, refused: null };
+  }
+  // ONE LINE above the cards says where crystals, wood and buildings come from, and whose base it is
+  function recordNote(got) {
+    if (!got) return '<b>NO SAVED RECORD</b> in this browser · open the base and play; it is written when you leave it';
+    const r = got.rec;
+    return '<b>SAVED RECORD</b> · base ' + BASE_ID + ', the one this browser plays · write ' + r.writes +
+      (got.pending ? ' + ' + got.pending + ' move' + (got.pending === 1 ? '' : 's') + ' an open base tab has not written yet' : '') +
+      (got.refused ? ' · an open tab\'s unwritten moves are not counted: the record refuses them (' + got.refused + ')' : '') +
+      ' · the record does not yet say which address owns a base, so this is the same whoever is connected';
+  }
+  const FROM = 'from the saved record';
+  // the record's clock is the game's: a building is standing once its build time has run on THAT clock
+  const clockOf = (r) => (r.scene && typeof r.scene.clock === 'number') ? r.scene.clock : r.at;
+
+  // WHERE EACH NUMBER COMES FROM. read(addr, got) -> { v, src } or throws; `needsAddr` cards wait for an address.
+  const NO_RECORD = { v: '—', src: 'no saved record in this browser' };
+  const SOURCES = [
+    { key: 'crystals', label: 'CRYSTALS', read: (a, got) => !got ? NO_RECORD : { v: fmt(got.rec.ledger.base.crystals),
+      src: '<b>' + fmt(got.rec.ledger.gathered) + ' ever gathered</b> · ' + FROM } },
+    { key: 'wood', label: 'WOOD', read: (a, got) => !got ? NO_RECORD : { v: fmt(got.rec.ledger.base.wood), src: FROM } },
+    { key: 'buildings', label: 'BUILDINGS', read: (a, got) => {
+      if (!got) return NO_RECORD;
+      const L = got.rec.ledger, clock = clockOf(got.rec), names = new Map(); let rising = 0;
+      L.buildings.forEach((b) => {
+        const s = Record.standingLevel(b, clock), row = V.kinds[b.kind];
+        if (!Record.finished(b, clock)) rising += 1;
+        if (s < 1) return;                               // a first level still going up stands at nothing yet
+        const n = (row && row.tiers && row.tiers[s - 1]) || esc(String(b.kind).toUpperCase());
+        names.set(n, (names.get(n) || 0) + 1);
+      });
+      const list = [...names].map(([n, c]) => (c > 1 ? c + ' ' : '') + n).join(' · ');
+      return { v: String(L.buildings.length), src: '<b>' + (list || 'nothing standing') + '</b>' + (rising ? ' · ' + rising + ' going up' : '') + ' · ' + FROM };
+    } },
+    { key: 'friends', label: 'FRIENDS', needsAddr: true, read: async (a) => {
+      const D = await (await fetch('base-data.json', { cache: 'no-store' })).json();
+      const r = await FriendChain.connect(D.toolkit, ChainLive.RPC).owned(a);
+      return { v: String(r.friends.length), src: 'hardwired Friends this address holds, read from chain ' + D.toolkit.chainId + ' at block ' + r.blockNumber +
+        ' (FriendChain.owned)' + (r.hiddenCount ? ' · ' + r.hiddenCount + ' at generation 0 left out' : '') +
+        (r.friends.length ? ' · <b>' + r.friends.map((f) => '#' + f.id).join(' ') + '</b>' : '') };
+    } },
+    { key: 'items', label: 'ITEMS', read: () => ({ v: '—', src: 'nothing holds items yet · the base\'s record has no items in it, and no other record does' }) },
+  ];
+  const hold = $('hold');
+  hold.innerHTML = SOURCES.map((s) =>
+    '<div class="card" data-hold="' + s.key + '"><div class="k">' + s.label + '</div>' +
+    '<div class="v">—</div><div class="src">reading…</div></div>').join('');
+
+  let seq = 0;
+  const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+  // recordOnly: a write from an open base tab re-reads the record's cards, never the chain
+  async function fill(addr, recordOnly) {
+    const mine = recordOnly ? seq : ++seq, got = readRecord();
+    window.playerPage.record = got;
+    $('recnote').innerHTML = recordNote(got);
+    await Promise.all(SOURCES.filter((s) => !(recordOnly && s.needsAddr)).map(async (s) => {
+      const card = hold.querySelector('[data-hold="' + s.key + '"]'), v = card.querySelector('.v'), src = card.querySelector('.src');
+      const paint = (val, html, read) => { if (mine !== seq) return; v.textContent = val; v.classList.toggle('read', !!read); src.innerHTML = html; card.dataset.state = read ? 'read' : 'none'; };
+      if (s.needsAddr && !addr) { paint('—', PINNED === 'bad' ? '?wallet= is not an address, so nothing is read' : 'connect a wallet to read it', false); return; }
+      if (s.needsAddr) paint('—', 'reading the chain…', false);
+      try { const r = await s.read(addr, got); paint(r.v, r.src, r.v !== '—'); }
+      catch (e) { paint('—', 'could not be read · ' + esc(String(e && e.message || e).slice(0, 160)), false); console.warn(s.key, e); }
+    }));
+  }
+
+  function show(addr) {
+    const a = $('addr');
+    a.textContent = addr || (PINNED === 'bad' ? '?wallet= is not an address: ' + TYPED : RFWallet.available() ? 'no wallet connected' : 'there is no wallet in this browser');
+    a.classList.toggle('none', !addr);
+    fill(addr);
+  }
+  window.playerPage = { SOURCES, show, readRecord, pinned: PINNED, record: null };   // for the checks
+  if (PINNED) {
+    $('pinned').hidden = false; $('connect').hidden = true;
+    $('why').textContent = 'Pinned by the address bar. Take ?wallet= off to use your own wallet.';
+    show(PINNED === 'bad' ? '' : PINNED);
+  } else {
+    RFWallet.onChange(show);
+    show(RFWallet.address);
+  }
+  // the base, open in another tab, writes its record when it is hidden or closed: read it again when it does
+  addEventListener('storage', (e) => { if (e.key && e.key.indexOf('rarefriends.') === 0) fill(PINNED ? (PINNED === 'bad' ? '' : PINNED) : RFWallet.address, true); });
+})();
+</script>
+</body>
+</html>

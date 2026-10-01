@@ -11,7 +11,7 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
   const ch=spawn(CHROME,['--headless=new','--hide-scrollbars','--remote-debugging-port='+PORT,
     '--user-data-dir='+prof,'--window-size=1200,900','http://localhost:8765/attack_defense.html'],{stdio:'ignore'});
   let send, sock;
-  for(let i=0;i<40&&!send;i++){await sleep(250);try{
+  for(let i=0;i<160&&!send;i++){await sleep(250);try{
     const t=(await(await fetch(`http://127.0.0.1:${PORT}/json`)).json()).find(x=>x.type==='page');
     const ws=new WebSocket(t.webSocketDebuggerUrl);await new Promise((ok,no)=>{ws.onopen=ok;ws.onerror=no;});
     let id=0;const m=new Map();ws.onmessage=e=>{const o=JSON.parse(e.data);if(o.id&&m.has(o.id)){m.get(o.id)(o);m.delete(o.id);}};
@@ -26,8 +26,8 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
   for (let i = 0; i < 80 && !/READ FROM THE GAME/.test(await status()); i++) await sleep(250);
   ok('the page reads its numbers from the game', /READ FROM THE GAME/.test(await status()), await status());
 
-  // the numbers are the estate's own
-  const src = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
+  // the numbers are the estate's own - read from values.js, the one home they moved to in M3 item 1
+  const src = fs.readFileSync(path.join(__dirname, 'values.js'), 'utf8');
   const hp = JSON.parse(src.match(/const HP_OF = (\{[^}]+\})/)[1].replace(/(\d+):/g, '"$1":'));
   ok('it fights with the estate\'s HP table', JSON.stringify(await ev('JSON.stringify(combatPage.GAME.hp)')) === JSON.stringify(JSON.stringify(hp)), await ev('JSON.stringify(combatPage.GAME.hp)'));
   const periods = src.match(/periodMs: \{ melee: (\d+), ranged: (\d+), siege: (\d+) \}/).slice(1).map(Number);
@@ -108,7 +108,29 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
       const f=Combat.fight(P.R,st,{word:w,contract:Chance.PREVIEW_CONTRACT,chainId:Chance.CHAIN_ID,fightId:1});
       return {reason:f.reason, left:f.defenders.filter(h=>h>0).length};};
     return JSON.stringify({hold:run(0),engage:run(1)});})()`));
-  ok('a lone catapult out of reach: HOLD ends on the clock, ENGAGE goes out and settles it', siege.hold.reason === 'held' && siege.engage.reason !== 'held', JSON.stringify(siege));
+  // ruling 47: there is no clock, a fight runs until one side wins. So on HOLD the catapult shells the base to
+  // the last Friend ('wiped'), and on ENGAGE the defence goes out and beats it ('repelled', some left standing).
+  // Neither may end 'held' - an attacker that is not spared always shoots or steps, so an attack never stalls.
+  ok('a lone catapult out of reach, and no clock (ruling 47): HOLD lets it shell the base to the last Friend, ENGAGE goes out and beats it, and neither stalls',
+    siege.hold.reason === 'wiped' && siege.hold.left === 0 && siege.engage.reason === 'repelled' && siege.engage.left > 0, JSON.stringify(siege));
+  // the one fight that CAN stand still: a SPARED intruder (a capture fight) boxed in by walls it may not break,
+  // out of every defender's reach. Nobody can move or shoot, so the defence holds - 'held', read off the field.
+  // The same line-up as an ordinary attack breaks the wall instead, and does not stall.
+  const stall = JSON.parse(await ev(`(()=>{const P=combatPage,w="0x${'ef'.repeat(32)}",ctx={word:w,contract:Chance.PREVIEW_CONTRACT,chainId:Chance.CHAIN_ID,fightId:1};
+    const box=[{x:39,y:39},{x:41,y:39},{x:39,y:41},{x:41,y:41},{x:39,y:40,vert:true},{x:41,y:40,vert:true}];
+    const D={walls:box,defenders:[{gen:3,x:0,y:0,tower:false,order:0},{gen:2,x:1,y:0,tower:false,order:0}]};
+    const c=Combat.captureFight(P.R,D,{gen:1,x:40,y:40},ctx), a=Combat.fight(P.R,Combat.captureSetup(D,{gen:1,x:40,y:40}),ctx);
+    return JSON.stringify({spared:{reason:c.reason,winner:c.winner,shots:c.shots},attack:{reason:a.reason,shots:a.shots}});})()`));
+  ok('the one stand-still: a spared intruder walled in and out of reach ends \'held\' with no shot fired; the same line-up as an attack breaks out and does not',
+    stall.spared.reason === 'held' && stall.spared.winner === 'defence' && stall.spared.shots === 0 && stall.attack.reason !== 'held' && stall.attack.shots > 0, JSON.stringify(stall));
+  // ruling 45: cover is standing ON a standing wall section (÷ coverDiv), and standing BEHIND one is nothing
+  const cover = JSON.parse(await ev(`(()=>{const P=combatPage,R=P.R,w="0x${'12'.repeat(32)}",ctx={word:w,contract:Chance.PREVIEW_CONTRACT,chainId:Chance.CHAIN_ID,fightId:1};
+    const run=(opt)=>{const b=Combat.proving(3,opt); const f=Combat.fight(R,{attackers:[4,4],entry:Combat.entry(b,'N',6),defenders:b.defenders,walls:b.walls},ctx,{log:true});
+      const at=f.log.filter(s=>s.at==='D0'); const full=Math.floor(R.hp[4]*10000/(R.hp[4]+R.hp[3]));
+      return {shots:at.length,covered:at.filter(s=>s.cover).length,halved:at.filter(s=>s.cover).every(s=>s.bps===Math.floor(full/R.coverDiv)),open:at.filter(s=>!s.cover).every(s=>s.bps===full)};};
+    return JSON.stringify({coverDiv:R.coverDiv,behind:run({wall:true}),on:run({onWall:true})});})()`));
+  ok('cover is standing ON a wall (ruling 45): shots at a Friend on a standing wall land at 1/' + cover.coverDiv + ' the chance; behind the wall it gets none',
+    cover.coverDiv === 2 && cover.behind.shots > 0 && cover.behind.covered === 0 && cover.behind.open && cover.on.covered > 0 && cover.on.halved && cover.on.open, JSON.stringify(cover));
 
   await ev('document.getElementById("homeBtn").click()'); await sleep(300);
   ok('and BACK TO WHERE THEY STAND puts the estate\'s orders back', await ev('combatPage.BASE.defenders.every(d => d.order === 0)') === true && await ev('document.getElementById("log").innerText') === logA, 'differs');

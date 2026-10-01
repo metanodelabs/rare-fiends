@@ -121,7 +121,7 @@ async function chain() {
       call: async (fn, args2, from2, value) => { const r2 = await send(from2 || from, at, iface.encodeFunctionData(fn, args2 || []), value); return { out: iface.decodeFunctionResult(fn, r2.ret), gas: r2.gas }; },
     };
   }
-  return { acct, deploy, travel: (s) => { now += BigInt(s); number++; } };
+  return { acct, deploy, travel: (s) => { now += BigInt(s); number++; }, now: () => Number(now) };
 }
 
 (async () => {
@@ -161,7 +161,7 @@ async function chain() {
       3: { n: 'BOW AND ARROW', k: 'bow', dmg: 35, rng: 3 }, 2: { n: 'CROSSBOW', k: 'xbow', dmg: 50, rng: 4, pierce: true },
       1: { n: 'CATAPULT', k: 'catapult', dmg: 80, rng: 5, siege: true, area: 1, vsBuilding: 2 } },
     combat: { periodMs: { melee: 1600, ranged: 2200, siege: 3200 }, melee: ['club', 'spear'], towerRange: 1, dropRange: 0.75, landVsBuildingBps: 9000 } };
-  const src = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
+  const src = fs.readFileSync(path.join(__dirname, '../values.js'), 'utf8');   // M3 item 1: the tables left index.html for values.js, the one home
   // Reads `const NAME = <expression>;` whole out of the page: from after the `=` to the `;` that ends
   // it, counting brackets and stepping over strings and comments, so a table spanning eight lines with
   // a `//` note on half of them comes back entire. A regex to the first `}` cannot do that, which is
@@ -206,10 +206,12 @@ async function chain() {
   const lab = await net.deploy(TEAM, C.lab);
   const rng = Chance.stream(wordOf(99, 0), lab.address, CHAIN_ID, 1);
   const rint = (n) => rng() % n;
-  let fights = 0, match = 0, gasMax = 0, gasSum = 0, firstBad = null, worst = null;
+  let fights = 0, match = 0, gasMax = 0, gasSum = 0, firstBad = null, worst = null, longest = 0;
+  const ends = {}, solEnds = {};   // how each fight ended, in combat.js and in RareCombat.sol, counted apart
   const cases = [];
-  // generation against generation on the proving ground: open, behind a wall, up a tower behind a wall
-  for (const opt of [{}, { wall: true }, { wall: true, tower: true }])
+  // generation against generation on the proving ground: open, behind a wall, up a tower behind a wall, and
+  // ON the wall as its crew - the one place cover counts since ruling 45 (2026-10-01)
+  for (const opt of [{}, { wall: true }, { wall: true, tower: true }, { onWall: true }])
     for (let a = 1; a <= 6; a++) for (let d = 1; d <= 6; d++) { const b = Combat.proving(d, opt);
       cases.push({ attackers: [a], entry: Combat.entry(b, 'N', 6), defenders: b.defenders, walls: b.walls }); }
   // random bases: a 6×6 plot, wall sections, defenders on random spots (some stacked, some up towers), any side
@@ -235,7 +237,7 @@ async function chain() {
   //     58% of the ceiling, and `gasMax < 32_000_000` was true of this sample and silent about the game.
   //
   // GENERATION 6 IS THE EXPENSIVE FIGHT AND IT IS ALSO THE COMMON ONE. 100 HP, a club for 10 damage,
-  // melee - so every unit has to walk to every other unit and then trade for the full clock, and every
+  // melee - so every unit has to walk to every other unit and then trade until one side is down (there is no clock since ruling 47), and every
   // step and every shot is another roll off the word. It is 61.5% of all Friends (site/stats.json,
   // generations.by_gen). The corpus avoided it at size, which hid the worst case AND made it look exotic.
   //
@@ -284,6 +286,7 @@ async function chain() {
       hits: Number(o.hits), rolls: Number(o.rolls), attackers: o.attackers.map(Number), defenders: o.defenders.map(Number), walls: o.walls.map(Number) };
     const want = { winner: js.winner, reason: js.reason, t: js.t, shots: js.shots, hits: js.hits, rolls: js.rolls, attackers: js.attackers, defenders: js.defenders, walls: js.walls };
     fights++;
+    ends[js.reason] = (ends[js.reason] || 0) + 1; solEnds[sol.reason] = (solEnds[sol.reason] || 0) + 1; if (js.t > longest) longest = js.t;
     if (JSON.stringify(sol) === JSON.stringify(want)) match++; else if (!firstBad) firstBad = JSON.stringify({ S, sol, want });
     const g = Number(r.gas); gasSum += g;
     if (S.name) rungGas.set(S.name, Math.max(rungGas.get(S.name) || 0, g));
@@ -292,6 +295,62 @@ async function chain() {
   const orders = [0, 1, 2, 3].map(o => cases.reduce((n, S) => n + S.defenders.filter(d => (d.order || 0) === o).length, 0));
   ok('a fight: RareCombat.fight matches combat.js field for field on ' + fights + ' fights (' + cases.length + ' line-ups × 2 words, spots, walls, towers, splash; ' +
     orders[0] + ' holding, ' + orders[1] + ' engaging, ' + orders[2] + ' defending, ' + orders[3] + ' falling back)', match === fights, firstBad);
+  // THE DECIDED RULES, not only the two engines agreeing (rulings 45 and 47, 2026-10-01). Parity alone would
+  // stay green if both engines were changed the same wrong way, so each rule is asserted on its own here.
+  ok('NO FIGHT CLOCK (ruling 47): the Rules struct and rulesFrom carry no maxMs, and every one of the ' + fights + ' fights ends with a side down - '
+    + JSON.stringify(ends) + ' in combat.js and ' + JSON.stringify(solEnds) + ' in Solidity, none "held" - the longest running ' + (longest / 1000).toFixed(1) + ' s',
+    !('maxMs' in R) && !C.lab.abi.find((f) => f.name === 'fight').inputs[0].components.some((c) => c.name === 'maxMs')
+    && [ends, solEnds].every((m) => Object.keys(m).every((k) => k === 'wiped' || k === 'repelled')), JSON.stringify({ js: ends, sol: solEnds }));
+  // cover, by switching it off: the same fight at coverDiv 1 must differ only where cover applies. On the wall it
+  // must change the fight (in BOTH engines); behind a wall it must change nothing (in both).
+  const R1 = Object.assign({}, R, { coverDiv: 1 });
+  const S2of = (S) => ({ attackers: S.attackers, entry: S.entry, walls: S.walls, defenders: S.defenders.map(d => ({ gen: d.gen, x: d.x, y: d.y, tower: !!d.tower,
+    order: d.order || 0, fx: d.fx == null ? d.x : d.fx, fy: d.fy == null ? d.y : d.fy })) });
+  const both = async (RR, S, w) => { const js = Combat.fight(RR, S, { word: w, contract: lab.address, chainId: CHAIN_ID, fightId: 1 }, { log: true });
+    const o = (await lab.call('fight', [RR, S2of(S), w, 1])).out[0];
+    return { js, jsKey: [js.t, js.shots, js.hits].concat(js.attackers, js.defenders).join(), solKey: [o.t, o.shots, o.hits].concat(o.attackers, o.defenders).map(Number).join() }; };
+  let onDiff = 0, behindSame = 0, onCover = true, behindCover = false; const NC = 6;
+  for (let g = 1; g <= NC; g++) {
+    const w = wordOf(4500, g);
+    const pOn = Combat.proving(g, { onWall: true }), pBe = Combat.proving(g, { wall: true });
+    const SOn = { attackers: [g], entry: Combat.entry(pOn, 'N', 6), defenders: pOn.defenders, walls: pOn.walls };
+    const SBe = { attackers: [g], entry: Combat.entry(pBe, 'N', 6), defenders: pBe.defenders, walls: pBe.walls };
+    const [a2, a1, b2, b1] = [await both(R, SOn, w), await both(R1, SOn, w), await both(R, SBe, w), await both(R1, SBe, w)];
+    // a shot at the crew on a standing wall carries cover and half the odds; a shot over the wall at a Friend behind it carries none
+    onCover = onCover && a2.js.log.filter((e) => e.at === 'D0').some((e) => e.cover);
+    behindCover = behindCover || b2.js.log.some((e) => e.cover);
+    if (a2.jsKey !== a1.jsKey && a2.solKey !== a1.solKey && a2.jsKey === a2.solKey) onDiff++;
+    if (b2.jsKey === b1.jsKey && b2.solKey === b1.solKey && b2.jsKey === b2.solKey) behindSame++;
+  }
+  ok('COVER IS ON THE WALL (ruling 45): a Friend standing ON a standing wall is shot at half the odds - turning coverDiv to 1 changes the fight, in both engines, for '
+    + onDiff + ' of ' + NC + ' generations; standing BEHIND the same wall it changes nothing in either engine (' + behindSame + ' of ' + NC + ') and no shot over it is logged as cover',
+    onDiff === NC && behindSame === NC && onCover && !behindCover, JSON.stringify({ onDiff, behindSame, onCover, behindCover }));
+  // the wall can be broken and its crew lose the cover with it: once the section under the crew falls, no later
+  // shot at them is in cover (the log says which shots were, and the wall's hp at each)
+  // Three clubs (reach one spot) stand two spots from both the crew on section 0 and a Friend just behind it;
+  // the tie goes to the Friend behind, so their step lands on the crew's own section and they break it.
+  { const S = { attackers: [6, 6, 6], entry: { x: 2, y: -3, ax: 0, ay: 0 }, walls: [{ x: 0, y: -2 }],
+      defenders: [{ gen: 6, x: 0, y: -1 }, { gen: 6, x: 0, y: -2 }] };
+    let seen = null;
+    for (let k = 0; k < 20 && !seen; k++) {
+      const w = wordOf(4600, k), r = Combat.fight(R, S, { word: w, contract: lab.address, chainId: CHAIN_ID, fightId: 1 }, { log: true });
+      const fall = r.log.findIndex((e) => e.at === 'W0' && e.wall === 0);
+      const atCrew = fall < 0 ? [] : r.log.slice(fall + 1).filter((e) => e.at === 'D1');
+      if (fall >= 0 && atCrew.length) seen = { k, w, wallShots: fall + 1, atCrew: atCrew.length, inCover: atCrew.filter((e) => e.cover).length, sol: await both(R, S, w), js: r };
+    }
+    ok('a wall keeps its strength and can be destroyed: three clubs break the section the crew stands on (400 hp), and every shot at the crew after it falls is out of cover; Solidity fights it identically',
+      !!seen && seen.inCover === 0 && seen.sol.jsKey === seen.sol.solKey && seen.js.walls[0] === 0,
+      JSON.stringify(seen && { k: seen.k, wallShots: seen.wallShots, atCrew: seen.atCrew, inCover: seen.inCover, js: seen.sol.jsKey, sol: seen.sol.solKey })); }
+  // THE ONE FIGHT THAT CAN STAND STILL (combat.js only; the chain runs no spared fight): an intruder walled off
+  // from the one defender, spared, so it may not break the wall, and no abortMs. Before ruling 47 the clock
+  // ended it; now the stalemate does - every living Friend took a turn and nothing moved or shot.
+  { const walls = [{ x: 1, y: -2, vert: true }, { x: 1, y: 0, vert: true }];
+    const S = { attackers: [6], entry: { x: 0, y: 0, ax: 0, ay: 0 }, defenders: [{ gen: 6, x: 10, y: 0 }], walls };
+    const ctx = { word: wordOf(4700, 0), contract: lab.address, chainId: CHAIN_ID, fightId: 1 };
+    const stuck = Combat.fight(R, S, ctx, { spare: true }), open = Combat.fight(R, S, ctx);
+    ok('a spared capture fight that cannot move ends at once as a stalemate ("held", defence holds, at ' + stuck.t + ' ms, no shot) rather than looping; unspared, the same field is fought out ("' + open.reason + '")',
+      stuck.reason === 'held' && stuck.winner === 'defence' && stuck.shots === 0 && stuck.t <= R.stepMs && (open.reason === 'wiped' || open.reason === 'repelled'),
+      JSON.stringify({ stuck: [stuck.reason, stuck.t, stuck.shots], open: open.reason })); }
   console.log('        gas per fight: average ' + Math.round(gasSum / fights).toLocaleString('en-US') + ', most ' + gasMax.toLocaleString('en-US') + ' (' + JSON.stringify(worst) + ')');
   // The ceiling, read from the chain the contracts are for. The chain id is asserted with it: a ceiling
   // read from the wrong chain is worse than a typed-in one, because it looks like it was measured.
@@ -421,14 +480,14 @@ async function chain() {
   const b32 = (s2) => ethers.encodeBytes32String(s2);
   // The mint and the owner go on chain as the RAW 32-byte Solana keys (b58decode), encoded by the attestor's own
   // helper so this fixture cannot disagree with what the attestor will sign; the decode back is asserted below.
-  const { keyToBytes32, bytes32ToKey } = await import('../attestor.mjs');
+  const { keyToBytes32, bytes32ToKey, CLAIM_TTL } = await import('../attestor.mjs');
   const MINT58 = 'BmAwHYEhSRetbEfSQoZQsrvnUgKBxu3vGNyZjzrru3Fb';                                        // the DESIGN one-of-one
   const mint = keyToBytes32(MINT58);
   // a real Doopie's sprite, straight from the converter (doopies_converter/tools), packed for the chain
   const fix = JSON.parse(fs.readFileSync(path.join(__dirname, 'test/doopie-sprite.json'), 'utf8'));
   const claim = { to: OWNER, solMint: mint, solOwner: keyToBytes32('4osKgRS9ypbxdtThqsUyTgoFqbRKYUZiUixcNTHDqtMR'), collection: b32('doopies'),
     mask: fix.mask, palette: fix.palette, pixels: fix.pixels, colors: fix.colors, count: fix.count,
-    imageHash: ethers.keccak256(ethers.toUtf8Bytes('ar://j6EPz')), deadline: 1_900_000_000,
+    imageHash: ethers.keccak256(ethers.toUtf8Bytes('ar://j6EPz')), deadline: net.now() + CLAIM_TTL,   // signed the way the attestor signs: now + CLAIM_TTL
     name: 'Doopies #8880', traitKeys: ['Background', 'Species', 'Body', 'Evolution'].map(b32), traitValues: ['Neotide', 'Lint', 'Zebra', 'Evolution 1'].map(b32) };
   // The EIP-712 domain name, and it is the SAME STRING as the ERC721 name on ShadowFriends.sol:87 - the two
   // were different spellings on that one line and now are not. It is frozen into every signature the
@@ -488,11 +547,27 @@ async function chain() {
   ok('the attestor can confirm it is still owned', Number((await shadow.call('shadowOf', [mint])).out[0].checkedAt) > 0, 'not checked');
   await shadow.call('revoke', [mint, 'sold on Solana'], attestor.address);
   ok('and revoke it when the Doopie has moved on: the shadow is gone', await refuse('ownerOf', [mint], OWNER), 'still there');
+  // The replay estate/bridge-proof.mjs found (2026-09-30): after the revoke the seller still holds calldata the
+  // attestor signed while they owned the Doopie, inside its deadline. `claim` now refuses anything signed at or
+  // before the revoke's second (ClaimPredatesRevoke), and that rests on the contract and the attestor agreeing
+  // what a deadline means - so the TTL is asserted equal first, and a claim signed one second later is proved to land.
+  const errName = async (fn, args, from) => {
+    try { await shadow.call(fn, args, from); return 'landed'; } catch (e) { try { return shadow.iface.parseError(e.data).name; } catch (_) { return 'revert'; } }
+  };
+  const ttlOnChain = Number((await shadow.call('CLAIM_TTL')).out[0]);
+  ok('CLAIM_TTL is one number in the contract and the attestor (' + CLAIM_TTL + ' s): the replay refusal below rests on it', ttlOnChain === CLAIM_TTL, ttlOnChain + ' vs ' + CLAIM_TTL);
+  const replay = await errName('claim', [claim, sig], OWNER);
+  ok('a claim signed BEFORE the revoke cannot re-mint the shadow AFTER it: the seller re-sending still-valid calldata is refused (ClaimPredatesRevoke)', replay === 'ClaimPredatesRevoke', replay);
+  net.travel(1);
+  const fresh = Object.assign({}, claim, { deadline: net.now() + CLAIM_TTL });
+  const again = await errName('claim', [fresh, await attestor.signTypedData(domain, types, fresh)], OWNER);
+  ok('and a claim signed one second after the revoke lands: the mint is freed for a fresh claim, not frozen', again === 'landed' && (await shadow.call('ownerOf', [mint])).out[0].toLowerCase() === OWNER.toLowerCase(), again);
 
   // what each step costs in gas, measured here, for the cost and bridge pages (execution gas on the EVM; a real transaction adds
   // 21,000 base and its calldata, and on an Arbitrum chain a small L1 data fee)
   if (!fails) {
     GAS.measuredAt = new Date().toISOString(); GAS.solc = solc.version().split('+')[0]; GAS.note = 'execution gas, measured by estate/contracts/paritycheck.js';
+    GAS.sourcesHash = require('./sources').sourcesHash();   // what it was measured FROM, so `npm run gas:fresh` can say when this file goes stale
     fs.writeFileSync(path.join(__dirname, '../gas.json'), JSON.stringify(GAS, null, 2) + '\n');
     console.log('        gas per step written to estate/gas.json: ' + JSON.stringify(GAS));
   }

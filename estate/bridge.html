@@ -342,9 +342,21 @@ pre.msg { margin: 0; background: #000; border: 1px solid var(--faint); border-le
           ? '<div class="box"><div class="mono">Minted by <b>' + short(S.contract) + '</b>, and yours at <b>' + short(S.evm) + '</b>. Your wallet will ask you to approve ' +
             (n === 1 ? 'one transaction' : n + ' transactions') + '.</div></div>'
           : '<div class="box warn"><div class="mono"><b>The contract is not deployed yet.</b> Everything up to here is real: your wallet, your Doopies, the art and the signature. ' +
-            'This last step needs <b>ShadowFriends.sol</b> on ' + CHAIN.name + ' and an attestor to sign the claim. <span class="tag open">NOT DEPLOYED</span></div></div>');
+            'This last step needs <b>ShadowFriends.sol</b> on ' + CHAIN.name + ' and an attestor to sign the claim. <span class="tag open">NOT DEPLOYED</span></div></div>') +
+        // What the chain holds, read back from the contract after the mint - not what the wallet said it sent.
+        // The image is the SVG the contract draws; the traits are the ones it stores; the owner and the token
+        // id are its answers to ownerOf and shadowOf. (The 66-character hex mint is one of its attributes and
+        // is shown as the token id below rather than as a chip.)
+        (S.minted || []).map(m =>
+          '<div class="box minted" data-minted="' + m.tokenId + '"><div class="mono"><b>' + m.name + '</b> · ON CHAIN, read back from <b>' + short(S.contract) + '</b></div>' +
+          '<div class="pair"><img alt="the shadow, as the contract draws it" class="shadow" src="' + m.image + '">' +
+          '<div class="traits">' + m.attributes.filter(a => String(a.value).length <= 32).map(a => '<span' +
+            (String(a.value) === window.DOOPIE_ONE_OF_ONE ? ' class="one"' : '') + '>' + String(a.value).toUpperCase() + '</span>').join('') + '</div></div>' +
+          '<div class="mono">owner <b>' + short(m.owner) + '</b> · token <b>' + short(m.tokenId) + '</b> · ' + m.count + ' pixels, ' + m.colors + ' colours · block ' +
+            m.block.toLocaleString('en-US') + ' · tx <b>' + short(m.hash) + '</b></div></div>').join('');
       back(acts);
-      btn(acts, n === 1 ? 'MINT THE SHADOW' : 'MINT THE ' + n + ' SHADOWS', mintNow, 'go').disabled = !S.contract;
+      const minted = (S.minted || []).length;
+      btn(acts, minted ? 'MINTED' : n === 1 ? 'MINT THE SHADOW' : 'MINT THE ' + n + ' SHADOWS', mintNow, 'go').disabled = !S.contract || minted > 0;
     },
   };
 
@@ -519,23 +531,68 @@ pre.msg { margin: 0; background: #000; border: 1px solid var(--faint); border-le
       S.chosen.map(i => { const n = S.nfts[i], c = n.chain;
         return 'doopie: ' + (n.name || '') + ' · ' + n.mintAddress + ' · ' + (c ? c.count + 'px/' + c.colors + 'col/' + c.words + 'w' : '…'); }).join('\n');
   }
+  // ---------- reading the shadow back ----------
+  // "Minted" is said by the chain, not by the wallet. The page used to say it the moment eth_sendTransaction
+  // returned, having read nothing. Now it waits for the receipt and reads the shadow back from ShadowFriends
+  // with the contract's own read-only functions - ownerOf, shadowed, shadowOf, tokenURI - and shows what it
+  // read: the owner, the token id, and the image and traits the contract itself drew. A receipt that says
+  // reverted, a read that names another owner, or art that is not the art approved at step 3, is said in those
+  // words and nothing is called minted. Every selector is computed here; no value from the chain is typed in.
+  const sel = (sig) => Chance.hex(Chance.keccak256(new TextEncoder().encode(sig))).slice(0, 10);
+  const call = async (sig, v) => ChainLive.rpc('eth_call', [{ to: S.contract, data: sel(sig) + Chance.hex(Chance.encode(v)).slice(2) }, 'latest']);
+  const wordAt = (ret, i) => '0x' + ret.slice(2 + i * 64, 2 + (i + 1) * 64);
+  // a returned `string`: an offset word, a length word, then the bytes
+  const strOf = (ret) => { const off = Number(BigInt(wordAt(ret, 0))) * 2, len = Number(BigInt('0x' + ret.slice(2 + off, 2 + off + 64)));
+    return new TextDecoder().decode(Uint8Array.from(ret.slice(2 + off + 64, 2 + off + 64 + len * 2).match(/../g) || [], x => parseInt(x, 16))); };
+  const receipt = async (hash, ms) => { const t = Date.now();
+    while (Date.now() - t < ms) { const r = await ChainLive.rpc('eth_getTransactionReceipt', [hash]); if (r) return r; await new Promise(k => setTimeout(k, 1500)); }
+    return null; };
+  const bail = (why) => { throw new Error(why); };
+  async function readBack(c, hash, n) {
+    const r = await receipt(hash, 90000);
+    if (!r) bail('The transaction is still pending after 90 seconds — check your wallet. Nothing is called minted until the chain confirms it.');
+    if (r.status !== '0x1') bail('The transaction reverted — nothing was minted.');
+    const id = c.tokenId;                                 // the raw 32-byte mint as the token id, from the signed claim
+    const owner = '0x' + (await call('ownerOf(uint256)', id)).slice(-40);
+    if (owner.toLowerCase() !== S.evm.toLowerCase()) bail('The chain says that shadow belongs to ' + short(owner) + ', not to your wallet — nothing is called minted.');
+    if (BigInt(await call('shadowed(bytes32)', id)) !== 1n) bail('The contract does not list that Doopie as shadowed — nothing is called minted.');
+    // shadowOf returns the struct: one offset word, then mask[16] inline, palette and pixels as offsets, then
+    // colors, count, solMint, solOwner, ... - so the fields are read at their places in that head.
+    const s = await call('shadowOf(uint256)', id);
+    const colors = Number(BigInt(wordAt(s, 1 + 18))), count = Number(BigInt(wordAt(s, 1 + 19))), solMint = wordAt(s, 1 + 20);
+    if (solMint.toLowerCase() !== String(id).toLowerCase()) bail('The shadow the contract holds is of another mint — nothing is called minted.');
+    if (n.chain && (count !== n.chain.count || colors !== n.chain.colors)) {
+      bail('The art on chain (' + count + ' pixels, ' + colors + ' colours) is not the art you approved (' + n.chain.count + ' pixels, ' + n.chain.colors + ' colours).');
+    }
+    const meta = JSON.parse(atob(strOf(await call('tokenURI(uint256)', id)).split(',')[1]));
+    return { hash, block: Number(BigInt(r.blockNumber)), owner, tokenId: id, name: meta.name, image: meta.image, attributes: meta.attributes || [], count, colors };
+  }
   async function mintNow() {
     if (!S.contract) { say('The contract is not deployed yet — nothing was sent.', true); return; }
     say('Asking the attestor…');
+    let out;
     try {
       const r = await fetch('api/claim', { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ solana: S.sol, evm: S.evm, message: S.message, signature: S.signature,
           art: S.chosen.map(i => { const c = S.nfts[i].chain;
             return { mint: S.nfts[i].mintAddress, mask: c.mask, palette: c.palette, pixels: c.pixels, colors: c.colors, count: c.count }; }),
           mints: S.chosen.map(i => S.nfts[i].mintAddress) }) });
-      const out = await r.json();
-      if (!out.ok) { say(out.error || 'The attestor refused.', true); return; }
-      say('Claim signed — your wallet will ask you to send it.');
-      for (const c of out.claims) {
-        await window.ethereum.request({ method: 'eth_sendTransaction', params: [{ from: S.evm, to: S.contract, data: c.data }] });
-      }
-      say('Minted. Your shadows are on ' + CHAIN.name + '.');
-    } catch (e) { say('The mint did not go through: ' + e.message, true); }
+      out = await r.json();
+    } catch (e) { say('The attestor could not be reached: ' + e.message, true); return; }
+    if (!out.ok) { say(out.error || 'The attestor refused.', true); return; }
+    say('Claim signed — your wallet will ask you to send it.');
+    S.minted = S.minted || [];
+    for (const c of out.claims) {
+      const n = S.nfts.find(x => x.mintAddress === c.mint) || {};
+      let hash;
+      try { hash = await window.ethereum.request({ method: 'eth_sendTransaction', params: [{ from: S.evm, to: S.contract, data: c.data }] }); }
+      catch (e) { say('The mint did not go through: ' + e.message, true); return; }
+      say('Sent ' + short(hash) + ' — waiting for the chain, then reading the shadow back…');
+      try { S.minted.push(await readBack(c, hash, n)); }
+      catch (e) { say(e.message, true); return; }
+      frame();
+    }
+    say('Minted: the contract holds ' + S.minted.length + (S.minted.length === 1 ? ' shadow' : ' shadows') + ', read back from the chain.');
   }
 
   // what the page needs from the chain and from the contracts, read when it opens

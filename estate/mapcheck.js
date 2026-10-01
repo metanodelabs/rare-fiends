@@ -8,7 +8,7 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
   const ch=spawn(CHROME,['--headless=new','--enable-unsafe-swiftshader','--hide-scrollbars','--remote-debugging-port='+PORT,
     '--user-data-dir='+prof,'--window-size=1400,900','http://localhost:8765/mapgen.html?seed=42&players=100'],{stdio:'ignore'});
   let send, sock;
-  for(let i=0;i<40&&!send;i++){await sleep(250);try{
+  for(let i=0;i<160&&!send;i++){await sleep(250);try{
     const t=(await(await fetch(`http://127.0.0.1:${PORT}/json`)).json()).find(x=>x.type==='page');
     const ws=new WebSocket(t.webSocketDebuggerUrl);await new Promise((ok,no)=>{ws.onopen=ok;ws.onerror=no;});
     let id=0;const m=new Map();ws.onmessage=e=>{const o=JSON.parse(e.data);if(o.id&&m.has(o.id)){m.get(o.id)(o);m.delete(o.id);}};
@@ -61,6 +61,26 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
   const solo = await ev(`(() => { const M = mapgen.M; let n = 0; for (const q of M.seams) { if (![[1,0],[-1,0],[0,1],[0,-1]].some(([dx, dy]) => { const x = q.x + dx, y = q.y + dy; return x >= 0 && y >= 0 && x < M.W && y < M.H && M.seamAt[y * M.W + x]; })) n++; } return n / M.seams.length; })()`);
   ok('crystals grow in clusters: only ' + (solo * 100).toFixed(1) + '% of seams stand alone (1–5%)', solo >= 0.005 && solo <= 0.05, solo);
   ok('every base has its groves (' + R2.groveTrees + ' trees = 100 × ' + EC.groves + ' × ' + EC.treesPerGrove + ')', R2.groves && R2.groveTrees === 100 * EC.groves * EC.treesPerGrove, JSON.stringify(R2));
+  // M12 / question 26, the economist's flag: the generator holds the MAP's counts and reads the chain's
+  // numbers from values.js, in the game's own unit. ECON_DEFAULT used to hold treeWood: 3 - whole logs,
+  // while the purse counts hundredths - beside growMs and regrowMs: a second home for three numbers.
+  // Each line below fails against that old table: the keys line on its three extra keys, the next on
+  // 3 != 300, the wood lines on a count a hundred times too small, and the refusal line on a quiet merge.
+  const VAL = await ev('JSON.stringify({ treeWood: VALUES.treeWood, growMs: VALUES.growMs, regrowMs: VALUES.regrowMs, chopMs: VALUES.chopMs, unit: VALUES.crystalUnit })').then(JSON.parse);
+  const dKeys = await ev('Object.keys(MapGen.ECON_DEFAULT).sort().join()');
+  ok('the generator\'s own defaults are the map\'s counts and nothing of the chain\'s (' + dKeys + ')', dKeys === 'groves,homeSeams,treesPerGrove,wildSeams', await ev('JSON.stringify(MapGen.ECON_DEFAULT)'));
+  ok('the map was made with values.js\'s tree, cycle and regrowth (' + VAL.treeWood + ' hundredths a tree, ' + VAL.growMs + ' / ' + VAL.regrowMs + ' ms)',
+    game.treeWood === VAL.treeWood && game.growMs === VAL.growMs && game.regrowMs === VAL.regrowMs && game.chopMs === VAL.chopMs && game.crystalUnit === VAL.unit && VAL.treeWood >= VAL.unit,
+    JSON.stringify([game, VAL]));
+  const st2 = await ev('JSON.stringify(mapgen.M.stats)').then(JSON.parse);
+  ok('wood standing is counted in hundredths, like the purse (' + st2.trees + ' trees × ' + VAL.treeWood + ' = ' + st2.wood + ')', st2.wood === st2.trees * VAL.treeWood, st2.wood);
+  const rate = st2.trees * VAL.treeWood / (VAL.treeWood / VAL.unit * VAL.chopMs + VAL.regrowMs) * 60000;
+  ok('the wood rate follows the game\'s chop: a log per chopMs, treeWood ÷ unit logs a tree, regrown after regrowMs (' + Math.round(rate) + ' / min)', Math.abs(st2.woodPerMinuteMax - rate) < 1e-6, st2.woodPerMinuteMax);
+  const logs = (st2.wood / VAL.unit).toLocaleString('en-US');
+  ok('and the page shows that wood in logs (' + logs + ' logs)', (await ev('document.getElementById("stats").innerText')).includes(logs + ' logs'), 'missing');
+  ok('every seam ripens on the chain\'s cycle: each t0 lies inside growMs', await ev('mapgen.M.seams.every(q => q.t0 >= 0 && q.t0 < VALUES.growMs)'), await ev('JSON.stringify(mapgen.M.seams.filter(q => !(q.t0 >= 0 && q.t0 < VALUES.growMs)).slice(0, 3))'));
+  const refused = await ev('(() => { try { MapGen.generate({ seed: 1, players: 2, econ: { treeWood: 3 } }); return "ACCEPTED"; } catch (e) { return e.message; } })()');
+  ok('a chain number passed to the generator is refused, not quietly used', /cannot be passed in/.test(refused), refused);
   // no base is swamped: its creek crosses it as a stream, not a pond
   const baseWater = await ev('JSON.stringify(mapgen.M.plots.map(p => { let n = 0; for (let i = 0; i < mapgen.M.plotAt.length; i++) if (mapgen.M.plotAt[i] === p.id && (mapgen.M.water[i] === 3 || mapgen.M.water[i] === 4)) n++; return n; }).sort((a, b) => a - b))').then(JSON.parse);
   ok('each base has a stream across it, not a pond (median ' + baseWater[50] + ', worst ' + baseWater[99] + ' of 36 tiles)', baseWater[0] >= 1 && baseWater[50] <= 10 && baseWater[99] <= 24, JSON.stringify(baseWater.slice(-5)));

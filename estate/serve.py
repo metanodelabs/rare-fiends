@@ -33,6 +33,7 @@ import socketserver
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -49,6 +50,81 @@ _ART = {}
 _ART_MAX = 240
 
 
+# Where the converter is. In the repository it is ../doopies_converter/tools, beside estate/. On the VPS,
+# deploy-api.sh lays the app out FLAT - serve.py and doopies_converter/tools/ in one directory, with none of
+# the repository's shape around it - so both places are looked at, the repository's first, and the one that
+# holds doopie.mjs is it. Found by reading deploy-api.sh --dry against this function's old single path: the
+# staged converter would have landed where this file could not see it, and /api/convert would have been a
+# 503 on the server with every file in place.
+def converter_dir():
+    here = os.path.dirname(os.path.abspath(__file__))
+    for d in (os.path.join(here, '..', 'doopies_converter', 'tools'), os.path.join(here, 'doopies_converter', 'tools')):
+        if os.path.isfile(os.path.join(d, 'doopie.mjs')):
+            return os.path.normpath(d)
+    return None
+
+
+# ---------------------------------------------------------------- the record (M7): one record a base, on disk
+# THE SERVER HOLDS THE RECORD (M3 item 5: the live game runs on our server and the chain holds the record;
+# ruling 3: on a mismatch the server's record stands). One JSON file a base under RECORDS, written whole and
+# renamed into place, so a restart finds a complete record or the last complete one and never half of one.
+# A write is taken by THE ONE RULE in record.js - run as `node record.js apply` with the record and the batch
+# on stdin, the way the attestor and the converter are run - and never by a copy of that rule here: what the
+# browser store refuses (Replayed, StaleParent, Invalid, Forged, NoRecord) is exactly what this refuses, in
+# record.js's own words. One lock round read-apply-write, so two clients writing one base at once land one
+# after the other and the second is StaleParent, not a second truth. Local development only; the default
+# directory sits beside the local attestor key, outside the repository. --records=<dir> moves it.
+RECORDS = os.path.join(os.path.expanduser('~'), '.cache', 'rare-fiends-local', 'records')
+RECORD_JS = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'record.js')
+_REC_LOCK = threading.Lock()
+BASE_ID = r'-?[0-9]{1,12}'
+
+
+def record_path(base):
+    return os.path.join(RECORDS, '%s.json' % base)
+
+
+def record_read(base):
+    try:
+        with open(record_path(base), encoding='utf8') as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def record_write(base, rec):
+    os.makedirs(RECORDS, mode=0o700, exist_ok=True)
+    tmp = record_path(base) + '.tmp'
+    with open(tmp, 'w', encoding='utf8') as f:
+        json.dump(rec, f, separators=(',', ':'))
+    os.replace(tmp, record_path(base))
+
+
+def record_apply(rec, batch):
+    """record.js's apply(), and nothing else: the record (or None) and the batch in, its answer out."""
+    run = subprocess.run(['node', RECORD_JS, 'apply'], input=json.dumps({'record': rec, 'batch': batch}).encode('utf8'),
+                         capture_output=True, timeout=30)
+    out = run.stdout.strip()
+    if run.returncode != 0 or not out:
+        raise RuntimeError('record.js apply failed: ' + (run.stderr.decode('utf8', 'replace')[-300:] or 'no output'))
+    return json.loads(out)
+
+
+def record_heads():
+    """Every record the server holds, by head: what a client polls, so it fetches only what moved."""
+    out = []
+    try:
+        names = sorted(os.listdir(RECORDS))
+    except OSError:
+        return out
+    for n in names:
+        if n.endswith('.json') and re.fullmatch(BASE_ID, n[:-5]):
+            rec = record_read(n[:-5])
+            if rec:
+                out.append({'id': rec.get('base'), 'head': rec.get('head'), 'writes': rec.get('writes'), 'at': rec.get('at')})
+    return out
+
+
 class NoCache(http.server.SimpleHTTPRequestHandler):
     """Serves site/, and proxies the three things the bridge page needs and a browser can't do itself:
     the Solana NFT listing (its API sends no CORS header), the art on Arweave (a redirect the page can't
@@ -56,6 +132,9 @@ class NoCache(http.server.SimpleHTTPRequestHandler):
     see. Local development only; nothing here is deployed."""
 
     def do_GET(self):                                  # noqa: N802 (the stdlib's own name)
+        if self.path.startswith('/api/record'):
+            self.record_get()
+            return
         if self.path.startswith('/api/'):
             try:
                 self.proxy()
@@ -69,6 +148,9 @@ class NoCache(http.server.SimpleHTTPRequestHandler):
     # and this handler never sees the key, only its answer.
     def do_POST(self):                                 # noqa: N802
         parts = urllib.parse.urlsplit(self.path)
+        if parts.path.startswith('/api/record/'):
+            self.record_post(parts.path)
+            return
         if parts.path not in ('/api/claim', '/api/convert'):
             self.send_error(404, 'nothing here takes a POST')
             return
@@ -129,6 +211,68 @@ class NoCache(http.server.SimpleHTTPRequestHandler):
         self.send_header('Content-Length', str(len(out)))
         self.end_headers()
         self.wfile.write(out)
+
+    # THE RECORD'S ROUTES (M7). Every answer is 200 with apply()'s own words - a refusal (StaleParent,
+    # Replayed, Invalid, Forged, NoRecord) is the record working, read by the page as `ok: false`, exactly as
+    # the attestor's refusals are (see claim). A non-2xx means the request itself was wrong.
+    #   GET  /api/record              -> { ok, records: [{ id, head, writes, at }] }   what a client polls
+    #   GET  /api/record/<id>         -> { ok, record } or { ok: false, reason: 'NoRecord' }
+    #   POST /api/record/<id>/commit  -> apply(record, batch), written to disk when it takes
+    #   POST /api/record/<id>/forget  -> the record is dropped (local development only; nothing here is published)
+    def record_get(self):
+        path = urllib.parse.urlsplit(self.path).path.rstrip('/')
+        if path == '/api/record':
+            with _REC_LOCK:
+                self.send_json(json.dumps({'ok': True, 'records': record_heads()}).encode('utf8'))
+            return
+        m = re.fullmatch(r'/api/record/(%s)' % BASE_ID, path)
+        if not m:
+            self.send_error(404, 'no such record route')
+            return
+        with _REC_LOCK:
+            rec = record_read(m.group(1))
+        out = {'ok': True, 'record': rec} if rec else {'ok': False, 'reason': 'NoRecord', 'base': int(m.group(1))}
+        self.send_json(json.dumps(out).encode('utf8'))
+
+    def record_post(self, path):
+        m = re.fullmatch(r'/api/record/(%s)/(commit|forget)' % BASE_ID, path)
+        if not m:
+            self.send_error(404, 'no such record route')
+            return
+        base, verb = m.group(1), m.group(2)
+        try:
+            n = int(self.headers.get('Content-Length') or 0)
+        except ValueError:
+            n = -1
+        if n < 0 or n > 4 * 1024 * 1024:
+            self.send_error(413, 'the request is too large')
+            return
+        body = self.rfile.read(n) if n else b''
+        if verb == 'forget':
+            with _REC_LOCK:
+                try:
+                    os.remove(record_path(base))
+                except OSError:
+                    pass
+            self.send_json(b'{"ok":true}')
+            return
+        try:
+            batch = json.loads(body.decode('utf8'))
+        except ValueError:
+            self.send_error(400, 'the batch is not JSON')
+            return
+        if not isinstance(batch, dict) or str(batch.get('base')) != base:
+            self.send_error(400, 'the batch is for another base than the route names')
+            return
+        try:
+            with _REC_LOCK:                             # read, apply, write: one at a time, so the second of two is StaleParent
+                out = record_apply(record_read(base), batch)
+                if out.get('ok'):
+                    record_write(base, out['record'])
+        except Exception as e:                          # node missing, or record.js threw: the server's fault, said as such
+            self.send_error(502, str(e))
+            return
+        self.send_json(json.dumps(out).encode('utf8'))
 
     def send_json(self, body):
         self.send_response(200)
@@ -210,9 +354,9 @@ class NoCache(http.server.SimpleHTTPRequestHandler):
         if not u.startswith('https://') and not u.startswith('data:image/'):
             self.send_error(400, 'not a url')
             return
-        tools = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'doopies_converter', 'tools')
-        if not os.path.isdir(os.path.join(tools, 'node_modules')):
-            self.send_error(503, 'the converter is not installed: cd doopies_converter/tools && npm install')
+        tools = converter_dir()
+        if tools is None or not os.path.isdir(os.path.join(tools, 'node_modules')):
+            self.send_error(503, 'the converter is not installed: cd doopies_converter/tools && npm ci')
             return
         work = tempfile.mkdtemp(prefix='doopie-')
         try:
@@ -326,10 +470,21 @@ class ApiOnly(NoCache):
     serves a file's headers on its own and an override of `do_GET` alone would leave it answering."""
 
     def do_GET(self):                                  # noqa: N802
+        if self.path.startswith('/api/record'):
+            self.send_error(404, 'the record is not served in the published shape')
+            return
         if self.path.startswith('/api/'):
             super().do_GET()
             return
         self.send_error(404, 'this server answers api/ only')
+
+    # M7's record routes are local development only: holding players' records on the VPS is a publish, and
+    # a publish is the deployer's to start (M20-M23). `forget` especially must never be reachable there.
+    def do_POST(self):                                 # noqa: N802
+        if self.path.startswith('/api/record'):
+            self.send_error(404, 'the record is not served in the published shape')
+            return
+        super().do_POST()
 
     def do_HEAD(self):                                 # noqa: N802
         self.send_error(404, 'this server answers api/ only')
@@ -408,7 +563,23 @@ if __name__ == '__main__':
     args = sys.argv[1:]
     api_only = '--api' in args
     LOCAL = '--local' in args and not api_only           # never in the published shape
-    ports = [a for a in args if a not in ('--api', '--local')]
+    # --fixture=<path>: another fixture for --local - a proof's scratch copy of doopies.local.json carrying
+    # its own localOwnerOverride (estate/bridge-fork-proof.mjs). Command line only, like --local itself, and
+    # refused without --local: the published shape has no fixture and no way to be given one.
+    fixtures = [a for a in args if a.startswith('--fixture=')]
+    if fixtures:
+        if not LOCAL:
+            sys.stderr.write('usage: --fixture=<path> goes with --local and nothing else\n')
+            sys.exit(2)
+        FIXTURE = os.path.abspath(fixtures[0][len('--fixture='):])
+        if not os.path.isfile(FIXTURE):
+            sys.stderr.write('--fixture: no such file: %s\n' % FIXTURE)
+            sys.exit(2)
+    # --records=<dir>: where the records are kept (M7); a check points it at a scratch directory of its own
+    recdirs = [a for a in args if a.startswith('--records=')]
+    if recdirs:
+        RECORDS = os.path.abspath(recdirs[0][len('--records='):])
+    ports = [a for a in args if a not in ('--api', '--local') and not a.startswith('--fixture=') and not a.startswith('--records=')]
     if api_only and not ports:
         # The port is the deployer's to choose, not this file's to default: a number typed here would be
         # the one every future reader copied.

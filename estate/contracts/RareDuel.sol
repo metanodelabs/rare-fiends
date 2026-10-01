@@ -4,7 +4,8 @@ pragma solidity ^0.8.36;
 import { IERC20 } from "lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { SafeERC20 } from "lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
 import { ReentrancyGuard } from "lib/openzeppelin-contracts/contracts/utils/ReentrancyGuard.sol";
-import { IDiceEntropy, RareChance } from "./RareChance.sol";
+import { IDiceEntropy } from "./RareChance.sol";
+import { IRareDice, RareDice } from "./RareDice.sol";
 import { IRareRoles } from "./RareRoles.sol";
 
 /// @notice The challenge: two players stake the same amount and pick rock, paper or scissors in secret.
@@ -46,26 +47,55 @@ contract RareDuel is ReentrancyGuard {
         uint64 seq;             // the LIVE Entropy sequence number; any other one's word is discarded
     }
 
+    /// @notice what a duel was CHALLENGED under, frozen with it: the odds, the fee and the dice. DESIGN,
+    /// *No number changes under a running game*: "a game holds the numbers it was created with - a running
+    /// game reads its own table, not the current one." `settle` reads this row and never the live values, so
+    /// a setter landing between a challenge and its settle cannot move a duel already struck - and a replay
+    /// of the duel (word, picks, this row) gives the same answer for ever. The three windows are not in here:
+    /// each sets a deadline at its own transition from the live value, and the live value cannot move while
+    /// a game runs (every setter asks `roles.requireNoGameRunning`), so a duel inside a game sees one clock.
+    struct Sealed {
+        IRareDice dice;         // the roll this duel settles with, whatever `setDice` points at later
+        uint16 counterBps;
+        uint16 sameBps;
+        uint16 feeBps;
+    }                           // 26 bytes: one slot, one extra SSTORE at challenge
+
     uint32 public constant CALLBACK_GAS_LIMIT = 200_000;
+
+    /// @notice the root power (`RareRoles.MANAGE_ROLES`, never grantable) guards the money numbers and the
+    /// dice; the clocks sit behind the same grantable power `RareGame` uses for its own clocks.
+    bytes32 public constant ROOT_POWER = keccak256("rarefriends.power.manageRoles");
+    bytes32 public constant SET_GAME_PARAMS = keccak256("rarefriends.power.setGameParams");
 
     IERC20 public immutable token;
     IDiceEntropy public immutable entropy;
     /// @notice who may do what, and whether the game is shut. `immutable` on purpose: this contract
     /// custodies `$RF`, and the permanently off-limits rule says nothing custodying `$RF` can ever be
     /// changed by anybody - so the registry it trusts is fixed at deployment rather than re-pointable.
-    /// Only the one question below is asked of it, and only on the way in.
+    /// It is asked three things: the whitelist on the way in, a setter's power, and whether a game runs.
     IRareRoles public immutable roles;
     address public immutable provider;
-    uint16 public immutable counterBps;     // your pick beats theirs
-    uint16 public immutable sameBps;        // the same pick
-    uint16 public immutable feeBps;
-    address public immutable feeTo;
-    uint64 public immutable answerWindow;
-    uint64 public immutable revealWindow;
-    uint64 public immutable rollWindow;     // how long the Entropy word has to arrive before the duel can be unstuck
+
+    // ---- the deployer's numbers: STORED STATE, never `immutable` and never a constant (M20 item 11) ----
+    // "Anything the deployer page can change is stored state." They were six immutables; a fee of zero that
+    // cannot be changed is still a constant. The six share one slot. Each is read by a page through its own
+    // getter, which is why they are six named variables and not a struct.
+    uint16 public counterBps;     // your pick beats theirs
+    uint16 public sameBps;        // the same pick
+    uint16 public feeBps;
+    uint64 public answerWindow;
+    uint64 public revealWindow;
+    uint64 public rollWindow;     // how long the Entropy word has to arrive before the duel can be unstuck
+    address public feeTo;
+    /// @notice the dice, at an address this contract LOOKS UP (M20 item 2: the roll is one of the two things
+    /// that may be re-pointed after launch). Born here as a fresh `RareDice` so the constructor and the
+    /// deploy order do not change; `setDice` points it elsewhere. Sealed into every duel at `challenge`.
+    IRareDice public dice;
 
     uint256 public duelCount;
     mapping(uint256 => Duel) private duels;
+    mapping(uint256 => Sealed) private _sealed;
     mapping(uint64 => uint256) private _requestDuel;
 
     event Challenged(uint256 indexed id, uint256 indexed gameId, address indexed p1, address p2, uint256 stake);
@@ -81,6 +111,11 @@ contract RareDuel is ReentrancyGuard {
     event Settled(uint256 indexed id, address indexed winner, uint16 roll, uint16 odds, uint256 payout, uint256 fee);
     event Forfeited(uint256 indexed id, address indexed winner);
     event Refunded(uint256 indexed id, uint256 each);
+    // the deployer's setters, each with its own record: `by` on every one so a log answers "who"
+    event OddsSet(uint16 counterBps, uint16 sameBps, address indexed by);
+    event FeeSet(uint16 feeBps, address feeTo, address indexed by);
+    event WindowsSet(uint64 answerWindow, uint64 revealWindow, uint64 rollWindow, address indexed by);
+    event DiceSet(address dice, address indexed by);
 
     error InvalidTerms();
     error InvalidDuel();
@@ -138,6 +173,17 @@ contract RareDuel is ReentrancyGuard {
         answerWindow = answerWindow_;
         revealWindow = revealWindow_;
         rollWindow = rollWindow_;
+        dice = new RareDice();
+        // the opening state is emitted so the log starts at deployment rather than at the first change
+        emit OddsSet(counterBps_, sameBps_, msg.sender);
+        emit FeeSet(feeBps_, feeTo_, msg.sender);
+        emit WindowsSet(answerWindow_, revealWindow_, rollWindow_, msg.sender);
+        emit DiceSet(address(dice), msg.sender);
+    }
+
+    /// @notice the numbers one duel was struck under - what `settle` reads
+    function sealedOf(uint256 id) external view returns (Sealed memory) {
+        return _sealed[id];
     }
 
     function getDuel(uint256 id) external view returns (Duel memory) {
@@ -146,11 +192,17 @@ contract RareDuel is ReentrancyGuard {
 
     // ---------- the rules (pure, so a page or a test can call them) ----------
 
-    /// @notice the challenger's chance of winning, in bps: 1 rock, 2 paper, 3 scissors
+    /// @notice the challenger's chance of winning, in bps, under the LIVE odds - what the next duel gets.
+    /// A duel already struck settles under its own sealed odds, which `sealedOf` shows.
     function oddsBps(uint8 pick1, uint8 pick2) public view returns (uint16) {
+        return _odds(counterBps, sameBps, pick1, pick2);
+    }
+
+    /// @dev the triangle: 1 rock, 2 paper, 3 scissors; counter beats, same ties, countered loses
+    function _odds(uint16 counter, uint16 same, uint8 pick1, uint8 pick2) private pure returns (uint16) {
         if (pick1 == 0 || pick1 > 3 || pick2 == 0 || pick2 > 3) revert BadReveal();
-        if (pick1 == pick2) return sameBps;
-        return (pick1 + 3 - pick2) % 3 == 1 ? counterBps : 10_000 - counterBps;
+        if (pick1 == pick2) return same;
+        return (pick1 + 3 - pick2) % 3 == 1 ? counter : 10_000 - counter;
     }
 
     function commitment(uint256 id, address player, uint8 pick, bytes32 salt) public view returns (bytes32) {
@@ -182,6 +234,7 @@ contract RareDuel is ReentrancyGuard {
         d.commit1 = commit;
         d.state = State.Offered;
         d.deadline = uint64(block.timestamp) + answerWindow;
+        _sealed[id] = Sealed(dice, counterBps, sameBps, feeBps);   // struck under these, settled under these
         token.safeTransferFrom(msg.sender, address(this), stake);
         emit Challenged(id, gameId, msg.sender, opponent, stake);
     }
@@ -298,11 +351,13 @@ contract RareDuel is ReentrancyGuard {
     function settle(uint256 id) external nonReentrant {
         Duel storage d = _duel(id, State.Rolling);
         if (!d.fulfilled) revert RandomnessPending();
-        uint16 odds = oddsBps(d.pick1, d.pick2);
-        uint16 r = uint16(RareChance.roll(d.word, address(this), block.chainid, id, 0));
+        Sealed storage s = _sealed[id];                        // the numbers this duel was struck under, never the live ones
+        uint16 odds = _odds(s.counterBps, s.sameBps, d.pick1, d.pick2);
+        // salted with THIS contract's address, which is stable across re-points of the dice (RareChance.sol)
+        uint16 r = uint16(s.dice.roll(d.word, address(this), block.chainid, id, 0));
         address winner = r < odds ? d.p1 : d.p2;
         uint256 pot = uint256(d.stake) * 2;
-        uint256 fee = pot * feeBps / 10_000;
+        uint256 fee = pot * s.feeBps / 10_000;
         d.roll = r;
         d.odds = odds;
         d.winner = winner;
@@ -348,6 +403,53 @@ contract RareDuel is ReentrancyGuard {
         token.safeTransfer(d.p1, d.stake);
         token.safeTransfer(d.p2, d.stake);
         emit Refunded(id, d.stake);
+    }
+
+    // ---------- the deployer's setters: every one guarded on chain, and refused while a game runs ----------
+    // The power is asked FIRST, so a stranger learns nothing about the game's state from the refusal; the
+    // running-game rule second (DESIGN, *No number changes under a running game*: the page's refusal is a
+    // convenience and the guard is here); the arguments last. A duel already struck is untouched by any of
+    // them - it settles under its own `Sealed` row - so these change what the NEXT duel is struck under.
+
+    /// @notice the odds of the triangle. Root only: they are the money.
+    function setOdds(uint16 counterBps_, uint16 sameBps_) external {
+        roles.requirePower(msg.sender, ROOT_POWER);
+        roles.requireNoGameRunning();
+        if (counterBps_ > 10_000 || sameBps_ > 10_000) revert InvalidTerms();
+        counterBps = counterBps_;
+        sameBps = sameBps_;
+        emit OddsSet(counterBps_, sameBps_, msg.sender);
+    }
+
+    /// @notice the house fee and where it goes, together, so a fee above zero can never point at nobody
+    function setFee(uint16 feeBps_, address feeTo_) external {
+        roles.requirePower(msg.sender, ROOT_POWER);
+        roles.requireNoGameRunning();
+        if (feeBps_ > 10_000 || (feeBps_ > 0 && feeTo_ == address(0))) revert InvalidTerms();
+        feeBps = feeBps_;
+        feeTo = feeTo_;
+        emit FeeSet(feeBps_, feeTo_, msg.sender);
+    }
+
+    /// @notice the three clocks, behind the same grantable power as `RareGame.setClocks`
+    function setWindows(uint64 answerWindow_, uint64 revealWindow_, uint64 rollWindow_) external {
+        roles.requirePower(msg.sender, SET_GAME_PARAMS);
+        roles.requireNoGameRunning();
+        if (answerWindow_ == 0 || revealWindow_ == 0 || rollWindow_ == 0) revert InvalidTerms();
+        answerWindow = answerWindow_;
+        revealWindow = revealWindow_;
+        rollWindow = rollWindow_;
+        emit WindowsSet(answerWindow_, revealWindow_, rollWindow_, msg.sender);
+    }
+
+    /// @notice re-point the dice (M20 item 2). Root only; an address with no code is refused, so the roll can
+    /// never be pointed at nothing. Every duel struck from here settles with the new dice; none before it.
+    function setDice(address dice_) external {
+        roles.requirePower(msg.sender, ROOT_POWER);
+        roles.requireNoGameRunning();
+        if (dice_.code.length == 0) revert InvalidTerms();
+        dice = IRareDice(dice_);
+        emit DiceSet(dice_, msg.sender);
     }
 
     function _duel(uint256 id, State want) private view returns (Duel storage d) {

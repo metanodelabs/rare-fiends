@@ -30,6 +30,7 @@ an argument that is `immutable` - it can never be changed once the transaction i
 | --- | --- | --- | --- | --- |
 | 1 | `RareRoles` | `(address deployer_)` | the deployer's own wallet - the one sending the transactions. Stored as role membership, **not** immutable: it can be added to and handed over (DESIGN decision 21: rules stay repairable) | Everything else asks it who may do what. First, because three others take its address |
 | 2 | `RareFightLog` | `(IRareRoles roles_)` | **`roles`** = step 1's address | Fights resolve on the server for v1 and only their hashes land here; it needs only Roles |
+| 2b | `RareOrders` | `(address roles_)` | **`roles`** = step 1's address | M20 item 10: the sealed standing orders - the session key seals one word per base (`RECORD_ORDERS`, granted by `grant.mjs`), anyone with the preimage opens it per fight. Holds no token; needs only Roles. `deploy.mjs` deploys it right after the fight log |
 | 3 | `ShadowFriends` | `(address attestor_, address team_)` | `attestor_` = the **public address** of the attestor key (section 3 - it must exist first). Settable later by `team` via `setAttestor`, so not permanent. **`team`** = the address that may rotate the attestor, and nothing else - immutable, so a lost `team` key means the attestor can never be rotated | Independent of Roles. Placed here so the bridge can be proved before the duel and market exist |
 | 4 | `RareDuel` | `(address token_, address entropy_, address provider_, uint16 counterBps_, uint16 sameBps_, uint16 feeBps_, address feeTo_, uint64 answerWindow_, uint64 revealWindow_, uint64 rollWindow_, address roles_)` | **all eleven are immutable.** `token` = `$RF` on 4663 (from `chainlive.js`/DESIGN, not typed here); `entropy` and `provider` = the Dice/Entropy contract and provider `chainlive.js` already reads (`DICE`, `PROVIDER`); `counterBps`/`sameBps`/`feeBps` = DESIGN's decided numbers via the economist; `feeTo` = the fee wallet; `answerWindow`/`revealWindow`/`rollWindow` = DESIGN (`rollWindow` 10 minutes = 600, per the M20 row; BINDING §20.5 records an earlier 300 - **read DESIGN, the later ruling wins**); `roles` = step 1. Constructor reverts if `token_`, `entropy_` or `roles_` has no code | After Roles. Blocked until `gameId` lands (section 3) |
 | 5 | `RareMarket` | `(address rf_, address roles_, address partners_, uint16 maxFeeBps_, uint16 feeBps_, address feeTo_)` | **all six immutable.** `rf` = `$RF`; `roles` = step 1; `partners` = `address(0)` unless a partnership layer is deployed first (the contract allows zero and it means nothing is owed); **`maxFeeBps` = 1000** (decided 2026-09-30, DESIGN question 13 - 10%, the ceiling `setFeeBps` can never exceed); `feeBps` = **150** (DESIGN's marketplace fee); `feeTo` = the fee wallet | After Roles. `partners` decides whether something deploys before it |
@@ -61,11 +62,19 @@ One line each. Once mined, none of these can be changed without a redeploy and a
 
 ## 3. Preconditions NOT met yet - the checklist
 
-- [ ] **`gameId` in `RareDuel`** - chain engineer, in progress. Deploy nothing until `npm run check`
+- [x] **`gameId` in `RareDuel`** - landed in `c071894` (`Duel.gameId`, `challenge(gameId, ..)`,
+      `Challenged(id, gameId, ..)`; `RareGame` mints it). Still true: deploy nothing until `npm run check`
       (the parity check) and `test/fixcheck.js` are green on the final source.
+- [ ] **`RareRoles.setGame(rareGame)` after `deploy.mjs --game`** - from the deployer, one transaction, not
+      in the script (it deploys; this is a call). It points every number's setter (`RareDuel` setOdds/setFee/
+      setWindows/setDice, `RareGame` setClocks/setDefaults) at the running-game count, so they refuse while a
+      game runs - BINDING §61.1. Until it is made the count reads zero and the setters are open to root, which
+      is also what they are between games.
 - [ ] **`bridge-config.json`** - today `{"chainId": 4663, "shadowFriends": null, "attestor": null}`.
       Needs `shadowFriends`, `attestor`, and new keys `rareRoles`, `rareFightLog` (the page and server
-      need them; the front-end adds the readers). **All `null` until deployed; `deploy.mjs` writes them.**
+      need them; the front-end adds the readers), and **`deployBlock`** - the block `ShadowFriends` landed
+      in, which `deploy.mjs` writes at that step and the attestor's hourly `recheck` scans `Claimed` from
+      (`SHADOWFRIENDS_FROM_BLOCK` overrides it). **All `null` until deployed; `deploy.mjs` writes them.**
 - [ ] **The attestor key.** Does not exist. **DECISION FOR THE DEPLOYER - YES or NO:**
       *"The attestor's private key lives only in an environment variable of the attestor service's systemd
       unit on the VPS (an `EnvironmentFile=` with mode 0600, owned by root, outside the web root and outside

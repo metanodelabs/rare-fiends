@@ -65,7 +65,8 @@ export function compileAll() {
   return { solc: solc.version().split('+')[0],
     RareRoles: pick('RareRoles.sol', 'RareRoles'), RareFightLog: pick('RareFightLog.sol', 'RareFightLog'), ShadowFriends: pick('ShadowFriends.sol', 'ShadowFriends'),
     RareDuel: pick('RareDuel.sol', 'RareDuel'), RareMarket: pick('RareMarket.sol', 'RareMarket'), RareCombatLab: pick('RareCombat.sol', 'RareCombatLab'),
-    RareRules: pick('RareRules.sol', 'RareRules'), RareGame: pick('RareGame.sol', 'RareGame') };
+    RareRules: pick('RareRules.sol', 'RareRules'), RareGame: pick('RareGame.sol', 'RareGame'),
+    RareOrders: pick('RareOrders.sol', 'RareOrders'), RareDoopieGate: pick('RareDoopieGate.sol', 'RareDoopieGate') };
 }
 
 /** The signing key comes from DEPLOYER_KEY and nowhere else. Never returned to a log, never written. */

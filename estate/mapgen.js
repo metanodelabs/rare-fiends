@@ -28,7 +28,14 @@
   // it draws (heights, water, forest, ruins, plots, trees, seams, seam depths - and none of the chain's
   // numbers, which values.js may change freely), and says DISAGREES when the fingerprint is not the one
   // its DRAWS table records for this VERSION. A bump is one line here and one row there.
-  const VERSION = 1;
+  // VERSION 2 (2026-10-01): THE SEED IS WIDE. Version 1 reduced any seed to 32 bits (mulberry32) and drew its noise
+  // from `seed % 100000` - so the island was one of at most 2^32 (its ground one of 100,000), and a player shown a few
+  // hundred tiles under the server's fog could search for the seed and generate everything else. Now a seed is a hex
+  // string of 32 digits or more (128 bits or more - serve.py makes one with secrets), every bit of it reaches a 128-bit
+  // key (seedKey), and every seed-dependent draw - the random source AND every noise lattice value - mixes all four key
+  // words, so no layer of the map can be searched on its own. A NUMBER is still a seed (a check's seed 7, mapgen.html's
+  // box), drawn through the same key; it is only as wide as the number is. Every island redraws: hence the bump.
+  const VERSION = 2;
   // The estate's plot. THIS IS THE ONE DECLARATION - M12 item 4. It used to be written out here
   // and again in estate/index.html, which read "exactly as the game draws a home estate" and was
   // true only for as long as nobody edited one of them. The game now reads `MapGen.PLAN`: the
@@ -63,13 +70,53 @@
   }
 
   // ---------- a seeded random source and value noise ----------
-  function mulberry32(a) {
-    return function () {
-      a |= 0; a = (a + 0x6D2B79F5) | 0;
-      let t = Math.imul(a ^ (a >>> 15), 1 | a);
-      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-    };
+  // THE WIDE SEED. seedKey turns a seed into four 32-bit words that every seed-dependent draw mixes: a hex string of
+  // 32+ digits folds all its digits in; a number is spread from its 32 bits (a test's seed, not a game's).
+  function fmix32(h) {
+    h ^= h >>> 16; h = Math.imul(h, 0x85ebca6b); h ^= h >>> 13; h = Math.imul(h, 0xc2b2ae35); h ^= h >>> 16; return h | 0;
+  }
+  const WIDE = /^(0x)?[0-9a-fA-F]{32,}$/;
+  function seedKey(seed) {
+    const K = [0x243F6A88, 0x85A308D3, 0x13198A2E, 0x03707344];
+    if (typeof seed === 'string' && WIDE.test(seed)) {
+      const hex = seed.replace(/^0x/, '').toLowerCase();
+      for (let i = 0, n = 0; i < hex.length; i += 8, n++) {
+        const w = parseInt(hex.slice(i, i + 8).padEnd(8, '0'), 16) | 0, k = n % 4;
+        K[k] = fmix32((K[k] ^ w) + Math.imul(n + 1, 0x9E3779B9));
+        K[(k + 1) % 4] = fmix32(K[(k + 1) % 4] + K[k]);
+      }
+      K[0] = fmix32(K[0] ^ hex.length);
+    } else {
+      const n = Number(seed) >>> 0;
+      for (let i = 0; i < 4; i++) K[i] = fmix32(K[i] ^ Math.imul(n + i, 0x9E3779B9) ^ (n >>> (i * 3)));
+    }
+    for (let r = 0; r < 4; r++) for (let i = 0; i < 4; i++) K[i] = fmix32(K[i] + K[(i + 1) % 4] + r);
+    return K;
+  }
+  // a 128-bit random source (sfc32) whose whole state is the key
+  function sfc32(K) {
+    let a = K[0], b = K[1], c = K[2], d = K[3];
+    const next = () => { a |= 0; b |= 0; c |= 0; d |= 0; const t = (((a + b) | 0) + d) | 0; d = (d + 1) | 0;
+      a = b ^ (b >>> 9); b = (c + (c << 3)) | 0; c = (c << 21) | (c >>> 11); c = (c + t) | 0; return (t >>> 0) / 4294967296; };
+    for (let i = 0; i < 15; i++) next();
+    return next;
+  }
+  // a lattice value in 0..1 that mixes all four key words: the seed-dependent twin of hash2
+  function khash2(x, y, s, K) {
+    let h = (Math.imul(x | 0, 374761393) + Math.imul(y | 0, 668265263) + Math.imul(s | 0, 1442695041)) | 0;
+    h = fmix32(h ^ K[0]); h = fmix32(h + K[1]); h = fmix32(h ^ K[2]); h = fmix32(h + K[3]);
+    return (h >>> 0) / 4294967296;
+  }
+  function kvnoise(x, y, s, K) {
+    const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi;
+    const a = khash2(xi, yi, s, K), b = khash2(xi + 1, yi, s, K), c = khash2(xi, yi + 1, s, K), d = khash2(xi + 1, yi + 1, s, K);
+    const u = fade(xf), v = fade(yf);
+    return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+  }
+  function kfbm(x, y, s, oct, K) {
+    let sum = 0, amp = 0.5, f = 1, norm = 0;
+    for (let o = 0; o < oct; o++) { sum += amp * kvnoise(x * f, y * f, s + o * 101, K); norm += amp; amp *= 0.5; f *= 2.03; }
+    return sum / norm;
   }
   function hash2(x, y, s) {                            // a lattice value in 0..1
     let h = (x | 0) * 374761393 + (y | 0) * 668265263 + (s | 0) * 1442695041;
@@ -246,18 +293,20 @@
 
   function generate(opts) {
     const t0 = (typeof performance !== 'undefined' ? performance : Date).now();
-    const seed = (opts && opts.seed != null ? opts.seed : 1) >>> 0;
+    const raw = opts && opts.seed != null ? opts.seed : 1;
+    const seed = typeof raw === 'string' && WIDE.test(raw) ? raw.replace(/^0x/, '').toLowerCase() : Number(raw) >>> 0;
+    const K = seedKey(seed);
     const players = Math.max(2, Math.min(200, (opts && opts.players) || MAP_DEFAULT.players));
     const perPlayer = (opts && opts.tilesPerPlayer) || MAP_DEFAULT.tilesPerPlayer;
     const LAND_SHARE = MAP_DEFAULT.landShare;
-    const rand = mulberry32(seed ^ 0x9E3779B9);
+    const rand = sfc32(K);
     // the map's counts, then the chain's numbers: E is what the page may set, T is what it may not
     const passed = Object.keys((opts && opts.econ) || {}).filter(k => !MAP_KEYS.includes(k));
     if (passed.length) throw new Error('mapgen.js: opts.econ carries ' + passed.join(', ') + ' - the chain\'s numbers are read from values.js and cannot be passed in');
     const E = Object.assign({}, ECON_DEFAULT, opts && opts.econ);
     const V = valuesTable();
     const T = Object.fromEntries(ECON_KEYS.map(k => [k, V[k]]));
-    const S1 = seed % 100000, S2 = S1 + 7919, S3 = S1 + 15731, S4 = S1 + 28657;
+    const S1 = 1, S2 = S1 + 7919, S3 = S1 + 15731, S4 = S1 + 28657;   // layer ids: the seed is in K, not here
 
     // 1. size
     const side = Math.max(48, Math.ceil(Math.sqrt(players * perPlayer / LAND_SHARE)));
@@ -270,11 +319,11 @@
     const sc = 6 / side;                               // about six noise cells across the map
     for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
       const nx = x / (W - 1) * 2 - 1, ny = y / (H - 1) * 2 - 1;
-      const wx = nx + 0.32 * (fbm(x * sc * 0.7, y * sc * 0.7, S2, 3) - 0.5);   // warp the edge: bays and headlands
-      const wy = ny + 0.32 * (fbm(x * sc * 0.7 + 50, y * sc * 0.7 + 50, S2, 3) - 0.5);
+      const wx = nx + 0.32 * (kfbm(x * sc * 0.7, y * sc * 0.7, S2, 3, K) - 0.5);   // warp the edge: bays and headlands
+      const wy = ny + 0.32 * (kfbm(x * sc * 0.7 + 50, y * sc * 0.7 + 50, S2, 3, K) - 0.5);
       const d = Math.min(1.4, Math.hypot(wx, wy));
-      const base = fbm(x * sc, y * sc, S1, 5);
-      const ridge = 1 - Math.abs(2 * fbm(x * sc * 1.6, y * sc * 1.6, S3, 4) - 1);   // ridged noise: hills
+      const base = kfbm(x * sc, y * sc, S1, 5, K);
+      const ridge = 1 - Math.abs(2 * kfbm(x * sc * 1.6, y * sc * 1.6, S3, 4, K) - 1);   // ridged noise: hills
       elev[idx(x, y)] = base * 0.62 + ridge * ridge * 0.3 - d * d * 0.9;
     }
     // the sea level is the elevation that leaves LAND_SHARE of the square as land
@@ -489,8 +538,8 @@
     for (let i = 0; i < N; i++) {
       if (water[i] || level[i] === 0 || level[i] === 5) continue;
       const x = i % W, y = (i / W) | 0;
-      const m = fbm(x * msc, y * msc, S4, 4) + (level[i] === 1 || level[i] === 3 ? 0.04 : 0);
-      if (m > 0.56 && hash2(x, y, S4 + 3) < 0.35 + (m - 0.56) * 5) forest[i] = 1;
+      const m = kfbm(x * msc, y * msc, S4, 4, K) + (level[i] === 1 || level[i] === 3 ? 0.04 : 0);
+      if (m > 0.56 && khash2(x, y, S4 + 3, K) < 0.35 + (m - 0.56) * 5) forest[i] = 1;
     }
 
     // 8. ruins: scarce, far from bases and from each other, each with glitching terminals
@@ -506,7 +555,7 @@
       const rr = 2 + Math.floor(rand() * 2), tiles = [];
       for (let dy = -rr; dy <= rr; dy++) for (let dx = -rr; dx <= rr; dx++) {
         const xx = x + dx, yy = y + dy; if (!inb(xx, yy)) continue; const j = idx(xx, yy);
-        if (water[j] || Math.hypot(dx, dy) > rr + 0.3 || hash2(xx, yy, S4 + 9) < 0.25) continue;
+        if (water[j] || Math.hypot(dx, dy) > rr + 0.3 || khash2(xx, yy, S4 + 9, K) < 0.25) continue;
         ruin[j] = 1; forest[j] = 0; tiles.push(j);
       }
       const nt = 1 + Math.floor(rand() * 3), terminals = [];
@@ -516,7 +565,7 @@
 
     // 8b. resources for every base, in the economy's amounts
     const trees = new Uint8Array(N);                   // how many trees stand on each tile
-    for (let i = 0; i < N; i++) if (forest[i]) trees[i] = 1 + Math.floor(hash2(i % W, (i / W) | 0, S4 + 5) * 3);   // the wild forest
+    for (let i = 0; i < N; i++) if (forest[i]) trees[i] = 1 + Math.floor(khash2(i % W, (i / W) | 0, S4 + 5, K) * 3);   // the wild forest
     const seams = [], seamAt = new Int16Array(N);
     const dry = (i) => !water[i] && !ruin[i] && !seamAt[i];
     plots.forEach(p => {
@@ -641,7 +690,9 @@
     };
   }
 
-  const api = { generate, unreachable, ensureSteps, crystalBed, bedFor, seamDepths, VERSION, PLAN, LEVELS, ECON_DEFAULT, MAP_DEFAULT, ECON_KEYS, WATER: { NONE: W_NONE, SEA: W_SEA, LAKE: W_LAKE, RIVER: W_RIVER, CREEK: W_CREEK } };
+  // N8: the eight steps in the order flowDir counts them (0..3 the four sides) - a page that holds only a few tiles of
+  // the island (under the server's fog) reads a tile's flowDir through this, the one table
+  const api = { generate, unreachable, ensureSteps, crystalBed, bedFor, seamDepths, VERSION, N8, PLAN, LEVELS, ECON_DEFAULT, MAP_DEFAULT, ECON_KEYS, WATER: { NONE: W_NONE, SEA: W_SEA, LAKE: W_LAKE, RIVER: W_RIVER, CREEK: W_CREEK } };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.MapGen = api;
 })(typeof window !== 'undefined' ? window : globalThis);

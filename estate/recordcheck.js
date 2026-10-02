@@ -311,20 +311,29 @@ console.log('--- M8 items 1, 2, 3, 6 and M10 item 2: the rules a build, a store 
   // The deployer's report, 2026-10-01: a fresh base on Server 1, a Friend sent to a seam, "it diminishes but the
   // friend doesn't collect anything". A fresh base in the player's game is the server's start: values.js's purse
   // and NO buildings. Its store is the rebuild price with no keep (ruling 78) and the keep's floor with one
-  // (ruling 62), and the purse already holds at least that much - so every hand cut must be REFUSED, never taken
-  // from the seam and dropped. These ask the rule the page asks before it touches a seam, and the move the
-  // record takes, at every stage a hand can cut.
+  // (ruling 62). Since the deployer's 2026-10-01 decision the purse is 100.00: OVER the 75.00 store with nothing built,
+  // so there every hand cut must be REFUSED, never taken from the seam and dropped, and the 25.00 over is kept; and
+  // UNDER the keep's 240.00, so once the keep stands every hand cut is TAKEN whole. These ask the rule the page asks
+  // before it touches a seam, and the move the record takes, at every stage a hand can cut.
   {
     const fresh = R.fresh(0, V.startBase.purse), hands = V.stageYieldBps.map((_, i) => R.haulOf(V.handYield, (i + 0.5) / V.stageYieldBps.length));
     const capNone = R.storeCap(fresh, 0), withKeep = R.fresh(0, V.startBase.purse);
     withKeep.buildings.push(R.buildingRow(1, 'keep', 1, 0.5, 0.5, false, null, 0)); withKeep.nextId = 2;
     const capKeep = R.storeCap(withKeep, 0);
-    console.log('       a fresh base holds ' + fresh.base.crystals / 100 + ' crystals against a store of ' + capNone / 100 + ' with nothing built and ' + capKeep / 100 + ' with its keep: it is FULL from the start');
-    for (const [label, L, cap] of [['nothing built (cap ' + capNone / 100 + ')', fresh, capNone], ['the keep standing (cap ' + capKeep / 100 + ')', withKeep, capKeep]]) {
-      const S = R.session(clone(L), R.head(L));
+    console.log('       a fresh base holds ' + fresh.base.crystals / 100 + ' crystals against a store of ' + capNone / 100 + ' with nothing built and ' + capKeep / 100 + ' with its keep');
+    // nothing built: FULL - the purse is over the no-keep store, so nothing is taken and nothing is taken AWAY
+    {
+      const L = fresh, cap = capNone, S = R.session(clone(L), R.head(L));
       const taken = hands.map((h) => !!S.note('gather', { got: h }, 1));
       ok(R.storeFull(L.base.crystals, cap) && hands.every((h) => !R.haulFits(L.base.crystals, cap, h)) && taken.every((t) => !t) && S.ledger.base.crystals === L.base.crystals,
-        'a fresh base with ' + label + ' is full: no hand cut at any stage fits (' + hands.join(' / ') + '), the record takes none, and the ' + L.base.crystals / 100 + ' held stays');
+        'a fresh base with nothing built (cap ' + cap / 100 + ') is full: no hand cut at any stage fits (' + hands.join(' / ') + '), the record takes none, and the ' + L.base.crystals / 100 + ' held stays - the ' + (L.base.crystals - cap) / 100 + ' over the cap is kept, not spilled');
+    }
+    // the keep standing: NOT full - the deployer's 100.00 sits under the keep's floor, so every hand cut is taken whole
+    {
+      const L = withKeep, cap = capKeep;
+      const taken = hands.map((h) => { const S = R.session(clone(L), R.head(L)); return !!S.note('gather', { got: h }, 1) && S.ledger.base.crystals === L.base.crystals + h; });
+      ok(!R.storeFull(L.base.crystals, cap) && hands.every((h) => R.haulFits(L.base.crystals, cap, h)) && taken.every((t) => t),
+        'a fresh base with its keep standing (cap ' + cap / 100 + ') is NOT full: every hand cut (' + hands.join(' / ') + ') fits and the record credits it whole');
     }
     // the rule against the move it guards, both ways, on every edge: a haul is taken whole exactly when it fits
     let agree = 0, cases = 0;
@@ -458,7 +467,7 @@ console.log('--- the harvester pays its bill; M13: an attack settled on our serv
     ok(r.reason === 'StaleParent' && !r.attacker && !r.defender, 'and an attacker that chose its Friends on a head that has moved is StaleParent, with no record returned to write'); }
   // a fight result is never a client's to write: SERVER_MOVES names the two kinds serve.py refuses in a batch
   // M17 items 4 and 5 added a challenge's stake and settlement (stakeHeld, stakeSettled) to the same list: our server's alone
-  ok(JSON.stringify(R.SERVER_MOVES) === '["attack","attacked","stakeHeld","stakeSettled"]' && R.SERVER_MOVES.every((k) => R.MOVES.includes(k)), 'the fight\'s two moves and a challenge\'s two stake moves are record.js\'s SERVER_MOVES - serve.py\'s list of what a client may never write');
+  ok(JSON.stringify(R.SERVER_MOVES) === '["attack","attacked","stakeHeld","stakeSettled","harvesterLost"]' && R.SERVER_MOVES.every((k) => R.MOVES.includes(k)), 'the fight\'s two moves and a challenge\'s two stake moves are record.js\'s SERVER_MOVES - serve.py\'s list of what a client may never write');
   // the refusals an attack CAN meet (decision 2: it cannot be refused by the defender - only a malformed order)
   ok(R.settle(att, def, { sent: [0, 0], side: 'E', parent: att.head }, draw).reason === 'Invalid' && R.settle(att, def, { sent: [7], side: 'E', parent: att.head }, draw).reason === 'Invalid'
     && R.settle(att, def, { sent: [0], side: 'Q', parent: att.head }, draw).reason === 'Invalid' && R.settle(att, att, { sent: [0], side: 'E', parent: att.head }, draw).reason === 'Invalid',
@@ -577,7 +586,7 @@ const uniq = (a) => new Set(a).size === a.length;
     const chopped = await A.untilSim('base.record.moves.some(m => m.kind === "chop")', 15000);
     s = JSON.parse(await A.J(STATE));
     const logs = s.moves.filter((k) => k === 'chop').length;
-    ok(hut[1] && s.moves.includes('demolish') && !s.kinds.some((k) => k.startsWith('hut#')) && s.crystals === V.startBase.purse.crystals + hut[2] + 150, 'demolish and bank are moves: the hut is gone and the purse is 240.00 + ' + (hut[2] / 100) + ' + 1.50 = ' + (s.crystals / 100));
+    ok(hut[1] && s.moves.includes('demolish') && !s.kinds.some((k) => k.startsWith('hut#')) && s.crystals === V.startBase.purse.crystals + hut[2] + 150, 'demolish and bank are moves: the hut is gone and the purse is ' + (V.startBase.purse.crystals / 100).toFixed(2) + ' + ' + (hut[2] / 100) + ' + 1.50 = ' + (s.crystals / 100));
     ok(chopped && logs >= 1 && s.trees >= 1 && s.wood === hut[3] + logs * V.crystalUnit, 'a chop timed on the game\'s clock is a `chop` move: wood ' + s.wood / 100 + ' = the hut\'s ' + hut[3] / 100 + ' back + ' + logs + ' log(s), ' + s.trees + ' tree(s) cut into');
     ok(s.same && s.refused.length === 0, 'after all of it the page and the record hash the same and nothing was refused' + (s.refused.length ? ': ' + s.refused.join('; ') : ''));
     const before = s;

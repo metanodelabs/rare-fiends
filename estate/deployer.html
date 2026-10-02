@@ -299,7 +299,8 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
   // recorded a map, so version 1 is recorded as it draws today.
   // ---------------------------------------------------------------------------
   const DRAWN_SEED = 1;
-  const DRAWS = { 1: '0xcadcba1bc2950b277e6a428d38342f0a240b0392377345d9a9b5547c8bcccd1f' };
+  // VERSION 2 (2026-10-01): the wide seed (mapgen.js seedKey) - every island redraws, so a new row.
+  const DRAWS = { 1: '0xcadcba1bc2950b277e6a428d38342f0a240b0392377345d9a9b5547c8bcccd1f', 2: '0x100a4ebec3e76205c412b7f493234853689549119a935671bd3fd7d58958edb8' };
   const DRAWN_FIELDS = ['level', 'water', 'forest', 'ruin', 'plotAt', 'flowDir', 'trees', 'seamDepth'];
   let drawnMemo = null;                                  // per game window: generating is ~100 ms, once
   function drawnBy(gmg) {
@@ -478,7 +479,7 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
     { g: 'econ', id: 'startPurse', k: 'Crystals a player starts with', e: 'economy', f: 'startPurse', u: 'crystals', put: 'url', q: 'purse',
       read: () => { const w = gameWin(); return w ? hund(w.crystals) : undefined; },
       where: 'base.crystals ÷ base.ECON.crystalUnit - the purse the game is playing with, in whole crystals',
-      sweep: { row: 9, t: 'keep 240.00', v: 240 },
+      sweep: { row: 9, by: 'BY THE DEPLOYER 2026-10-01', t: '100.00 - replaces ruling 64\'s 240.00. A new base has no keep, so it holds 100.00 against the 75.00 no-keep cap (ruling 78) and reads STORE FULL until its keep stands', v: 100 },
       s: 'Delivered as <code>?purse=</code>, the web address the game reads in whole crystals. It went out as <code>?startPurse=</code> until now, which the game never read, so the change never arrived.' },
     { g: 'econ', id: 'startWood', k: 'Wood a player starts with', e: 'economy', f: 'startWood', u: 'logs',
       read: () => { const g = G(); return g ? hund(g.startWood) : undefined; }, where: 'base.ECON.startWood ÷ crystalUnit',
@@ -1642,7 +1643,7 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
   function sweepCheck(r, got) {
     const sw = r.sweep, head = sw.prop
       ? 'PROPOSED, NOT DECIDED (SWEEP ROW ' + sw.row + ', ' + sw.prop.toUpperCase() + '): '
-      : 'DECIDED, RULING ' + (sw.rul || 64) + ' (SWEEP ROW ' + sw.row + '): ';
+      : 'DECIDED, ' + (sw.by || 'RULING ' + (sw.rul || 64)) + ' (SWEEP ROW ' + sw.row + '): ';   // `by`: a decision with no ruling number yet
     let cmp = null, off = '';
     if (got != null && got !== '') {
       if (Array.isArray(sw.v)) { cmp = sameList(got, sw.v); off = String(got); }

@@ -305,7 +305,8 @@ async function nodeSignIn(port, wallet) {
   // 2. the base starts empty
   const hudA = await a.ev(`JSON.parse(JSON.stringify(base.hud()))`);
   ok('nothing is built on the map: no building on any base', await a.ev(`base.buildings.length`) === 0, await a.ev(`base.buildings.length`));
-  ok('the purse is values.js\'s start: 240 crystals and 0 wood', hudA.crystals === 24000 && hudA.wood === 0 && await a.ev(`document.getElementById('crystals').textContent`) === '240.00' && await a.ev(`document.getElementById('wood').textContent`) === '0.00', hudA);
+  const VP = require(path.join(ESTATE, 'values.js')), P0 = VP.startBase.purse, P0s = (P0.crystals / VP.crystalUnit).toFixed(2);
+  ok('the purse is values.js\'s start: ' + P0s + ' crystals and 0 wood', hudA.crystals === P0.crystals && hudA.wood === 0 && await a.ev(`document.getElementById('crystals').textContent`) === P0s && await a.ev(`document.getElementById('wood').textContent`) === '0.00', hudA);
   ok('the HUD names the Genesis played as', await a.ev(`document.getElementById('genesisName').textContent`) === 'GENESIS #' + GEN_A[0]);
   ok('no HIRED in the player\'s HUD', await a.ev(`!document.getElementById('hired') && !/HIRED/.test(document.querySelector('.hud') ? document.querySelector('.hud').textContent : '')`));
   // 3. the Friends, from the chain, on the spawn spot
@@ -430,7 +431,7 @@ async function nodeSignIn(port, wallet) {
   await b.shot('b-375-picked');
   // THE RACE: while B looks at that free plot, A takes it first (A's second Genesis, from another machine)
   const A2 = await nodeSignIn(S.port, A);
-  const R0 = require(path.join(ESTATE, 'record.js')), L0 = R0.fresh(other.id, null); L0.base = R0.baseRow(other.id, { crystals: 24000, wood: 0 });
+  const R0 = require(path.join(ESTATE, 'record.js')), L0 = R0.fresh(other.id, null); L0.base = R0.baseRow(other.id, require(path.join(ESTATE, 'values.js')).startBase.purse);
   const first = await A2.commit(other.id, Object.assign({ genesisToken: GEN_A[1] }, R0.genesis(L0, { clock: 0 }, Date.now())));
   ok('meanwhile A takes that very plot first, as Genesis #' + GEN_A[1], first && first.ok, first);
   let here = await b.ev(`(()=>{const r=document.getElementById('spawnHere').getBoundingClientRect();return [r.left+r.width/2,r.top+r.height/2]})()`);
@@ -448,7 +449,7 @@ async function nodeSignIn(port, wallet) {
   const ownB2 = require(path.join(ESTATE, 'spawn.js')).ownPlot(M, new Set([PA.home, other.id]), GEN_B[0]);
   ok('B arrives on B\'s own plot (rule a), never on ground A took', PB.home === ownB2.id && PB.home !== PA.home && PB.home !== other.id && PB.how === 'own', PB);
   ok('B\'s Friends stand on B\'s spawn spot', (await b.ev(`base.actors.filter(x=>x.base===base.HOME).map(x=>Math.hypot(x.x-(${PB.spawn[0]}),x.y-(${PB.spawn[1]})))`)).every((d) => d <= 1.0));
-  ok('B\'s base starts empty too: 240 crystals, 0 wood, nothing of B\'s built', await b.ev(`base.hud().crystals===24000&&base.hud().wood===0&&base.buildings.filter(x=>x.base===base.HOME).length===0`));
+  ok('B\'s base starts empty too: ' + P0s + ' crystals, 0 wood, nothing of B\'s built', await b.ev(`base.hud().crystals===${P0.crystals}&&base.hud().wood===0&&base.buildings.filter(x=>x.base===base.HOME).length===0`));
   await b.ev(`base.record.poll()`); await b.until(`Object.keys(base.record.others).includes('${PA.home}')`, 15000, 'A\'s record read by B').catch(() => {});
   ok('B\'s page reads A\'s base off the server: A\'s keep stands on A\'s plot', await b.ev(`base.buildings.some(x=>x.base===${PA.home}&&x.type==='keep')`));
   ok('the server holds B\'s base under B\'s wallet and B\'s Genesis', (() => { const rb = JSON.parse(fs.readFileSync(path.join(S.recs, PB.home + '.json'), 'utf8')); return rb.owner === B.address.toLowerCase() && rb.ownerTokenId === GEN_B[0]; })());

@@ -21,6 +21,8 @@ own cache entry. This one says no-store on everything, so the browser always ask
     --chain-rate=<n>/<window>            reads of who holds a Genesis that go to the chain, per client per window
                                          (default 60/600) - the same limiter as --auth-rate, its own bucket
     --genesis-ttl=<s>                    how long who holds a Genesis is kept before it is read again (default 30)
+    --fog                                THE REAL FOG OF WAR (estate/visibility.py): a player is served only what its
+                                         Friends can see. Needs --gate. Off by default, so every check runs as it did
 
 The `--api` form is M21 item 6, the server side a published bridge needs. rarefiends.com is Apache serving
 static files with system python3 beside it (see deploy/rarefiends.com.conf and run.sh), and the deploy
@@ -39,6 +41,7 @@ import hashlib
 import hmac
 import http.cookies
 import http.server
+import io
 import json
 import mimetypes
 import os
@@ -118,6 +121,10 @@ def record_write(base, rec):
     if clockwork:
         clockwork.seal(RECORDS, base, rec)
     # ---- end CLOCKWORK HOOK (2 of 3)
+    # ---- FOG HOOK (2 of 10): the fog's index of every base (owner, roster, buildings, keep) follows every write
+    if FOG:
+        FOG.on_record(base, rec)
+    # ---- end FOG HOOK (2 of 10)
 
 
 def record_apply(rec, batch):
@@ -309,15 +316,25 @@ def game_read():
         g = json.loads(raw)
     except ValueError:
         g = None
-    if not (isinstance(g, dict) and isinstance(g.get('seed'), int) and not isinstance(g.get('seed'), bool)):
+    if not (isinstance(g, dict) and seed_ok(g.get('seed'))):
         raise GameUnreadable('game.json is there and is not a game ({ seed, players }): refused, never replaced - '
                              'a new seed would move every base. Mend or remove %s by hand.' % game_path())
     return {'seed': g['seed'], 'players': g.get('players') if isinstance(g.get('players'), int) else None}
 
 
+def seed_ok(s):
+    """A game's seed: a WIDE one - 32 hex digits or more, what game_new makes (mapgen.js VERSION 2 folds every bit
+    into its key) - or a whole number, which a check's scratch server names with --game-seed and an older game.json
+    holds. A number is only as wide as it is: a real game's seed is never one."""
+    if isinstance(s, bool):
+        return False
+    return isinstance(s, int) or (isinstance(s, str) and re.fullmatch(r'[0-9a-f]{32,128}', s) is not None)
+
+
 def game_new():
-    """The first read of a server with no game.json: a seed, written once."""
-    g = {'seed': GAME_SEED if GAME_SEED is not None else 1 + secrets.randbelow(2 ** 31 - 2), 'players': None}
+    """The first read of a server with no game.json: a seed, written once - 256 bits from secrets, never a number a
+    player could search for from the ground they are shown (mapgen.js VERSION 2)."""
+    g = {'seed': GAME_SEED if GAME_SEED is not None else secrets.token_hex(32), 'players': None}
     os.makedirs(RECORDS, mode=0o700, exist_ok=True)
     tmp = game_path() + '.tmp'
     with open(tmp, 'w', encoding='utf8') as f:
@@ -486,6 +503,15 @@ try:
 except ImportError:
     playernames = None
 # ---- end M5 NAMES HOOK (1 of 5)
+# ---- FOG HOOK (1 of 10): estate/visibility.py (with estate/terrain.py) is the real fog of war - what each player may
+# be served, the position stream and the terrain in chunks. On only with --fog (which needs --gate); FOG is the one
+# Fog, made at start. Missing (the --api shape stages serve.py alone): --fog refuses to start rather than run open.
+try:
+    import visibility                                   # noqa: E402
+except ImportError:
+    visibility = None
+FOG = None
+# ---- end FOG HOOK (1 of 10)
 HTML_EXT = ('.html', '.htm', '.xhtml', '.xht', '.shtml')
 RANK = {'none': 0, 'player': 1, 'deployer': 2}
 NEED = {'public': 0, 'player': 1, 'deployer': 2}
@@ -578,6 +604,10 @@ def api_tier(method, route):
     """public | player | deployer for an api/ route, as the router below will read it (the path before ? and #)."""
     if route.startswith('/api/convert'):
         return 'deployer'
+    if route.rstrip('/') == '/api/record/game/settings' and method == 'POST':   # FOG HOOK (3 of 10): the deployer's alone
+        return 'deployer'
+    if route.startswith('/api/fog'):                                            # FOG HOOK (3 of 10): a player's
+        return 'player'
     if route.startswith('/api/record') or route.startswith('/api/standings'):
         return 'player'
     if method == 'POST' and route.startswith('/api/claim'):
@@ -706,6 +736,9 @@ class NoCache(http.server.SimpleHTTPRequestHandler):
             return
         if self.path.startswith('/api/') and not self.api_gate('GET'):
             return
+        if self.path.startswith('/api/fog'):                # FOG HOOK (4 of 10): GET
+            self.fog_route('GET')
+            return
         if self.path.startswith('/api/record'):
             self.record_get()
             return
@@ -724,7 +757,7 @@ class NoCache(http.server.SimpleHTTPRequestHandler):
             self.standings()
             return
         if duels and (parts.path == '/api/duel' or parts.path.startswith('/api/duel/')):   # M17 DUELS HOOK (2 of 5): GET
-            self.duels().route('GET', parts.path)
+            self.fog_duels('GET', parts.path)               # FOG HOOK (5 of 10): the lobby, its other seats' bases cut
             return
         if self.path.startswith('/api/'):
             try:
@@ -743,6 +776,9 @@ class NoCache(http.server.SimpleHTTPRequestHandler):
         if self.path.startswith('/api/') and not self.api_gate('POST'):
             return
         parts = urllib.parse.urlsplit(self.path)
+        if parts.path.startswith('/api/fog') or parts.path.rstrip('/') == '/api/record/game/settings':   # FOG HOOK (4 of 10): POST
+            self.fog_route('POST')
+            return
         if parts.path.startswith('/api/record/'):
             self.record_post(parts.path)
             return
@@ -762,7 +798,7 @@ class NoCache(http.server.SimpleHTTPRequestHandler):
             playernames.Names(self, RECORDS, record_read).route('POST', parts.path, parts.query)
             return
         if duels and (parts.path == '/api/duel' or parts.path.startswith('/api/duel/')):   # M17 DUELS HOOK (3 of 5): POST
-            self.duels().route('POST', parts.path)
+            self.fog_duels('POST', parts.path)              # FOG HOOK (5 of 10): a base challenged must be one in sight
             return
         if parts.path not in ('/api/claim', '/api/convert'):
             self.send_error(404, 'nothing here takes a POST')
@@ -838,6 +874,9 @@ class NoCache(http.server.SimpleHTTPRequestHandler):
     #                                    server has settled, one line each in fights.jsonl beside the records
     def record_get(self):
         path = urllib.parse.urlsplit(self.path).path.rstrip('/')
+        if FOG:                                         # FOG HOOK (6 of 10): every record route, cut to what is visible
+            self.fog_record_get(path)
+            return
         if path == '/api/record':
             with _REC_LOCK:
                 heads = record_heads()
@@ -901,6 +940,11 @@ class NoCache(http.server.SimpleHTTPRequestHandler):
             self.send_error(404, 'no such record route')
             return
         base, verb = m.group(1), m.group(2)
+        # ---- FOG HOOK (7 of 10): a base that is not this wallet's is answered as one that does not exist, whatever
+        # the verb - except the first write to a plot this wallet was OFFERED (GET /api/fog/spawn)
+        if FOG and self.refused(self.fog_write_refusal(base, verb)):
+            return
+        # ---- end FOG HOOK (7 of 10)
         try:
             n = int(self.headers.get('Content-Length') or 0)
         except ValueError:
@@ -919,6 +963,8 @@ class NoCache(http.server.SimpleHTTPRequestHandler):
                     os.remove(record_path(base))
                 except OSError:
                     pass
+                if FOG:                                 # FOG HOOK (7 of 10): a dropped record leaves the fog's index
+                    FOG.forget(base)
             self.send_json(b'{"ok":true}')
             return
         try:
@@ -976,6 +1022,8 @@ class NoCache(http.server.SimpleHTTPRequestHandler):
                     if tok is not None:                 # the Genesis, by the same rule: the record's, or the one just checked
                         out['record']['ownerTokenId'] = tok
                     record_write(base, out['record'])
+                    if FOG and rec is None and s:       # FOG HOOK (7 of 10): an offered plot taken - the offer is spent
+                        FOG.claimed(s['address'], base)
         except Exception as e:                          # node missing, or record.js threw: the server's fault, said as such
             self.send_error(502, str(e))
             return
@@ -992,6 +1040,22 @@ class NoCache(http.server.SimpleHTTPRequestHandler):
             self.send_error(400, 'an attack names the base it attacks')
             return
         on = str(order.get('on'))
+        # ---- FOG HOOK (8 of 10): a base is attacked only while the attacker can see it - one of its Friends,
+        # buildings or harvesters on a live tile of the attacking base. Not seen and not there are the same answer.
+        # A HARVESTER is a target of its own ({on, harvester: {depot, n}}): attacked only while THAT harvester stands on
+        # a live tile of the attacking base, else the same Unseen. In sight, its fight is record.js's settleHarvester
+        # (the deployer approved it 2026-10-01): where it stood and what it carried are the fog's, never the attacker's.
+        if FOG and isinstance(order.get('harvester'), dict):
+            hv = order['harvester']
+            if int(base) not in self.fog_mine() or not FOG.harvester_visible(int(base), on, hv.get('depot'), hv.get('n')):
+                self.send_json(json.dumps(visibility.UNSEEN).encode('utf8'))
+                return
+            self.harvester_fight(base, on, order, hv)
+            return
+        if FOG and not FOG.visible([int(base)], on):
+            self.send_json(json.dumps(visibility.UNSEEN).encode('utf8'))
+            return
+        # ---- end FOG HOOK (8 of 10)
         if self.refused(self.attacker_refusal(base, record_read(base))):     # the chain read, outside the lock
             return
         try:
@@ -1022,6 +1086,50 @@ class NoCache(http.server.SimpleHTTPRequestHandler):
         except Exception as e:
             self.send_error(502, str(e))
             return
+        # ---- FOG HOOK (9 of 10): the attacker is answered with the fight (its setup is the defence it met, during the
+        # fight - ruling 59 opens the orders there) and its own record; never the defender's whole record. The fight is
+        # announced by names only.
+        if FOG and out.get('ok'):
+            out.pop('defender', None)
+            FOG.on_fight(out['fight'])
+        # ---- end FOG HOOK (9 of 10)
+        self.send_json(json.dumps(out).encode('utf8'))
+
+    # A HARVESTER'S FIGHT (FOG HOOK 8's target of its own): both records read under the lock, the fight numbered and its
+    # word drawn here, record.js settleHarvester resolves it, and only if both writes took are they written, the fight
+    # journaled (fights.jsonl, the one counter) and announced by names only (FOG.on_fight). The fog then forgets the
+    # harvester that is gone. The attacker is answered with the fight and its own record, never the defender's.
+    def harvester_fight(self, base, on, order, hv):
+        if self.refused(self.attacker_refusal(base, record_read(base))):
+            return
+        try:
+            with _REC_LOCK:
+                att, dfn = record_read(base), record_read(on)
+                if self.refused(self.attacker_refusal(base, att)):
+                    return
+                at = FOG.harvester_state(on, hv.get('depot'), hv.get('n')) or {}
+                draw = {'word': '0x' + secrets.token_hex(32), 'fightId': len(self.fights_read()) + 1}
+                o = {k: order.get(k) for k in ('sent', 'side', 'parent')}
+                o.update(harvester={'depot': hv.get('depot'), 'n': hv.get('n')}, x=at.get('x'), y=at.get('y'), cargo=at.get('cargo', 0))
+                out = self.record_settle(att, dfn, o, draw)
+                if out.get('ok'):
+                    for side, rec in (('attacker', att), ('defender', dfn)):
+                        if (rec or {}).get('owner'):
+                            out[side]['owner'] = rec['owner']
+                        if (rec or {}).get('ownerTokenId') is not None:
+                            out[side]['ownerTokenId'] = rec['ownerTokenId']
+                    record_write(base, out['attacker'])
+                    if (out.get('changed') or {}).get('defender'):
+                        FOG.harvester_lost(on, hv.get('depot'), hv.get('n'))
+                        record_write(on, out['defender'])
+                    self.fights_append(dict(out['fight'], loggedAt=time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())))
+        except Exception as e:
+            self.send_error(502, str(e))
+            return
+        if out.get('ok'):
+            for k in ('defender', 'changed'):            # never the defender's record
+                out.pop(k, None)
+            FOG.on_fight(out['fight'])
         self.send_json(json.dumps(out).encode('utf8'))
 
     # The attack's helpers, beside the routes that use them. record.js holds every rule; these only carry
@@ -1165,6 +1273,228 @@ class NoCache(http.server.SimpleHTTPRequestHandler):
                          'why': 'this base has no Genesis on it yet: write it once naming the Genesis you play as'}
         return None
 
+    # ------------------------------------------------------------ THE FOG'S ROUTES (estate/visibility.py; --fog)
+    # Every one needs a signed-in player (the gate checks the tier; these check the session again, so a route reached
+    # some other way still has a wallet). A base named in a query or a body must be this wallet's own - anything else
+    # is visibility.UNSEEN, the same bytes whether the base exists or not.
+    #   GET  /api/fog/settings                 -> { ok, settings, running }
+    #   GET  /api/fog/me[?genesis=N]           -> { ok, bases: [id...] }  this wallet's bases (N: its Genesis's, read now)
+    #   GET  /api/fog/view?base=B              -> visibility.Fog.view
+    #   GET  /api/fog/terrain?base=B&i=I&j=J   -> visibility.Fog.chunk
+    #   GET  /api/fog/spawn                    -> visibility.Fog.spawn   (offers to a wallet arriving)
+    #   GET  /api/fog/news                     -> { ok, news: [{ at, kind, attacker, defender, won }] }  names only
+    #   POST /api/fog/pos {base, units}        -> visibility.Fog.ingest
+    #   POST /api/fog/power/find|portal {base} -> visibility.Fog.use_power
+    #   POST /api/record/game/settings {fog}   -> the deployer only, refused while a game runs
+    def fog_mine(self):
+        """The base ids this request's wallet holds: its records' owner, or the Genesis it holds by what is kept."""
+        s = self.session()
+        if not s or not FOG:
+            return []
+
+        def held_by(tok):
+            ans = genesis_cached(tok)
+            return ans[1] if ans and ans[0] == 'held' else None
+        return FOG.mine(s['address'], held_by)
+
+    def fog_say(self, body, code=200):
+        self.send_json(json.dumps(body).encode('utf8'), code)
+
+    def fog_body(self, cap=16384):
+        try:
+            n = int(self.headers.get('Content-Length') or 0)
+        except ValueError:
+            n = -1
+        if n < 0 or n > cap:
+            self.fog_say({'ok': False, 'error': 'the request is too large'}, 413)
+            return None
+        try:
+            j = json.loads(self.rfile.read(n).decode('utf8')) if n else {}
+        except (ValueError, UnicodeDecodeError):
+            j = None
+        if not isinstance(j, dict):
+            self.fog_say({'ok': False, 'error': 'the request is not a JSON object'}, 400)
+            return None
+        return j
+
+    def fog_own(self, raw):
+        """int(raw) when it names one of this wallet's bases, else None."""
+        if not isinstance(raw, (str, int)) or isinstance(raw, bool) or not re.fullmatch(BASE_ID, str(raw)):
+            return None
+        b = int(raw)
+        return b if b in self.fog_mine() else None
+
+    def fog_route(self, method):
+        parts = urllib.parse.urlsplit(self.path)
+        path, q = parts.path.rstrip('/'), urllib.parse.parse_qs(parts.query)
+        one = lambda k: (q.get(k) or [None])[0]         # noqa: E731
+        if not FOG:
+            self.send_error(404, 'the fog is not on here')
+            return
+        s = self.session()
+        if path == '/api/record/game/settings' and method == 'POST':
+            if not s or s.get('role') != 'deployer':     # checked here as well as at the gate: the deployer's alone
+                self.fog_say({'ok': False, 'code': 'gate', 'needs': 'deployer', 'error': 'the fog settings are the deployer\'s'}, 403)
+                return
+            j = self.fog_body()
+            if j is None:
+                return
+            code, out = FOG.set_settings(j.get('fog') if isinstance(j.get('fog'), dict) else j)
+            self.fog_say(out, code)
+            return
+        if not s or s.get('role') not in ('player', 'deployer'):
+            self.fog_say({'ok': False, 'code': 'gate', 'error': 'sign in with a wallet that may play'}, 403)
+            return
+        if method == 'GET' and path == '/api/fog/settings':
+            self.fog_say({'ok': True, 'settings': FOG.settings, 'running': FOG.running()})
+            return
+        if method == 'GET' and path == '/api/fog/news':
+            self.fog_say(FOG.news_list())
+            return
+        if method == 'GET' and path == '/api/fog/me':
+            g = one('genesis')
+            if g and re.fullmatch(r'[0-9]{1,9}', g):
+                tok = int(g)                            # the buyer of a Genesis takes its base: read who holds it NOW
+                for b in [b for b in list(FOG.bases.values()) if b.genesis == tok]:
+                    ans = self.genesis_read(tok)
+                    if ans[0] == 'held' and ans[1] == s['address']:
+                        rec = record_read(str(b.id))
+                        if rec:
+                            self.owner_now(str(b.id), rec)
+            self.fog_say({'ok': True, 'bases': self.fog_mine()})
+            return
+        if method == 'GET' and path == '/api/fog/spawn':
+            self.fog_say(FOG.spawn(s['address']))
+            return
+        if method == 'GET' and path in ('/api/fog/view', '/api/fog/terrain'):
+            b = self.fog_own(one('base'))
+            if b is None:
+                self.fog_say(visibility.UNSEEN)
+                return
+            if path == '/api/fog/view':
+                self.fog_say(FOG.view(b))
+                return
+            i, j = one('i'), one('j')
+            if not (i and j and re.fullmatch(r'-?[0-9]{1,4}', i) and re.fullmatch(r'-?[0-9]{1,4}', j)):
+                self.fog_say({'ok': False, 'reason': 'Invalid', 'why': 'a chunk is i and j, whole numbers'}, 400)
+                return
+            self.fog_say(FOG.chunk(b, int(i), int(j)))
+            return
+        if method == 'POST' and (path == '/api/fog/pos' or path.startswith('/api/fog/power/')):
+            j = self.fog_body()
+            if j is None:
+                return
+            b = self.fog_own(j.get('base'))
+            if b is None:
+                self.fog_say(visibility.UNSEEN)
+                return
+            if path == '/api/fog/pos':
+                code, out = FOG.ingest(b, j.get('units'), harvesters=j.get('harvesters'))
+            else:
+                code, out = FOG.use_power(b, record_read(str(b)), path[len('/api/fog/power/'):])
+            self.fog_say(out, code)
+            return
+        self.send_error(404, 'no such fog route')
+
+    def fog_record_get(self, path):
+        """The record routes under the fog: heads, fights and records are this wallet's own; another base only as
+        much of it as stands on ground this wallet sees live; the game without its seed."""
+        mine = self.fog_mine()
+        if path == '/api/record':
+            with _REC_LOCK:
+                heads = [h for h in record_heads() if h.get('id') in mine]
+            viewer = self.session()
+            for h in heads:                             # on top of SEALED ORDERS: a head whose owner field is not
+                if not sees_orders(viewer, h.get('owner'), h.get('genesis')):    # this wallet (yet) is sealed
+                    h['head'], h['sealed'] = sealed_head(h.get('id'), h.get('head')), True
+            self.fog_say({'ok': True, 'records': heads})
+            return
+        if path == '/api/record/fights':
+            with _REC_LOCK:
+                fights = [f for f in self.fights_read() if f.get('attacker') in mine or f.get('defender') in mine]
+            self.fog_say({'ok': True, 'count': len(fights), 'fights': fights[-50:]})
+            return
+        if path == '/api/record/game':
+            try:
+                with _REC_LOCK:
+                    g = game_read()
+            except (GameUnreadable, OSError) as e:
+                self.log_message('game: %s', e)
+                self.fog_say({'ok': False, 'reason': 'GameUnreadable'}, 503)
+                return
+            s = self.session()                          # THE SEED IS NEVER SERVED under the fog: the ground comes in chunks
+            self.fog_say({'ok': True, 'players': g.get('players'), 'fog': True, 'me': s['address'] if s else None,
+                          'chunk': visibility.CHUNK})
+            return
+        m = re.fullmatch(r'/api/record/(%s)' % BASE_ID, path)
+        if not m:
+            self.send_error(404, 'no such record route')
+            return
+        b = int(m.group(1))
+        if b in mine:
+            with _REC_LOCK:
+                rec = record_read(str(b))
+            if rec and rec.get('ownerTokenId') is not None:
+                rec = self.owner_now(str(b), rec)
+            viewer = self.session()
+            if rec and not sees_orders(viewer, rec.get('owner'), rec.get('ownerTokenId')):
+                rec = sealed_record(rec)                # SEALED ORDERS still decide the orders: the fog only cuts more
+            self.fog_say({'ok': True, 'record': rec} if rec else {'ok': False, 'reason': 'NoRecord', 'base': b})
+            return
+        peek = FOG.peek(mine, b)
+        self.fog_say({'ok': True, 'view': peek} if peek else visibility.UNSEEN)
+
+    def fog_write_refusal(self, base, verb):
+        """None when this wallet may write base (commit, forget, attack FROM it); else (200, UNSEEN). A base id must be
+        written as the record names it - '007' is not base 7 - and the first write to a base with no record must be to
+        a plot this wallet was offered."""
+        s = self.session()
+        if s and str(int(base)) == base:
+            if int(base) in self.fog_mine():
+                return None
+            if verb == 'commit' and FOG.offered(s['address'], base):
+                if record_read(base) is None:
+                    return None
+                return 200, {'ok': False, 'reason': 'Taken', 'base': int(base),
+                             'why': 'that plot was taken first, just now - ask for new offers'}
+        return 200, dict(visibility.UNSEEN)
+
+    def fog_duels(self, method, path):
+        """The challenge lobby, under the fog: a base challenged by its number must be one this wallet sees (else the
+        lobby's own NoOpponent, word for word), and every answer carries the other seat's wallet, never its base."""
+        if not FOG:
+            self.duels().route(method, path)
+            return
+        s = self.session()
+        me = s['address'] if s else None
+        if method == 'POST' and path.rstrip('/') == '/api/duel':
+            try:
+                n = int(self.headers.get('Content-Length') or 0)
+            except ValueError:
+                n = -1
+            raw = self.rfile.read(n) if 0 < n <= 2048 else b''
+            try:
+                to = str((json.loads(raw.decode('utf8')) or {}).get('to') or '').strip()
+            except (ValueError, UnicodeDecodeError, AttributeError):
+                to = ''
+            if re.fullmatch(BASE_ID, to) and not FOG.visible(self.fog_mine(), to):
+                self.fog_say({'ok': False, 'reason': 'NoOpponent', 'why': 'nobody signed in holds that base or wallet on our server'})
+                return
+            self.rfile = io.BytesIO(raw)                 # the lobby reads the same body
+        plain = self.send_json
+
+        def cut(body, code=200, headers=()):
+            try:
+                body = json.dumps(visibility.strip_duel(json.loads(body), me)).encode('utf8')
+            except ValueError:
+                pass
+            plain(body, code, headers)
+        self.send_json = cut
+        try:
+            self.duels().route(method, path)
+        finally:
+            del self.send_json
+
     # GET /api/standings -> 200 { ok, at, players: [{ address, name, gathered, base, baseName }] }, highest `gathered` first:
     # every record with an owner, gathered read off its ledger in the record's own units. name is the owner's chosen
     # name (names.py), null when none. Records with no owner are left out - a standing is a wallet's, and an unowned base has none.
@@ -1188,6 +1518,11 @@ class NoCache(http.server.SimpleHTTPRequestHandler):
                              'base': rec.get('base'),
                              'baseName': playernames.base_name_of(based, rec.get('base'), rec.get('ownerTokenId')) if playernames else None})
         rows.sort(key=lambda r: (-r['gathered'], str(r['base'])))
+        if FOG:                                         # FOG HOOK (10 of 10): names and totals; a base only for its own wallet
+            me = (self.session() or {}).get('address')
+            for r in rows:
+                if r['address'] != me:
+                    r.pop('base', None)
         self.send_json(json.dumps({'ok': True, 'at': whitelist_iso(time.time()), 'players': rows}).encode('utf8'))
 
     # ------------------------------------------------------------ the whitelist's three routes (see WHITELIST above)
@@ -1632,7 +1967,7 @@ class ApiOnly(NoCache):
     So both readers of the disk are cut here - GET and HEAD, because `SimpleHTTPRequestHandler.do_HEAD`
     serves a file's headers on its own and an override of `do_GET` alone would leave it answering."""
 
-    PRIVATE = ('/api/record', '/api/whitelist', '/api/auth', '/api/standings', '/api/duel')   # /api/duel: M17 DUELS HOOK (5 of 5)
+    PRIVATE = ('/api/record', '/api/whitelist', '/api/auth', '/api/standings', '/api/duel', '/api/fog')   # /api/duel: M17 DUELS HOOK (5 of 5)
     PRIVATE = PRIVATE + ('/api/name',)                  # M5 NAMES HOOK (5 of 5): names are held on our server, never published
 
     def do_GET(self):                                  # noqa: N802
@@ -1798,7 +2133,8 @@ if __name__ == '__main__':
             GENESIS_TTL = max(0, min(3600, int(a[len('--genesis-ttl='):])))
         # the seed of a NEW game file (see THE GAME above); a check's scratch server fixes its map with it
         if a.startswith('--game-seed='):
-            GAME_SEED = int(a[len('--game-seed='):])
+            v = a[len('--game-seed='):]
+            GAME_SEED = v.lower() if re.fullmatch(r'[0-9a-fA-F]{32,128}', v) else int(v)
     if WL_RATE != (8, 600) or WL_NONCE_RATE != (20, 600):
         print('auth rate: %d signed POSTs and %d nonces per client per %d s / %d s' %
               (WL_RATE[0], WL_NONCE_RATE[0], WL_RATE[1], WL_NONCE_RATE[1]))
@@ -1806,11 +2142,31 @@ if __name__ == '__main__':
     if '--gate' in args and api_only:
         sys.stderr.write('usage: --gate is the full server\'s; the published --api shape holds no pages and no sessions\n')
         sys.exit(2)
+    # ---- FOG HOOK (1 of 10, the start): --fog needs the gate (a player is a session) and visibility.py beside this file
+    if '--fog' in args:
+        if not GATE or not visibility:
+            sys.stderr.write('usage: --fog needs --gate and estate/visibility.py; refusing to start an open server as a fogged one\n')
+            sys.exit(2)
+
+        def _game():
+            with _REC_LOCK:
+                return game_read()
+        FOG = visibility.Fog(RECORDS, _game)
+        FOG.ensure()                                    # the map is made and every base indexed before the first request
+        import atexit                                   # noqa: E402
+        import signal                                   # noqa: E402
+        atexit.register(FOG.flush)                      # a stop writes what was discovered since the last save
+
+        def _stop(*_):
+            sys.exit(0)
+        signal.signal(signal.SIGTERM, _stop)
+        print('fog ON: %d bases indexed, the map %dx%d, settings %s' % (len(FOG.bases), FOG.map().W, FOG.map().H, json.dumps(FOG.settings)))
+    # ---- end FOG HOOK (1 of 10, the start)
     if GATE:
         rr = auth_rareroles()
         print('gate ON: pages and api/ by the wallet session; deployer = RareRoles %s via %s' %
               (rr or '(none on record - nobody is deployer)', AUTH_RPC or 'chainlive.js\'s RPC list'))
-    ports = [a for a in args if a not in ('--api', '--local', '--gate') and not a.startswith('--fixture=') and not a.startswith('--records=')
+    ports = [a for a in args if a not in ('--api', '--local', '--gate', '--fog') and not a.startswith('--fixture=') and not a.startswith('--records=')
              and not a.startswith('--whitelist=') and not a.startswith('--wl-') and not a.startswith('--auth-')
              and not a.startswith('--session-ttl=') and not a.startswith('--role-ttl=') and not a.startswith('--game-seed=')
              and not a.startswith('--chain-rate=') and not a.startswith('--genesis-ttl=')]

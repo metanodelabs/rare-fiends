@@ -255,7 +255,7 @@
              strength: [350, 700, 1400], energy: [3, 6, 10],
              hands: 4,
              footprint: [[0, 0]], placement: PLACE({ scienceGen: [0, 0, 0] }),
-             decided: DECIDED({ capacity: 'DECIDED, ruling 64, sweep row 20: 240.00 / 720.00 / 2,160.00 crystals by level - level I equals the starting purse, each level x3' }),
+             decided: DECIDED({ capacity: 'DECIDED, ruling 64, sweep row 20: 240.00 / 720.00 / 2,160.00 crystals by level, each level x3 - level I was set equal to the starting purse, which moved to 100.00 on 2026-10-01; Depot I was NOT moved with it (the economist recommends it stays at the keep floor\'s 240.00 - the deployer\'s to confirm)' }),
              sub: 'Holds 240, 720, then 2,160 crystals; each level runs one more harvester.' },
     // THE NINTH BUILDING (M8 item 11). Decided: four levels; one to a base; it must stand touching a
     // generator, and that generator is the one it serves; it leaks by its own level (10% a day, 5%, 3%,
@@ -296,7 +296,11 @@
   // The single-estate plan. index.html clones a fresh copy of each row, so `crew` and `occupant` are
   // the shape of a row and never shared state. A two-base island is laid out by mapgen's kit instead.
   const START_BASE = {
-    purse: { crystals: 24000, wood: 0 },             // hundredths - 240.00 crystals and no wood - DECIDED, ruling 64, sweep rows 9 and 10
+    // hundredths - 100.00 crystals and no wood. Crystals: DECIDED by the deployer 2026-10-01 ("lower that starting amount to
+    // 100 crystals"), replacing ruling 64's 240.00 (sweep row 9). Wood: DECIDED, ruling 64, sweep row 10.
+    // A new base has no keep, so it holds this against the rebuild cap of 75.00 (ruling 78) until its keep is placed -
+    // nothing takes the 25.00 over it (record.js storeCap/haulFits); gathering is refused until it stands.
+    purse: { crystals: 10000, wood: 0 },
     buildings: [
       { type: 'keep',  x:  0.5, y:  0.5, tier: 1 },
       { type: 'tower', x: -2.5, y: -0.5, tier: 1, occupant: null },
@@ -334,6 +338,13 @@
     harvCost: 2000,                                   // hundredths - 20.00 crystals for a harvester - DECIDED, ruling 64, sweep row 18
     treeWood: 300,                                    // three logs a tree, in hundredths - DECIDED, ruling 64, sweep row 11. NOT trees per grove: that is the map's (mapgen.js), frozen at the seed
     chopMs: 1400,                                     // a log every 1.4 s - DECIDED, ruling 64, sweep row 12
+    // WALKING PACE: how fast a Friend walks, in tiles a second - the toolkit walker's 170 of its units a second at 52 a
+    // tile, measured (index.html NAV.SPEED reads it, times TILE). ONE COPY: the page walks at it and the server's fog
+    // (visibility.py) bounds the position stream by it, so neither can drift from the other.
+    walkTilesPerSec: 3.27,
+    // the server's bound on how fast a reported Friend may move is this many times walking pace: the margin is room
+    // for the Speed power, whose amount is not decided - PROPOSED (the economist's review, 2026-10-01)
+    speedPowerX: 2,
     regrowMs: DEMO ? DEMO_PACE.regrowMs : 15 * 60e3,  // a felled tree stands again - DECIDED, ruling 64, sweep row 13: 15 min (demo 45 s)
     buildMs: BUILD_MS,                                // THE DEMO PACE's flat raise time, kept readable for the clip clocks (index.html BUILD_MS) and the pages that read one number; under the switch every kind's per-level buildMs names it, and under the decided pace none does - the decided rule is buildMsPerUnit
     buildMsPerUnit: BUILD_MS_PER_UNIT,                // DECIDED, ruling 64, sweep row 24: ms of one Friend's work per unit of a rung's materials; every kind's buildMs is derived from it

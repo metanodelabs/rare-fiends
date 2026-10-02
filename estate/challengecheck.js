@@ -34,6 +34,8 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 // expression threw would PASS. It is a FAIL, carrying the error.
 let bad=0; const ok=(n,c,v)=>{ if (typeof c === 'string' && c.startsWith('THREW')) { v = c; c = false; } console.log((c?'  ok  ':'FAIL  ')+n+(c?'':'   -> '+v)); if(!c) bad++;};
   await sleep(1500);
+  // wait for the page to be UP (its handle and the pot drawn), not a stopwatch: under -j 4 1.5 s was not always enough
+  for (let i = 0, t0 = Date.now(); Date.now() - t0 < 45000; i++) { if ((await ev("typeof window.challenge === 'object' && !!document.querySelector('#potn') && document.querySelector('#potn').innerText !== ''")) === true) break; await sleep(150); }
   const click = (sel) => ev(`(()=>{const b=document.querySelector(${JSON.stringify(sel)}); if(!b||b.disabled) return false; b.click(); return true;})()`);
   const txt = (sel) => ev(`(document.querySelector(${JSON.stringify(sel)})||{}).innerText||''`);
   ok('it opens on the terms, as the challenger', /SET THE TERMS/.test(await txt('#phase')), await txt('#phase'));

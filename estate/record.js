@@ -442,6 +442,34 @@
   SERVER_MOVES.push('stakeHeld', 'stakeSettled');
 
   // ---------------------------------------------------------------------------------------------
+  // A HARVESTER ATTACKED (the deployer, 2026-10-01, approving the proposal: "If you attack a harvester you make it
+  // difficult for the other team to build and grow.. so they become stagnant while you become stronger faster and can
+  // defeat them"; and "you can attack anything you can see"). Read off the rulings that already stood:
+  //   - the harvester fights ALONE at its strength, VALUES.harvStrength (ruling 64, sweep row 6: 150), and deals no
+  //     damage - so nobody on the attacking side goes down, and the defender's Friends are not in it;
+  //   - a won attack takes nothing (ruling 68): the attacker gains nothing but the harvester's loss to its owner;
+  //   - the harvester is lost and the depot's count falls by one, with NO refund (a refund is the owner's own
+  //     demolition, rulings 15 and 56) - it is built again at harvCost;
+  //   - what it was carrying spills on the tile it stood on (rulings 70 and 88: a pile that lies until someone
+  //     claims it), in the defender's `spills` - the same pile a challenge's overflow makes.
+  // `harvesterLost` { depot, n, cargo, tile, fight, hash, by } - on the DEFENDER's record, our server's alone.
+  // ---------------------------------------------------------------------------------------------
+  Object.assign(MOVES, {
+    harvesterLost(L, m) {
+      const b = building(L, m.depot);
+      if (b.kind !== 'collectionDepot') no('building ' + m.depot + ' is not a collection depot');
+      if (!Number.isInteger(m.n) || m.n < 0 || m.n >= (b.harvesters || 0)) no('depot ' + m.depot + ' has no harvester ' + m.n);
+      const most = haulOf(b.level, 1);
+      if (!Number.isInteger(m.cargo) || m.cargo < 0 || m.cargo > most) no('a harvester carries 0 to ' + most + ' hundredths, not ' + m.cargo);
+      if (m.cargo > 0 && !(m.tile && Number.isInteger(m.tile.x) && Number.isInteger(m.tile.y))) no('a spilled cargo lies on a tile');
+      noLoot(m);
+      b.harvesters -= 1;
+      if (m.cargo > 0) L.spills = (L.spills || []).concat([{ fight: m.fight, crystals: m.cargo, at: m.at, tile: { x: m.tile.x, y: m.tile.y } }]);
+    },
+  });
+  SERVER_MOVES.push('harvesterLost');
+
+  // ---------------------------------------------------------------------------------------------
   // M13: AN ATTACK, SETTLED ON OUR SERVER (rulings 3 and 7). settle(attacker, defender, order, draw) takes
   // both bases' records as the server holds them and the attacker's order - which of its Friends it sends
   // (`sent`, roster ids: decision 13, as many as it chooses, no stake and no fee), from which side, and the
@@ -523,12 +551,58 @@
     A.record.lastFight = fight; B.record.lastFight = fight;
     return { ok: true, fight, setup, attacker: A.record, defender: B.record };
   }
+  // settleHarvester(attacker, defender, order, draw): an attack on one harvester, in settle()'s shape. The order adds
+  // `harvester` { depot, n } and what our server knows of it - `x`, `y` (the defender's frame: where it stood) and
+  // `cargo` (hundredths, as its own page last reported it; capped at what its depot hauls). The harvester is the one
+  // target on the defence's side, combat.js's last-standing slot (`genesis`: never acts, its own strength) - the fight
+  // RareCombat.sol already holds the parity for. The attacker's record takes `attack` (its Friends that went down:
+  // none, since nothing shoots back); the defender's takes `harvesterLost` only if the attack won.
+  function settleHarvester(att, def, order, draw) {
+    const C = root.Combat || require('./combat.js');
+    if (!att || !def) return refuse('NoRecord', { why: 'both bases need a record on our server' });
+    if (att.base === def.base) return refuse('Invalid', { why: 'a base does not attack itself' });
+    if (!order || order.parent !== att.head) return refuse('StaleParent', { saw: order && order.parent, is: att.head, why: 'the attacker chose its Friends on a record that has moved on' });
+    const sent = order.sent;
+    if (!Array.isArray(sent) || !sent.length || sent.length > C.MAX_SIDE || new Set(sent).size !== sent.length || !sent.every(Number.isInteger))
+      return refuse('Invalid', { why: 'send 1 to ' + C.MAX_SIDE + ' of your own Friends, each once' });
+    const rows = sent.map((id) => att.ledger.roster.find((r) => r.id === id));
+    if (rows.some((r) => !r)) return refuse('Invalid', { why: 'a Friend sent is not on the attacker\'s roster' });
+    if (!C.SIDES.includes(order.side)) return refuse('Invalid', { why: 'an attack comes in from ' + C.SIDES.join(', ') });
+    if (!draw || typeof draw.word !== 'string' || !Number.isInteger(draw.fightId)) return refuse('Invalid', { why: 'the server draws the word and numbers the fight' });
+    const hv = order.harvester || {}, depot = def.ledger.buildings.find((b) => b.id === hv.depot);
+    if (!depot || depot.kind !== 'collectionDepot' || !Number.isInteger(hv.n) || hv.n < 0 || hv.n >= (depot.harvesters || 0))
+      return refuse('Nothing', { why: 'there is no such harvester' });
+    if (!Number.isFinite(order.x) || !Number.isFinite(order.y)) return refuse('Invalid', { why: 'our server says where the harvester stood' });
+    const tile = { x: Math.floor(order.x), y: Math.floor(order.y) }, [hx, hy] = spotOf(order.x, order.y);
+    const cargo = Math.max(0, Math.min(haulOf(depot.level, 1), Number.isInteger(order.cargo) ? order.cargo : 0));
+    const setup = { attackers: rows.map((r) => r.gen), entry: C.entry({ tiles: [[tile.x, tile.y]] }, order.side, ATTACK.gapTiles * 2),
+      defenders: [], walls: [], genesis: { x: hx, y: hy, hp: V.harvStrength } };
+    const R = C.rulesFrom(V), ctx = { word: draw.word, contract: Chance.PREVIEW_CONTRACT, chainId: Chance.CHAIN_ID, fightId: draw.fightId };
+    const res = C.fight(R, setup, ctx);
+    const hash = C.fightHash(setup, res, { fightLog: Chance.PREVIEW_CONTRACT, chainId: Chance.CHAIN_ID, gameId: 0, fightId: draw.fightId, word: draw.word, rules: R });
+    const won = res.winner === 'attack', lostA = sent.filter((id, i) => res.attackers[i] === 0);
+    const write = (rec, kind, body) => {
+      const S = session(rec.ledger, rec.head), at = rec.at || 0;
+      if (!S.note(kind, body, at)) return refuse('Invalid', { why: S.refused[0].why, base: rec.base });
+      return apply(rec, S.batch(at, rec.scene || null, rec.ledger.lastSeen || 0));
+    };
+    const A = write(att, 'attack', { fight: draw.fightId, hash, on: def.base, won, sent: sent.slice(), lost: lostA });
+    if (!A.ok) return A;
+    const B = won ? write(def, 'harvesterLost', { fight: draw.fightId, hash, by: att.base, depot: depot.id, n: hv.n, cargo, tile }) : { ok: true, record: def };
+    if (!B.ok) return B;
+    const fight = { id: draw.fightId, hash, word: draw.word, attacker: att.base, defender: def.base, side: order.side, sent: sent.slice(),
+      target: { harvester: { depot: depot.id, n: hv.n } }, winner: res.winner, reason: res.reason, t: res.t, shots: res.shots, hits: res.hits, won,
+      spilled: won ? cargo : 0, lost: { attacker: lostA, defender: [] }, walls: [], orders: [],
+      heads: { attacker: A.record.head, defender: B.record.head } };
+    A.record.lastFight = fight; if (won) B.record.lastFight = fight;
+    return { ok: true, fight, setup, attacker: A.record, defender: B.record, changed: { defender: won } };
+  }
   // THE SERVER'S HALF OF AN ATTACK: `node record.js attack` reads { attacker, defender, order, draw } off stdin
   // and writes settle()'s answer to stdout - serve.py calls this, as it calls `apply`, and holds no rule itself.
   if (typeof require !== 'undefined' && typeof module !== 'undefined' && require.main === module && process.argv[2] === 'attack') {
     let s = ''; process.stdin.setEncoding('utf8'); process.stdin.on('data', (c) => { s += c; });
     process.stdin.on('end', () => {
-      let out; try { const j = JSON.parse(s); out = settle(j.attacker || null, j.defender || null, j.order, j.draw); }
+      let out; try { const j = JSON.parse(s); out = (j.order && j.order.harvester ? settleHarvester : settle)(j.attacker || null, j.defender || null, j.order, j.draw); }
       catch (e) { out = { ok: false, reason: 'BadInput', why: String((e && e.message) || e) }; }
       process.stdout.write(JSON.stringify(out));
     });
@@ -715,6 +789,6 @@
   const api = { head, hashOf, canon, baseRow, fresh, buildingRow, rosterRow, finished, standingLevel, refund, refundShort, siloCap, wallSlots,
     MOVES: Object.keys(MOVES), reduce, Refused, session, genesis, apply, defense, spotOf, browserStore, serverStore, POLL_MS, LOG, MAX_HAUL,
     MATERIALS, materials, raiseMs, ceiling, handsAt, worked, progress, storeCap, stageOf, haulOf, refundExempt, haulFits, storeFull, MIN_HAUL, spillTile,
-    SERVER_MOVES, ATTACK, groundOf, settle };
+    SERVER_MOVES, ATTACK, groundOf, settle, settleHarvester };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.Record = api;
 })(typeof window !== 'undefined' ? window : globalThis);

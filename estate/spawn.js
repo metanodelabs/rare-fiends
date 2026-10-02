@@ -163,6 +163,54 @@
     });
   }
 
+  // UNDER THE SERVER'S FOG (serve.py --fog): the page holds no map, so it cannot show the island. The server offers a
+  // few free plots (GET api/fog/spawn -> { offers: [{ plot, w, h, x0, y0, fields, tiles }] }), each with the ground
+  // round it in THAT plot's frame (tiles from its centre), and the player picks one of those and nothing else - the
+  // deployer: "show only the 3 offered plots, never all free plots".
+  // Spawn.offerSpot(offer) -> [tx, ty]: the dry, tree-free tile of the plot nearest its middle (frame tiles), or null.
+  function offerSpot(o) {
+    const F = o.fields, at = (row, k) => row[F.indexOf(k)];
+    const ok = o.tiles.filter((r) => at(r, 'plot') === 2 && at(r, 'water') === NONE && !at(r, 'trees'));
+    ok.sort((p, q) => Math.hypot(at(p, 'x') + 0.5, at(p, 'y') + 0.5) - Math.hypot(at(q, 'x') + 0.5, at(q, 'y') + 0.5));
+    return ok.length ? [at(ok[0], 'x'), at(ok[0], 'y')] : null;
+  }
+  // Spawn.chooseOffer({ offers, genesis, note }) -> Promise<{ plot, spot: [tx, ty], how: 'offered' }>: one card an offer,
+  // its ground drawn a pixel a tile; the first card's button is #spawnOwn, so a page or a check that starts on the
+  // first plot it is given still finds it.
+  function chooseOffer(opts) {
+    const { offers, genesis } = opts, doc = root.document;
+    if (!doc.getElementById('spawn-css')) { const st = doc.createElement('style'); st.id = 'spawn-css'; st.textContent = CSS; doc.head.appendChild(st); }
+    return new Promise((resolve) => {
+      const el = doc.createElement('section'); el.className = 'spawn'; el.id = 'spawn'; el.setAttribute('aria-label', 'Where you start');
+      el.innerHTML = '<h2>WHERE DOES GENESIS #' + genesis + ' START?</h2>'
+        + '<p>The map starts empty and dark: you see what your Friends see. Choose one of the plots offered to you.</p>'
+        + '<div class="say" id="spawnSay"></div><div class="row" id="spawnOffers"></div>';
+      doc.body.appendChild(el);
+      if (opts.note) el.querySelector('#spawnSay').textContent = opts.note;
+      const row = el.querySelector('#spawnOffers');
+      offers.forEach((o, n) => {
+        const F = o.fields, at = (r, k) => r[F.indexOf(k)];
+        const xs = o.tiles.map((r) => at(r, 'x')), ys = o.tiles.map((r) => at(r, 'y'));
+        const x0 = Math.min(...xs), y0 = Math.min(...ys), w = Math.max(...xs) - x0 + 1, h = Math.max(...ys) - y0 + 1;
+        const card = doc.createElement('div'); card.style.cssText = 'display:grid;gap:6px;justify-items:center';
+        const cv = doc.createElement('canvas'); cv.width = w; cv.height = h; cv.style.cssText = 'width:' + w * 8 + 'px;height:' + h * 8 + 'px;image-rendering:pixelated';
+        const c = cv.getContext('2d'), img = c.createImageData(w, h);
+        o.tiles.forEach((r) => {
+          const i = (at(r, 'y') - y0) * w + (at(r, 'x') - x0), wt = at(r, 'water');
+          let col = wt === 1 ? PAL.sea : wt === 2 ? PAL.lake : wt ? PAL.run : at(r, 'forest') ? PAL.forest : landShade(at(r, 'level'));
+          if (at(r, 'plot') === 2) col = PAL.own; else if (at(r, 'plot') === 1) col = PAL.taken;
+          img.data.set([col[0], col[1], col[2], 255], i * 4);
+        });
+        c.putImageData(img, 0, 0);
+        const b = doc.createElement('button'); b.type = 'button'; b.dataset.offer = String(o.plot); b.textContent = 'START ON PLOT ' + (n + 1);
+        if (n === 0) b.id = 'spawnOwn';
+        b.addEventListener('click', () => { el.remove(); resolve({ plot: o.plot, spot: offerSpot(o), how: 'offered' }); });
+        card.append(cv, b); row.appendChild(card);
+      });
+      if (!offers.length) el.querySelector('#spawnSay').textContent = 'no plot is free on this map';
+    });
+  }
+
   // A card that stops the arrival and says why, with the way back to the player's own page. Resolves never: the
   // game cannot start without what it names (a Genesis, our server, the chain).
   function stop(title, text) {
@@ -176,6 +224,6 @@
     return new Promise(() => {});
   }
 
-  const api = { ownPlot, spotsOn, randomSpot, plotNear, hashToken, choose, pickGenesis, stop };
+  const api = { ownPlot, spotsOn, randomSpot, plotNear, hashToken, choose, chooseOffer, offerSpot, pickGenesis, stop };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.Spawn = api;
 })(typeof window !== 'undefined' ? window : globalThis);

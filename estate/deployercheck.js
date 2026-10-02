@@ -766,8 +766,8 @@ let PROF = null, CH = null;
     GV.every(([id, t]) => new RegExp('THE CONTRACT READS ' + GWANT[id] + '$').test(t) && (id === 'places' || /^THE CONTRACT READS/.test(t))), JSON.stringify(GV));
   // amounts are hundredths in the game and whole on the page: the divisor is the game's crystalUnit
   const EV = JSON.parse(await ev(`JSON.stringify(Object.fromEntries(['startPurse','treeWood','harvCost','siloCap','footprint','cellNeeds'].map(id=>[id, deployerPage.readback(deployerPage.rows.find(x=>x.id===id)).got])))`));
-  ok('the economy reads in whole units, not hundredths: 240 crystals, 3 logs a tree, a harvester 20, silos 300 / 900 / 3000',
-    PURSE0 === 240 && EV.treeWood === 3 && EV.harvCost === 20 && EV.siloCap === '300, 900, 3000', JSON.stringify(Object.assign({ startPurseAtLoad: PURSE0 }, EV)));
+  ok('the economy reads in whole units, not hundredths: ' + require('./values.js').startPurse / require('./values.js').crystalUnit + ' crystals, 3 logs a tree, a harvester 20, silos 300 / 900 / 3000',
+    PURSE0 === require('./values.js').startPurse / require('./values.js').crystalUnit && EV.treeWood === 3 && EV.harvCost === 20 && EV.siloCap === '300, 900, 3000', JSON.stringify(Object.assign({ startPurseAtLoad: PURSE0 }, EV)));
   ok('footprint and the cell\'s operator table are read, not blank', /keep 1/.test(EV.footprint) && EV.cellNeeds === 'none at any level', JSON.stringify(EV));
   const SW = JSON.parse(await ev(`JSON.stringify(['tradeCrystals','tradeItems','tradeBuildings','tradeBase','multiPartner','whitelistOpen'].map(id=>[id, !!deployerPage.val[id]]))`));
   ok('ruling 29: the four trade switches start ON; multiple partnerships and the open whitelist start OFF',
@@ -776,8 +776,10 @@ let PROF = null, CH = null;
   const SWROWS = JSON.parse(await ev(`JSON.stringify([...document.querySelectorAll('#out [data-sweep]')].map(e=>+e.dataset.sweep))`));
   const WANT_ROWS = [5, 6, 7, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 34, 35, 36, 37, 38, 43];
   // row 23 is question 22's table, DECIDED by ruling 76 (bd99132 / aa0d193) - it was the one line still PROPOSED
+  // row 9, the starting purse, was moved to 100.00 by the deployer on 2026-10-01, a decision with no ruling number yet
   const badSweep = PROP.map((t, i) => [SWROWS[i], t]).filter(([n, t]) => n === 23
     ? !/^DECIDED, RULING 76 \(SWEEP ROW 23\): /.test(t)
+    : n === 9 ? !/^DECIDED, BY THE DEPLOYER 2026-10-01 \(SWEEP ROW 9\): 100\.00 /.test(t)
     : !new RegExp('^DECIDED, RULING 64 \\(SWEEP ROW ' + n + '\\): ').test(t));
   ok('rulings 64 and 76: every sweep line says DECIDED and cites its row - RULING 64, and row 23 (question 22) RULING 76; none says PROPOSED (' + PROP.length + ' lines)',
     PROP.length >= 30 && badSweep.length === 0, JSON.stringify(badSweep.slice(0, 3)));

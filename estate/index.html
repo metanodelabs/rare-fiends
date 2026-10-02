@@ -621,6 +621,33 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
   // `full` is THE PLAYER'S MAP: { M, home } - the generator's whole island, not a window cut round two plots, with
   // every plot on it a base's ground and none of them built on, every tree, seam, ruin and stream as the generator
   // made them, and the player's own plot at the origin. Without it, the two-base test window it always was.
+  // RUNNING WATER on one tile: a lane through it from the edge each upstream neighbour enters by, through the centre,
+  // out of the edge it flows over; a source with nothing upstream starts at its centre; where the tile it pours into
+  // is lower, that edge is a fall. `cell(dx, dy)` is the tile (0, 0) or a neighbour as { wet, running, flowDir,
+  // level }, or null where it is off the island or not known (under the server's fog a neighbour may not have
+  // arrived yet: it is asked again when it does). The one rule for the whole island (buildWorld) and for the tiles
+  // the server's fog hands over a chunk at a time (fogTerrain).
+  const LANE_HW = 0.12;
+  const TILE_TREES = [[-0.22, -0.2], [0.21, -0.12], [-0.04, 0.23]];   // where a tile's trees stand, the generator counting them per tile
+  function waterLanes(x, y, k, cell, N8, lo) {
+    const HW = LANE_HW, L = [], falls = [], me = cell(0, 0);
+    const lane = (dx, dy, into) => {                  // into: the lane runs from centre to the edge (dx,dy); else from that edge to centre
+      const ex = x + dx * 0.5, ey = y + dy * 0.5, fx = into ? dx : -dx, fy = into ? dy : -dy;
+      return dx ? [Math.min(x, ex), y - HW, Math.max(x, ex), y + HW, fx, fy] : [x - HW, Math.min(y, ey), x + HW, Math.max(y, ey), fx, fy];
+    };
+    const f = me.flowDir, [nx, ny] = f >= 0 && f < 4 ? N8[f] : [0, 0];
+    if (nx || ny) {
+      L.push(lane(nx, ny, true));
+      const there = cell(nx, ny), lvHere = me.level - lo, lvThere = there && !there.wet ? there.level - lo : 0;
+      if (lvThere < lvHere) falls.push({ tile: k, nx, ny, a: nx ? [x + nx * 0.5, y - HW] : [x - HW, y + ny * 0.5], b: nx ? [x + nx * 0.5, y + HW] : [x + HW, y + ny * 0.5] });
+    }
+    for (let d = 0; d < 4; d++) {                      // whoever flows into this tile enters by the shared edge
+      const [ex, ey] = N8[d], u = cell(ex, ey);
+      if (u && u.running && u.flowDir >= 0 && u.flowDir < 4 && N8[u.flowDir][0] === -ex && N8[u.flowDir][1] === -ey) L.push(lane(ex, ey, false));
+    }
+    if (!L.length) L.push([x - HW, y - HW, x + HW, y + HW, 0, 1]);   // still water with no current read: a pool
+    return { lanes: L, falls };
+  }
   function buildWorld(seed, players, full) {
     const M = (full && full.M) || MapGen.generate({ seed, players });
     const inb = (x, y) => x >= 0 && y >= 0 && x < M.W && y < M.H;
@@ -697,7 +724,7 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
       if (nearBase) continue;
       // the generator counts trees per tile; the estate wants one object each
       for (let n = 0; n < M.trees[i]; n++) {
-        const [dx, dy] = [[-0.22, -0.2], [0.21, -0.12], [-0.04, 0.23]][n % 3];
+        const [dx, dy] = TILE_TREES[n % 3];
         wtrees.push({ x: x + dx, y: y + dy, tile: k, n });
       }
     }
@@ -706,31 +733,16 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
     // flows over; a source with nothing upstream starts at its centre. Where the tile it pours
     // into is lower, that edge is a fall.
     const running = (i) => M.water[i] === MapGen.WATER.RIVER || M.water[i] === MapGen.WATER.CREEK;
-    const water = {}, falls = [], waterSites = [], HW = 0.12;
-    const lane = (x, y, dx, dy, into) => {           // into: the lane runs from centre to the edge (dx,dy); else from that edge to centre
-      const ex = x + dx * 0.5, ey = y + dy * 0.5, fx = into ? dx : -dx, fy = into ? dy : -dy;
-      return dx ? [Math.min(x, ex), y - HW, Math.max(x, ex), y + HW, fx, fy] : [x - HW, Math.min(y, ey), x + HW, Math.max(y, ey), fx, fy];
-    };
+    const water = {}, falls = [], waterSites = [];
     for (let my = y0; my <= y1; my++) for (let mx = x0; mx <= x1; mx++) {
       if (!inb(mx, my)) continue;
       const i = at(mx, my);
       if (!running(i)) continue;
-      const x = mx + 0.5 - ox, y = my + 0.5 - oy, k = tileKey(x, y), L = [];
-      const f = M.flowDir[i], [nx, ny] = f >= 0 && f < 4 ? M.N8[f] : [0, 0];
-      if (nx || ny) {
-        L.push(lane(x, y, nx, ny, true));
-        const j = inb(mx + nx, my + ny) ? at(mx + nx, my + ny) : -1;
-        const lvHere = M.level[i] - lo, lvThere = j >= 0 && !wet(j) ? M.level[j] - lo : 0;
-        if (lvThere < lvHere) falls.push({ tile: k, nx, ny, a: nx ? [x + nx * 0.5, y - HW] : [x - HW, y + ny * 0.5], b: nx ? [x + nx * 0.5, y + HW] : [x + HW, y + ny * 0.5] });
-      }
-      for (let d = 0; d < 4; d++) {                    // whoever flows into this tile enters by the shared edge
-        const [ex, ey] = M.N8[d], ux = mx + ex, uy = my + ey;
-        if (!inb(ux, uy)) continue;
-        const u = at(ux, uy), g = M.flowDir[u];
-        if (running(u) && g >= 0 && g < 4 && M.N8[g][0] === -ex && M.N8[g][1] === -ey) L.push(lane(x, y, ex, ey, false));
-      }
-      if (!L.length) L.push([x - HW, y - HW, x + HW, y + HW, 0, 1]);   // still water with no current read: a pool
-      water[k] = L; waterSites.push(k);
+      const x = mx + 0.5 - ox, y = my + 0.5 - oy, k = tileKey(x, y);
+      const cell = (dx, dy) => { if (!inb(mx + dx, my + dy)) return null; const j = at(mx + dx, my + dy);
+        return { wet: wet(j), running: running(j), flowDir: M.flowDir[j], level: M.level[j] }; };
+      const w = waterLanes(x, y, k, cell, M.N8, lo);
+      falls.push(...w.falls); water[k] = w.lanes; waterSites.push(k);
     }
     // a plot's own tiles map onto the estate's local coordinates by a whole-tile offset
     const conv = (p) => Object.assign({}, p, { bx: p.cx - ox, by: p.cy - oy });
@@ -784,6 +796,9 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
     const asked = Number(Q.get('genesis'));
     const genesis = tokens.includes(asked) ? asked : await Spawn.pickGenesis({ tokens, bases });
     if (asked !== genesis) { const u = new URL(location.href); u.searchParams.set('genesis', String(genesis)); history.replaceState(null, '', u); }
+    // UNDER THE SERVER'S FOG (serve.py --fog: the game answers { fog: true, chunk } and no seed) the page never holds the
+    // island: it is handed the ground its player may see, a chunk at a time (THE FOG, CLIENT, below)
+    if (game && game.fog) return playerOpenFog({ address, genesis, tokens, players, serverOk, local: !!me.local, api, chunk: game.chunk || 16 });
     const M = MapGen.generate({ seed, players });
     let home = bases.get(genesis), spawn = null, how = 'restored';
     if (home == null) {
@@ -822,12 +837,145 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
     else return;
     box.insertBefore(b, box.querySelector('a'));
   }
+  // ---------- THE FOG, CLIENT (serve.py --fog; estate/visibility.py is the server half and says the rules) ----------
+  // The page receives only what its player may see, and draws only that:
+  //   GET  api/fog/me?genesis=N      this wallet's bases (the buyer of a Genesis takes its base: read now)
+  //   GET  api/fog/spawn             with no base: the plots offered - and only those are shown (Spawn.chooseOffer)
+  //   GET  api/fog/view?base=B       every FOG_VIEW_MS: the fog over the frame (0 black, 1 dim, 2 live, base64 a byte a
+  //                                  tile), this base's Friends and harvesters where the server has them, other bases'
+  //                                  Friends, harvesters and buildings on LIVE ground only, waypoints, terrainRev, and
+  //                                  the game's fog settings
+  //   GET  api/fog/terrain?base=&i=&j=  a chunk x chunk piece of ground: every field -1 where it is not revealed
+  //   POST api/fog/pos {base, units, harvesters}  every nextMs: where this base's Friends and harvesters stand; one the
+  //                                  server will not take comes back corrected and is put where the server has it; a
+  //                                  429 waits its retryMs
+  //   GET  api/fog/news              the attacks, by name only, for the announcements
+  // THE FRAME is the server's: tiles from the centre of the player's own plot, a tile's centre at t + 0.5 - which is
+  // the frame this page always drew in (`ox = A.cx`), so nothing is translated: WORLDGEN.ox and .oy are 0.
+  // THE CLOCK is the server's: what is live, dim or black is the server's answer at its own time (wall seconds), never
+  // this page's game clock - a paused base does not hold its ground live.
+  const FOG_VIEW_MS = 2000;                            // how often the view is asked for: the server's spec ("every 2 s")
+  const FOREIGN = -1;                                  // owner of ground that is another plot's: whose, the fog does not say
+  // the chunks covering a view's fog box and its plot, fetched and laid out as tile records { x, y, level, water, ... }
+  async function fogChunks(api, base, view, chunk, have) {
+    const boxes = [];
+    if (view && view.fog) boxes.push([view.fog.x0, view.fog.y0, view.fog.x0 + view.fog.w - 1, view.fog.y0 + view.fog.h - 1]);
+    if (view && view.plot) boxes.push([view.plot.x0, view.plot.y0, view.plot.x0 + view.plot.w - 1, view.plot.y0 + view.plot.h - 1]);
+    const want = new Set();
+    boxes.forEach(([x0, y0, x1, y1]) => { for (let j = Math.floor(y0 / chunk); j <= Math.floor(y1 / chunk); j++) for (let i = Math.floor(x0 / chunk); i <= Math.floor(x1 / chunk); i++) want.add(i + ',' + j); });
+    const out = { tiles: [], seams: [], terminals: [] };
+    for (const ij of want) {
+      if (have && have.has(ij)) continue;
+      const [i, j] = ij.split(',').map(Number), c = await api('api/fog/terrain?base=' + base + '&i=' + i + '&j=' + j);
+      if (!c || !c.ok) continue;
+      const F = Object.keys(c.tiles), n = c.size * c.size;
+      for (let k = 0; k < n; k++) {
+        if (c.tiles.level[k] < 0) continue;
+        const r = { x: c.x0 + (k % c.size), y: c.y0 + Math.floor(k / c.size) };
+        F.forEach((f) => { r[f] = c.tiles[f][k]; });
+        out.tiles.push(r);
+      }
+      out.seams.push(...(c.seams || [])); out.terminals.push(...(c.terminals || []));
+      if (have) have.add(ij);
+    }
+    return out;
+  }
+  async function playerOpenFog(o) {
+    const { api } = o;
+    await api('api/fog/me?genesis=' + o.genesis);     // a Genesis bought from someone brings its base with it: asked now
+    const heads = (await api('api/record')).records || [];
+    const held = heads.find(h => h.genesis === o.genesis);
+    let home = held ? held.id : null, spawn = null, how = 'restored', view = null, plot = null, ground = { tiles: [], seams: [], terminals: [] };
+    if (home == null) {
+      let note = null; try { note = sessionStorage.getItem('rf.spawn.note'); sessionStorage.removeItem('rf.spawn.note'); } catch (_) {}
+      const sp = await api('api/fog/spawn'), offers = (sp && sp.offers) || [];
+      const c = await Spawn.chooseOffer({ offers, genesis: o.genesis, note });
+      const off = offers.find(x => x.plot === c.plot);
+      home = c.plot; spawn = c.spot; how = 'offered';
+      plot = { w: off.w, h: off.h, x0: off.x0, y0: off.y0 };
+      const F = off.fields;                            // what an offer carries of the ground: x, y, level, water, forest, trees, plot
+      ground.tiles = off.tiles.map(r => Object.fromEntries(F.map((f, i) => [f, r[i]])));
+    } else {
+      view = await api('api/fog/view?base=' + home);
+      if (!view || !view.ok) return Spawn.stop('YOUR BASE COULD NOT BE READ', 'Our server did not hand over your base. Try again in a moment.');
+      plot = view.plot;
+      ground = await fogChunks(api, home, view, o.chunk, null);
+    }
+    return Object.assign({}, o, { seed: null, M: null, home, spawn, how, heads, fog: { view, plot, ground, chunk: o.chunk } });
+  }
+  // The island under the fog, in buildWorld's shape so everything that reads WORLDGEN reads it unchanged - and empty
+  // but for what the server handed over. fogTerrain lays every later chunk into it, and into the page's own tables.
+  function buildFogWorld(P) {
+    const W = { M: { W: null, H: null }, seed: null, tiles: [], hill: {}, landKeys: new Set(), trees: [], claimed: new Map(), owner: new Map(),
+      ox: 0, oy: 0, water: {}, falls: [], waterSites: [], seams: [], ruins: [{ id: 0, x: 0, y: 0, r: 0, terminals: [] }], ruinSet: new Set(),
+      bases: [{ id: P.home, bx: 0, by: 0, cx: 0, cy: 0, x: P.fog.plot.x0, y: P.fog.plot.y0, w: P.fog.plot.w, h: P.fog.plot.h }],
+      full: true, home: P.home, fog: true, T: new Map(), lo: null };
+    W.ruinAt = (x, y) => W.ruinSet.has(tileKey(x, y));
+    return W;
+  }
+  let FOG_READY = false;                               // the page's own tables exist: from then on a chunk is laid into them as well
+  // Lay ground into the world: new land becomes a tile (and its trees), a known tile takes the fields a later chunk
+  // carries (an offer carries only some), running water is worked out again for every tile touched and its four
+  // neighbours, and a seam or a terminal not seen before is added. Returns how many tiles of land were new.
+  function fogTerrain(ground) {
+    const Wd = WORLDGEN, T = Wd.T, WA = MapGen.WATER, home = PLAYER.home;
+    const wetv = (w) => w === WA.SEA || w === WA.LAKE, runv = (w) => w === WA.RIVER || w === WA.CREEK;
+    if (Wd.lo == null) { const lv = ground.tiles.filter(r => r.level >= 0 && !wetv(r.water)).map(r => r.level); Wd.lo = lv.length ? Math.min(...lv) : 0; }
+    const touched = []; let added = 0;
+    ground.tiles.forEach(r => {
+      if (!(r.level >= 0)) return;
+      const x = r.x + 0.5, y = r.y + 0.5, k = tileKey(x, y), was = T.get(k);
+      const rec = Object.assign({ flowDir: -1, ruin: 0, trees: 0, forest: 0 }, was || {}, r);
+      T.set(k, rec); touched.push([r.x, r.y]);
+      if (!wetv(rec.water) && !(was && !wetv(was.water))) {
+        const t = { x, y }; Wd.tiles.push(t); Wd.landKeys.add(k); added++;
+        if (FOG_READY) { tiles.push(t); TILES.set(x, y, TILES.LAND); }
+        for (let n = 0; n < (rec.trees || 0); n++) { const [dx, dy] = TILE_TREES[n % 3], tr = { x: x + dx, y: y + dy, tile: k, n };
+          Wd.trees.push(tr); if (FOG_READY) trees.push(treeOf(tr, trees.length)); }
+      }
+      const lv = wetv(rec.water) ? 0 : Math.max(0, rec.level - Wd.lo);
+      if (lv > 0) Wd.hill[k] = lv; else delete Wd.hill[k];
+      if (FOG_READY) levelSet(x, y, lv);
+      if (rec.plot === 2) { Wd.owner.set(k, home); Wd.claimed.set(k, home); } else if (rec.plot === 1 && !Wd.owner.has(k)) Wd.owner.set(k, FOREIGN);
+      if (rec.ruin > 0) Wd.ruinSet.add(k);
+    });
+    // running water, again for every tile touched and the four round it: a neighbour that has just arrived changes a lane
+    const redo = new Set();
+    touched.forEach(([tx, ty]) => [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]].forEach(([dx, dy]) => redo.add((tx + dx) + ',' + (ty + dy))));
+    redo.forEach(c => {
+      const [tx, ty] = c.split(',').map(Number), x = tx + 0.5, y = ty + 0.5, k = tileKey(x, y), me = T.get(k);
+      if (!me || !runv(me.water)) return;
+      const cell = (dx, dy) => { const q = T.get(tileKey(x + dx, y + dy)); return q ? { wet: wetv(q.water), running: runv(q.water), flowDir: q.flowDir, level: q.level } : null; };
+      const w = waterLanes(x, y, k, cell, MapGen.N8, Wd.lo);
+      if (!Wd.water[k]) Wd.waterSites.push(k);
+      Wd.water[k] = w.lanes;
+      for (let i = Wd.falls.length - 1; i >= 0; i--) if (Wd.falls[i].tile === k) Wd.falls.splice(i, 1);
+      Wd.falls.push(...w.falls);
+      if (FOG_READY) { FALLS_AT.delete(k); if (w.falls.length) FALLS_AT.set(k, w.falls.slice()); }
+    });
+    const seamKeys = new Set(Wd.seams.map(n => tileKey(n.x, n.y)));
+    ground.seams.forEach(q => {
+      const n = { x: q.x + 0.5, y: q.y + 0.5, t0: q.t0, wild: !!q.wild, plot: q.mine ? home : null }, k = tileKey(n.x, n.y);
+      if (seamKeys.has(k)) return; seamKeys.add(k);
+      Wd.seams.push(n); if (FOG_READY) { const c = Object.assign({}, n); fogSceneSeam(c); nodes.push(c); }
+    });
+    const terms = Wd.ruins[0].terminals, termKeys = new Set(terms.map(t => tileKey(t.x, t.y)));
+    ground.terminals.forEach(q => { const t = { x: q.x + 0.5, y: q.y + 0.5 }; if (!termKeys.has(tileKey(t.x, t.y))) { termKeys.add(tileKey(t.x, t.y)); terms.push(t); } });
+    if (FOG_READY && added) {
+      NAV_TILES = null;                                // the walkable ground round the plot is laid again (navKey moves with tiles.length)
+      Wd.tiles.slice(-added).forEach(t => { MAP_BOUNDS.x0 = Math.min(MAP_BOUNDS.x0, t.x); MAP_BOUNDS.x1 = Math.max(MAP_BOUNDS.x1, t.x);
+        MAP_BOUNDS.y0 = Math.min(MAP_BOUNDS.y0, t.y); MAP_BOUNDS.y1 = Math.max(MAP_BOUNDS.y1, t.y); });
+    }
+    return added;
+  }
   const PLAYER = PLAY ? await playerOpen() : null;
   // The island the game plays on. The player's: the whole generated map (above). The test switch, ?world=1: a window
   // round two plots with two bases built on them - a test of drawing two bases, never how a game starts.
-  const WORLDGEN = PLAY ? buildWorld(PLAYER.seed, PLAYER.players, { M: PLAYER.M, home: PLAYER.home })
+  const WORLDGEN = PLAY && PLAYER.fog ? buildFogWorld(PLAYER) : PLAY ? buildWorld(PLAYER.seed, PLAYER.players, { M: PLAYER.M, home: PLAYER.home })
     : Q.get('world') === '1' && window.MapGen
     ? buildWorld(parseInt(Q.get('seed') || '7', 10), parseInt(Q.get('players'), 10) || MapGen.MAP_DEFAULT.players) : null;
+  const FOG_SRV = !!(WORLDGEN && WORLDGEN.fog);        // THE FOG, CLIENT: on - the ground is the server's, a chunk at a time
+  if (FOG_SRV) fogTerrain(PLAYER.fog.ground);
 
   const HILL = WORLDGEN ? WORLDGEN.hill
     : { '-1.5,2.5': 1, '-1.5,1.5': 2, '-0.5,1.5': 3 };   // steps up from the west to the summit
@@ -841,6 +989,8 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
     Object.entries(HILL).forEach(([k, v]) => { const [x, y] = k.split(',').map(Number), ix = Math.floor(x) + 512, iy = Math.floor(y) + 512;
       if (ix >= 0 && iy >= 0 && ix < 1024 && iy < 1024) g[iy * 1024 + ix] = v; });
     return g; })();
+  const levelSet = (x, y, v) => { const ix = Math.floor(x) + 512, iy = Math.floor(y) + 512;   // THE FOG, CLIENT: ground arrives a chunk at a time
+    if (ix >= 0 && iy >= 0 && ix < 1024 && iy < 1024) LEVEL_GRID[iy * 1024 + ix] = v; };
   const levelAt = (x, y) => { const ix = Math.floor(x) + 512, iy = Math.floor(y) + 512;
     return ix < 0 || iy < 0 || ix >= 1024 || iy >= 1024 ? 0 : LEVEL_GRID[iy * 1024 + ix]; };
   const heightAt = (x, y) => levelAt(x, y) * STEP;
@@ -878,7 +1028,8 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
   // the way.
   const SDK = window.FriendSDK;
   const PROP_ART_K = 0.58;            // a prop's 240px art is drawn at this many pixels a pixel - trees too
-  const NAV = { mode: '', why: '', key: null, at: -1, world: null, nav: null, s: 1, ox: 0, oy: 0, R: 7, SPEED: 170, builds: 0 };
+  const WALK_UNITS = V.walkTilesPerSec * TILE;        // walking pace in the toolkit's units a second: values.js's, the one copy the server's fog reads too
+  const NAV = { mode: '', why: '', key: null, at: -1, world: null, nav: null, s: 1, ox: 0, oy: 0, R: 7, SPEED: WALK_UNITS, builds: 0 };
   const toTk = (x, y) => [(x - NAV.ox) * TILE * NAV.s, (y - NAV.oy) * TILE * NAV.s];
   const fromTk = (p) => [p[0] / (TILE * NAV.s) + NAV.ox, p[1] / (TILE * NAV.s) + NAV.oy];
   const navOpen = (x, y) => NAV.mode === 'toolkit' && SDK.isWorldWalkable(NAV.world, toTk(x, y), NAV.R);
@@ -912,7 +1063,7 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
     const P = SDK.PROJECTION;
     // 0.999: the plane's edge is a hard limit in validateWorld, and a float a hair over it is a refusal
     NAV.s = Math.min(1, P.width / ((x1 - x0) * TILE), P.height / ((y1 - y0) * TILE)) * 0.999;
-    NAV.ox = x0; NAV.oy = y0; NAV.R = 7 * NAV.s; NAV.SPEED = 170 * NAV.s;
+    NAV.ox = x0; NAV.oy = y0; NAV.R = 7 * NAV.s; NAV.SPEED = WALK_UNITS * NAV.s;
     const u = TILE * NAV.s, W = (x1 - x0) * u, H = (y1 - y0) * u;
     const rect = (x, y, w, h) => {                   // tiles in, the toolkit's units out, clipped to the plane
       const ax = Math.max(0, (x - x0) * u), ay = Math.max(0, (y - y0) * u);
@@ -1319,6 +1470,8 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
   const groundName = (o) => {
     if (o === HOME) return 'your own ground';
     if (o === UNCLAIMED) return 'unclaimed ground — a cell can take it';
+    if (FOG_SRV && o === FOREIGN) return "another player's ground";
+    if (FOG_SRV && FOG_OTHERS.has(o)) { const e = FOG_OTHERS.get(o); return (e.name || (e.owner ? e.owner.slice(0, 6) + '…' + e.owner.slice(-4) : 'base ' + o)) + "'s ground"; }
     const g = actors.find((a) => a.kind === 'genesis' && a.base === o);
     return (g ? g.name : 'base ' + o) + "'s ground";
   };
@@ -1991,7 +2144,7 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
     + ' tiles from the cell: meant to arrive at tier ' + i.meant + ', the ladder ' + JSON.stringify(CELL_REACH) + ' reaches it at tier ' + i.reachedAt));
   // World mode always has seams: the harvester is the point of the clip, and it has nothing to
   // drive to without them. ?seams=1 still controls the single-estate map.
-  const nodes = WORLDGEN ? WORLDGEN.seams.map(n => ({ ...n })) : !SEAMS ? [] : SEAM_PLAN.map(n => ({ ...n }));
+  const nodes = WORLDGEN ? WORLDGEN.seams.map(n => ({ ...n, t00: n.t0 })) : !SEAMS ? [] : SEAM_PLAN.map(n => ({ ...n }));
   /* ---------- forests: groves of trees that Friends cut down for wood ---------- */
   // Level-1 buildings are built of logs, and logs come from here. A Friend sent to a tree walks
   // over and chops; each tree gives TREE_WOOD logs, falls, leaves a stump, and grows back. When a
@@ -2003,13 +2156,19 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
   // like GROVES above. How many trees a grove has is this list's length, never a number typed beside it.
   const GROVE_TREES = [[-0.22, -0.2], [0.21, -0.12], [-0.04, 0.23]];
   const trees = [];
+  // THE FOG, CLIENT: the scene's trees and seams are kept by their TILE (grove key and n), not by their place in a list -
+  // the list grows in whatever order the ground arrives - and a saved state waits here for its tree or seam to arrive
+  const FOG_SCENE = { trees: new Map(), seams: new Map() };
+  function treeOf(tr, i) {
+    const o = { x: tr.x, y: tr.y, grove: tr.tile, n: tr.n, wood: TREE_WOOD, chop: 0, felled: 0, size: 0.85 + (((i) * 0.37) % 1) * 0.3, flip: i % 2 === 1 };
+    const s = FOG_SCENE.trees.get(tr.tile + '#' + tr.n); if (s) Object.assign(o, s);
+    return o;
+  }
+  function fogSceneSeam(n) { n.t00 = n.t0; const s = FOG_SCENE.seams.get(tileKey(n.x, n.y)); if (s) Object.assign(n, s); }
   if (WORLDGEN) {
     // the generator already placed every tree on the island; it counts them per tile and the
     // world builder has expanded them into one object each
-    WORLDGEN.trees.forEach((tr, i) => trees.push({
-      x: tr.x, y: tr.y, grove: tr.tile, wood: TREE_WOOD, chop: 0, felled: 0,
-      size: 0.85 + (((i) * 0.37) % 1) * 0.3, flip: i % 2 === 1,
-    }));
+    WORLDGEN.trees.forEach((tr, i) => trees.push(treeOf(tr, i)));
   } else GROVES.forEach(([gx, gy], gi) => {
     GROVE_TREES.forEach(([ox, oy], k) => trees.push({
       x: gx + ox, y: gy + oy, grove: gi, wood: TREE_WOOD, chop: 0, felled: 0,
@@ -2246,6 +2405,7 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
     WORLDGEN.claimed.forEach((id, k) => {
       if (live.indexOf(id) < 0) return;
       const c = k.split(','), sx = +c[0], sy = +c[1];
+      if (fogStateAt(sx, sy) < 2) return;               // THE FOG, CLIENT: the claim glitches only where it is seen
       things.push({ d: zsort(sx, sy) - 0.54, f: () => claimTile(sx, sy, t) });
     });
   }
@@ -2264,7 +2424,9 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
     };
     // the four edges of a tile, each with the neighbour it faces
     const EDGES = [[0, 1, 0, -1], [1, 2, 1, 0], [2, 3, 0, 1], [3, 0, -1, 0]];
+    const a0 = ctx.globalAlpha;                        // THE FOG, CLIENT: dim ground is drawn faded, tile by tile
     sorted.forEach(t => {
+      ctx.globalAlpha = a0 * fogAlpha(t.x, t.y);
       const q = tileQuad(t.x, t.y, lift(t));
       EDGES.forEach(([i, j, nx, ny]) => {
         if (isLand(t.x + nx, t.y + ny)) return;
@@ -2281,6 +2443,7 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
       });
     });
     sorted.forEach(t => {
+      ctx.globalAlpha = a0 * fogAlpha(t.x, t.y);
       const { sx, sy } = tileTop(t.x, t.y, '#1a1d1a', lift(t));
       ctx.strokeStyle = 'rgba(255,255,255,.13)'; ctx.lineWidth = 1; ctx.stroke();
       ctx.fillStyle = 'rgba(255,255,255,.4)';
@@ -2289,6 +2452,7 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
     // bright rim along the far edges
     ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1;
     sorted.forEach(t => {
+      ctx.globalAlpha = a0 * fogAlpha(t.x, t.y);
       const q = tileQuad(t.x, t.y, lift(t)), [cx0, cy0] = project(t.x, t.y);
       [[0, 1, 0, -1], [1, 2, 1, 0], [2, 3, 0, 1], [3, 0, -1, 0]].forEach(([i, j, nx, ny]) => {
         if (isLand(t.x + nx, t.y + ny)) return;
@@ -2297,6 +2461,7 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
         ctx.beginPath(); ctx.moveTo(q[i][0], q[i][1]); ctx.lineTo(q[j][0], q[j][1]); ctx.stroke();
       });
     });
+    ctx.globalAlpha = a0;
   }
   function outline(pts, fill) {
     ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]);
@@ -3617,7 +3782,8 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
   }
   function pick(px, py) {
     let best = null, bd = 22 / SCALE;
-    actors.forEach(a => { const [sx, sy0] = project(a.x, a.y), sy = sy0 - heightAt(a.x, a.y);
+    [...actors, ...(FOG_SRV ? [...OTHER_UNITS, ...OTHER_HARV] : [])].forEach(a => { if (fogStateAt(a.x, a.y) < 2) return;   // THE FOG, CLIENT: nothing unseen is tappable
+      const [sx, sy0] = project(a.x, a.y), sy = sy0 - heightAt(a.x, a.y);
       const d = Math.hypot(sx - px, sy - py - 6); if (d < bd) { bd = d; best = a; } });
     return best;
   }
@@ -3685,7 +3851,9 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
     if (!selected && !hit) return;                     // nobody to send anywhere (a wallet with no activated Friend)
     // M13 item 1: anything of another player's base - its Friends, its Genesis - is a target, not yours to
     // select. A tap on it opens the attack chooser for that base (decision 2: every base is a target).
-    if (hit && SHARED && hit.base != null && hit.base !== HOME && openAttack(hit.base)) return;
+    // THE FOG, CLIENT: a harvester of another base's in sight is a target of its own (the server's {depot, n})
+    if (hit && SHARED && hit.base != null && hit.base !== HOME) { ATTACK_TARGET = hit.kind === 'harvester' ? { depot: hit.depot, n: hit.n } : null; if (openAttack(hit.base)) return; }
+    if (hit && (hit.kind === 'harvester' || hit.kind === 'other')) { flashNote(hit.kind === 'harvester' ? 'another player\'s harvester - whose, you cannot tell from here' : 'another player\'s Friend'); return; }   // never selected as one of yours
     if (hit) { selected = hit; sync(); return; }
     // tap the watchtower to send the selected Friend up, or bring them down
     // walls first: a wall is hit on its own edge (wallHit), whichever axis it lies on
@@ -3693,7 +3861,7 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
     // Friends - a tap on it opens the attack chooser for that base, as a tap on one of its Friends does.
     { const w = wallHit(px, py);
       if (w && SHARED && !ofBase(HOME)(w) && openAttack(w.base)) return;
-      const t = buildings.find(x => x.type === 'tower' && !ofBase(HOME)(x) && (([tx2, ty2]) => Math.hypot(tx2 - px, ty2 - py - 30 / SCALE) < 26 / SCALE)(project(x.x, x.y)));
+      const t = buildings.find(x => x.type === 'tower' && !ofBase(HOME)(x) && fogStateAt(x.x, x.y) === 2 && (([tx2, ty2]) => Math.hypot(tx2 - px, ty2 - py - 30 / SCALE) < 26 / SCALE)(project(x.x, x.y)));
       if (t && SHARED && openAttack(t.base)) return; }
     for (const b of [wallHit(px, py)].filter(Boolean)) {
       {
@@ -3747,7 +3915,9 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
       if (!fits(HOME, haul)) { flashNote(fullWhy(HOME, haul)); showCrystals(); return; }
       bank(HOME, haul); n.t0 = now(); showCrystals();
     }});
-    if (!onLand(wx, wy)) return;
+    // THE FOG, CLIENT: black ground is not known land, and a Friend may still be sent into it - it walks as far as the
+    // ground it knows goes, and sees more as it goes
+    if (!onLand(wx, wy) && !(FOG_SRV && fogStateAt(wx, wy) === 0)) return;
     selected.job = null;                                // tapping open ground stands a chopper down
     [selected.tx, selected.ty] = snapSpot(wx, wy);       // to the middle of the quadrant tapped: always on a spot
   }
@@ -4441,7 +4611,14 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
   // tile it draws, and the player's map has hundreds of falls - the scan was 44% of a frame, measured
   const FALLS_AT = new Map();
   FALLS.forEach(f => { if (!FALLS_AT.has(f.tile)) FALLS_AT.set(f.tile, []); FALLS_AT.get(f.tile).push(f); });
+  FOG_READY = true;                                    // THE FOG, CLIENT: every table a chunk is laid into exists from here
   function drawColumn(tl, t) {
+    const a0 = ctx.globalAlpha; ctx.globalAlpha = a0 * fogAlpha(tl.x, tl.y);   // THE FOG, CLIENT: dim ground is drawn faded
+    try { drawColumnBody(tl, t); } finally { ctx.globalAlpha = a0; }
+  }
+  const FOG_DIM = 0.35;                                // how strongly dim ground is drawn: a client belief about a screen, not a game number
+  const fogAlpha = (x, y) => (fogStateAt(x, y) === 1 ? FOG_DIM : 1);
+  function drawColumnBody(tl, t) {
     const lv = levelAt(tl.x, tl.y), z = lv * STEP, drop = 22 / SCALE;
     const q = tileQuad(tl.x, tl.y), [cx0, cy0] = project(tl.x, tl.y);
     const EDGES = [[0, 1, 0, -1], [1, 2, 1, 0], [2, 3, 0, 1], [3, 0, -1, 0]];
@@ -4594,7 +4771,11 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
     // which a screen shows a few hundred. The box is the world under the canvas, padded for raised ground.
     const VIEW = PLAY && !focus && !xf ? viewBox() : null;
     const seen = (x, y, pad) => !VIEW || (x >= VIEW.x0 - (pad || 0) && x <= VIEW.x1 + (pad || 0) && y >= VIEW.y0 - (pad || 0) && y <= VIEW.y1 + (pad || 0));
-    const near = (x, y, pad) => (!focus || (!focus.solo && Math.hypot(x - focus.x, y - focus.y) <= focus.r + (pad || 0))) && seen(x, y, pad);
+    // THE FOG, CLIENT: a thing is drawn only on LIVE ground (fogStateAt 2); the ground itself on any ground that is not
+    // black (`ground`), faded where it is dim. Off the fog every tile is live.
+    if (settle && FOG_SRV) fogOthersStep();
+    const near = (x, y, pad) => (!focus || (!focus.solo && Math.hypot(x - focus.x, y - focus.y) <= focus.r + (pad || 0))) && seen(x, y, pad) && fogStateAt(x, y) === 2;
+    const ground = (x, y, pad) => (!focus || (!focus.solo && Math.hypot(x - focus.x, y - focus.y) <= focus.r + (pad || 0))) && seen(x, y, pad) && fogStateAt(x, y) > 0;
     if (focus && focus.solo) {
       // one thing on its own: a small plinth under it, following it, and nothing else of the map
       studioPlinth(focus.x, focus.y, 0.24);
@@ -4602,14 +4783,14 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
       ctx.restore();
       return;
     }
-    const plan = focus || VIEW ? tiles.filter(tl => near(tl.x, tl.y)) : null;
+    const plan = focus || VIEW ? tiles.filter(tl => ground(tl.x, tl.y)) : null;
     drawGround(plan, focus ? (x, y) => plan.some(tl => Math.abs(tl.x - x) < 0.5 && Math.abs(tl.y - y) < 0.5) : null);
     LAST_VIEW = VIEW ? { box: VIEW, tiles: plan.length } : null;
     buildings.filter(b => b.type === 'collectionDepot' && !levelAt(b.x, b.y) && near(b.x, b.y)).forEach(drawTrack);
     if (!WORLDGEN && near(-0.5, 2.5) && onLand(-0.5, 2.5)) drawStream(t);   // the stream is land; a generator on it just adds its wheel
     // wild seams still outside your border sit on a ghost tile, so you can see what is worth reaching
     nodes.forEach(n => {
-      if (focus || onLand(n.x, n.y)) return;
+      if (focus || onLand(n.x, n.y) || fogStateAt(n.x, n.y) < 2) return;
       const q = tileQuad(n.x, n.y);
       ctx.save(); ctx.setLineDash([3, 4]); ctx.strokeStyle = SIGRGBA + '.45)'; ctx.lineWidth = 1;
       ctx.beginPath(); q.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]));
@@ -4627,10 +4808,10 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
     // everything sorted back to front so overlaps read correctly
     const things = [];
     // raised tiles go into the same sort as everything else, just ahead of what stands on them
-    (plan || tiles).forEach(tl => { if (levelAt(tl.x, tl.y) && near(tl.x, tl.y)) things.push({ d: zsort(tl.x, tl.y) - 0.55, f: () => drawColumn(tl, t) }); });
+    (plan || tiles).forEach(tl => { if (levelAt(tl.x, tl.y) && ground(tl.x, tl.y)) things.push({ d: zsort(tl.x, tl.y) - 0.55, f: () => drawColumn(tl, t) }); });
     // the ruins (the generator's step 8): rubble on the ground, and terminals glitching among it
     if (WORLDGEN && WORLDGEN.ruins.length) {
-      (plan || tiles).forEach(tl => { if (WORLDGEN.ruinAt(tl.x, tl.y)) things.push({ d: zsort(tl.x, tl.y) - 0.53, f: () => lifted(tl.x, tl.y, () => drawRubble(tl.x, tl.y)) }); });
+      (plan || tiles).forEach(tl => { if (WORLDGEN.ruinAt(tl.x, tl.y) && fogStateAt(tl.x, tl.y) === 2) things.push({ d: zsort(tl.x, tl.y) - 0.53, f: () => lifted(tl.x, tl.y, () => drawRubble(tl.x, tl.y)) }); });
       WORLDGEN.ruins.forEach(r => r.terminals.forEach(tm => { if (near(tm.x, tm.y)) things.push({ pt: [tm.x, tm.y], d: zsort(tm.x, tm.y) + 0.01, f: () => lifted(tm.x, tm.y, () => drawTerminal(tm, t)) }); }));
     }
     // A claimed tile that is raised has its top repainted by drawColumn, which would bury the
@@ -4653,6 +4834,9 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
       things.push({ pt: [fx, fy], d: zsort(fx, fy), f: () => lifted(fx, fy, () => campfire(fx, fy, t)) });
     });
     nodes.forEach(n => { if (near(n.x, n.y, 0.2)) things.push({ pt: [n.x, n.y], d: zsort(n.x, n.y), f: () => lifted(n.x, n.y, () => drawNode(n, t)) }); });
+    // THE FOG, CLIENT: other bases' Friends and harvesters in sight, as the server last had them
+    if (FOG_SRV) OTHER_UNITS.forEach(u => { if (near(u.x, u.y, 0.1)) things.push({ pt: [u.x, u.y], d: zsort(u.x, u.y) + 0.01, f: () => lifted(u.x, u.y, () => drawActor(u, t)) }); });
+    if (FOG_SRV) OTHER_HARV.forEach(h => { if (near(h.x, h.y, 0.2)) things.push({ pt: [h.x, h.y], d: zsort(h.x, h.y) + 0.02, f: () => lifted(h.x, h.y, () => drawDrone(h, t)) }); });
     drones.forEach(dr => { if (!dr.f.build && near(dr.x, dr.y, 0.2)) things.push({ pt: [dr.x, dr.y], d: zsort(dr.x, dr.y) + 0.02, f: () => lifted(dr.x, dr.y, () => drawDrone(dr, t)) }); });
     trees.forEach(tr => { if (near(tr.x, tr.y, 0.1)) things.push({ pt: [tr.x, tr.y], d: zsort(tr.x, tr.y) + 0.005, f: () => lifted(tr.x, tr.y, () => drawTree(tr, t)) }); });
     placedProps.forEach(p => { if (near(p.x, p.y, 0.1)) things.push({ pt: [p.x, p.y], d: zsort(p.x, p.y) + 0.005, f: () => lifted(p.x, p.y, () => drawProp(p)) }); });
@@ -5909,8 +6093,10 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
   // and writing them all into every write would be 300 KB of nothing (`treesAt`: [index, wood, felled, chop]).
   function sceneOf() {
     return { clock: now(), actors: actors.map(a => ({ x: a.x, y: a.y, tx: a.tx, ty: a.ty })),
-      ...(PLAY ? { treesAt: trees.map((tr, i) => (tr.wood !== TREE_WOOD || tr.felled || tr.chop ? [i, tr.wood, tr.felled, tr.chop] : null)).filter(Boolean) }
-        : { trees: trees.map(tr => ({ wood: tr.wood, felled: tr.felled, chop: tr.chop })) }), seams: nodes.map(n => ({ t0: n.t0, cut: n.cut })),
+      ...(FOG_SRV ? { treesBy: trees.filter(tr => tr.wood !== TREE_WOOD || tr.felled || tr.chop).map(tr => [tr.grove + '#' + tr.n, tr.wood, tr.felled, tr.chop]),
+        seamsBy: nodes.filter(n => n.t0 !== n.t00 || n.cut).map(n => [tileKey(n.x, n.y), n.t0, n.cut]) }
+        : PLAY ? { treesAt: trees.map((tr, i) => (tr.wood !== TREE_WOOD || tr.felled || tr.chop ? [i, tr.wood, tr.felled, tr.chop] : null)).filter(Boolean) }
+        : { trees: trees.map(tr => ({ wood: tr.wood, felled: tr.felled, chop: tr.chop })) }), ...(FOG_SRV ? {} : { seams: nodes.map(n => ({ t0: n.t0, cut: n.cut })) }),
       year: YEAR_CLOCK.has(HOME) ? Object.assign({}, YEAR_CLOCK.get(HOME)) : null };
   }
   // NOTING A MOVE. Only the home base has a session; a move for another base, or made while restoring, is
@@ -6014,6 +6200,10 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
       if (S.trees) S.trees.forEach((p, i) => { if (trees[i] && p) Object.assign(trees[i], p); });
       if (S.treesAt) S.treesAt.forEach(([i, wood, felled, chop]) => { if (trees[i]) Object.assign(trees[i], { wood, felled, chop }); });
       if (S.seams) S.seams.forEach((p, i) => { if (nodes[i] && p) Object.assign(nodes[i], p); });
+      if (S.treesBy) S.treesBy.forEach(([k, wood, felled, chop]) => { FOG_SCENE.trees.set(k, { wood, felled, chop });
+        const [g, n] = k.split('#'), tr = trees.find(t => t.grove === g && t.n === +n); if (tr) Object.assign(tr, { wood, felled, chop }); });
+      if (S.seamsBy) S.seamsBy.forEach(([k, t0, cut]) => { FOG_SCENE.seams.set(k, { t0, cut });
+        const n = nodes.find(q => tileKey(q.x, q.y) === k); if (n) Object.assign(n, { t0, cut }); });
       if (S.year) YEAR_CLOCK.set(HOME, Object.assign({}, S.year));
     } finally { RESTORING = false; }
   }
@@ -6114,6 +6304,7 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
     if (LAST_FIGHT && LAST_FIGHT.defender === HOME) flashNote(fightWords(LAST_FIGHT));
     pollShared();
     setInterval(pollShared, STORE.pollMs);
+    fogStart();                                        // THE FOG, CLIENT: the position stream, the view and the news
   }
   // THE PLAYER'S FRIENDS ARE THEIR TOKENS. On the player's map the bodies are made from what the wallet holds now, in
   // token order - which need not be the order the record numbered them in, once a Friend has come or gone. So each
@@ -6225,6 +6416,7 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
   let LAST_FIGHT = null, ATTACKING = null;
   const ATTACK_PICK = new Set();                      // the Friends ticked to send, in the attack panel
   let ATTACK_SIDE = 'N';
+  let ATTACK_TARGET = null;                            // THE FOG, CLIENT: a harvester attacked rather than the base, { depot, n }
   // A body whose roster row is gone (a Friend that went down in a fight leaves the game - record.js's
   // `attack`/`attacked`) leaves the page with it: off its post, out of the actors, its token back in the pool.
   function dropBody(a) {
@@ -6258,7 +6450,7 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
     ATTACKING = (async () => {
       for (let i = 0; i < 3 && (INFLIGHT || SESSION.moves.length); i++) await (INFLIGHT || saveShared('attack'));
       if (INFLIGHT || SESSION.moves.length) return { ok: false, reason: 'Unwritten', why: 'this base\'s own moves could not be written first' };
-      const order = { on, sent: friends.map(a => a.rid), side, parent: SESSION.parent };
+      const order = Object.assign({ on, sent: friends.map(a => a.rid), side, parent: SESSION.parent }, FOG_SRV && ATTACK_TARGET ? { harvester: ATTACK_TARGET } : {});
       const r = await fetch('api/record/' + HOME + '/attack', { method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(order) })
         .then(x => (x.ok ? x.json() : { ok: false, reason: 'HTTP ' + x.status })).catch(e => ({ ok: false, reason: 'Unavailable', why: String((e && e.message) || e) }));
       if (r.ok) {
@@ -6268,7 +6460,7 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
         FRIENDS().filter(ofBase(HOME)).filter(a => a.rid != null && !L.roster.some(q => q.id === a.rid)).forEach(dropBody);
         Object.assign(purse(HOME), { crystals: L.base.crystals, wood: L.base.wood });
         SESSION = Record.session(L, r.attacker.head); STORE.clearDraft(HOME);
-        OTHERS.set(on, r.defender); showOther(r.defender);
+        if (r.defender) { OTHERS.set(on, r.defender); showOther(r.defender); }   // under the fog the defender's record is not handed over
         LAST_FIGHT = r.fight; console.log('record: ' + fightWords(r.fight) + ' - hash ' + r.fight.hash);
         sync(); flashNote(fightWords(r.fight));
       } else if (r.reason === 'StaleParent') await lostTo('StaleParent');
@@ -6280,7 +6472,7 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
   }
   // the chooser: a base's panel of its own (panelFor = { attack: id }), opened by a tap on anything of that base's
   function openAttack(id) {
-    if (!SHARED || id === HOME || !BASES.includes(id)) return false;
+    if (!SHARED || id === HOME || !(BASES.includes(id) || (FOG_SRV && FOG_OTHERS.has(id)))) return false;
     ATTACK_PICK.clear(); picked.forEach(a => { if (ofBase(HOME)(a)) ATTACK_PICK.add(a); });
     openPanel({ attack: id }); return true;
   }
@@ -6482,7 +6674,136 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
   const play = !PLAY ? null : { address: PLAYER.address, genesis: PLAYER.genesis, tokens: PLAYER.tokens, seed: PLAYER.seed, players: PLAYER.players,
     home: HOME, how: PLAYER.how, spawn: SPAWN_AT, spawnTile: PLAYER.spawn, map: { W: WORLDGEN.M.W, H: WORLDGEN.M.H, plots: WORLDGEN.bases.length,
       ruins: WORLDGEN.ruins.length, seams: nodes.length, trees: trees.length, rivers: WATER_SITES.length, tiles: tiles.length } };
-  window.base = { view, hud, play, PLAY, capture, defense, record, spotOf, trees, levelAt, heightAt, tileKey, onLand, TILES, WALLS, PLAN, WATER_SITES, WORLDGEN, get wood() { return purse().wood; }, purse, BASES, HOME, sendToChop, buildings, actors, nodes, drones, tiles, openPanel, startBuild, project, screenToWorld, CAM, reclaim,
+  // ---------- THE FOG, CLIENT: what the server says, every few seconds ----------
+  // FOG_VIEW is the last view's fog box (frame tiles) and its states; a tile outside the box is black. FOG_OTHERS is every
+  // other base the view showed on live ground: its Friends (gen and place only), harvesters and buildings - drawn here
+  // as the server hands them and nothing more (no ledger, no orders, no purse). They are tappable, and a tap opens the
+  // attack chooser for that base: attackable only while in sight, which is the server's rule too.
+  let FOG_VIEW = null, FOG_REV = -1, FOG_SETTINGS = null, FOG_AT = null, FOG_NEWS = [];
+  const FOG_OTHERS = new Map(), OTHER_UNITS = [], OTHER_HARV = [], FOG_CHUNKS = new Set();
+  let FOG_POS_WAIT = 0, FOG_POS_NEXT = 1000, FOG_STARTED = false;
+  function fogStateAt(x, y) {
+    if (!FOG_SRV) return 2;
+    const v = FOG_VIEW; if (!v) return 0;
+    const tx = Math.floor(x) - v.x0, ty = Math.floor(y) - v.y0;
+    return tx < 0 || ty < 0 || tx >= v.w || ty >= v.h ? 0 : v.st[ty * v.w + tx];
+  }
+  const FOG_NAMES = ['black', 'dim', 'live'];
+  const fogApi = async (u, init) => { const r = await fetch(u, Object.assign({ cache: 'no-store', credentials: 'same-origin' }, init || {}));
+    let j = null; try { j = await r.json(); } catch (_) {} return { status: r.status, j }; };
+  function fogTell(why) { try { dispatchEvent(new CustomEvent('rf:fog', { detail: { why, at: FOG_AT, revealed: fogCount() } })); } catch (_) { /* never breaks the game */ } }
+  function fogCount() { if (!FOG_VIEW) return 0; let n = 0; for (let i = 0; i < FOG_VIEW.st.length; i++) if (FOG_VIEW.st[i]) n++; return n; }
+  // the view: the fog, this base's own where the server has them (on the first view only - the page then walks them),
+  // the others in sight, and the ground to fetch when terrainRev moved
+  async function fogView(first) {
+    const r = await fogApi('api/fog/view?base=' + HOME);
+    if (!r.j || !r.j.ok) return;
+    const v = r.j, before = FOG_VIEW ? FOG_VIEW.st.join('') + FOG_VIEW.x0 + ',' + FOG_VIEW.y0 : '';
+    FOG_AT = v.at; FOG_SETTINGS = v.settings || FOG_SETTINGS;
+    if (v.fog) { const b = atob(v.fog.states), st = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) st[i] = b.charCodeAt(i);
+      FOG_VIEW = { x0: v.fog.x0, y0: v.fog.y0, w: v.fog.w, h: v.fog.h, st }; }
+    if (first) {
+      const own = new Map((v.own || []).filter(u => u.placed).map(u => [u.id, u]));
+      FRIENDS().filter(ofBase(HOME)).forEach(a => { const u = own.get(a.rid); if (u) { a.x = a.tx = u.x; a.y = a.ty = u.y; } });
+      const oh = new Map((v.ownHarvesters || []).filter(h => h.placed).map(h => [h.depot + ':' + h.n, h]));
+      ownHarvesters().forEach(({ d, depot, n }) => { const h = oh.get(depot + ':' + n); if (h) { d.x = h.x; d.y = h.y; } });
+    }
+    fogOthers(v.others || []);
+    if (v.terrainRev !== FOG_REV || first) {
+      FOG_REV = v.terrainRev;
+      FOG_CHUNKS.clear();                              // a moved revision may have revealed ground in a chunk already read
+      const g = await fogChunks((u) => fogApi(u).then(x => x.j), HOME, v, PLAYER.fog.chunk, FOG_CHUNKS);
+      if (fogTerrain(g)) sync();
+    }
+    const after = FOG_VIEW ? FOG_VIEW.st.join('') + FOG_VIEW.x0 + ',' + FOG_VIEW.y0 : '';
+    if (after !== before) fogTell('view');
+  }
+  // this base's harvesters, each named as the server names it: its depot's building id and its place among that depot's
+  function ownHarvesters() {
+    const out = [], count = new Map();
+    drones.forEach(d => { if (!ofBase(HOME)(d.f)) return; const n = count.get(d.f.id) || 0; count.set(d.f.id, n + 1); out.push({ d, depot: d.f.id, n }); });
+    return out;
+  }
+  // other bases in sight: their buildings placed as this page places any base's (razed and placed again each view, so
+  // a base that left sight leaves the page), their Friends and harvesters as bodies that only walk where they are put
+  function fogOthers(list) {
+    const seen = new Set(list.filter(o => o.base != null).map(o => o.base));
+    [...FOG_OTHERS.keys()].forEach(id => { if (!seen.has(id)) { razeBase(id); FOG_OTHERS.delete(id); } });
+    RESTORING = true;
+    try {
+      // the deployer: seeing a harvester does NOT reveal its base - an entry may come with harvesters and no base at all
+      list.forEach(o => {
+        if (o.base == null) return;
+        FOG_OTHERS.set(o.base, o);
+        razeBase(o.base);
+        (o.buildings || []).forEach((b, i) => place({ id: 'fog' + o.base + ':' + i, type: b.kind, tier: b.level || 1, x: b.x, y: b.y, base: o.base,
+          ...(b.kind === 'tower' ? { occupant: null } : {}), ...(b.kind === 'wall' ? { crew: [], dir: b.vert ? 'y' : 'x' } : {}), ...(b.kind === 'collectionDepot' ? { harvesters: 0 } : {}) }));
+      });
+    } finally { RESTORING = false; }
+    const sync1 = (arr, want, make) => {
+      const keep = new Map(arr.map(u => [u.key, u])); arr.length = 0;
+      want.forEach(w => { const u = keep.get(w.key) || make(w); u.tx = w.x; u.ty = w.y; if (!keep.has(w.key)) { u.x = w.x; u.y = w.y; } arr.push(u); });
+    };
+    sync1(OTHER_UNITS, list.flatMap(o => (o.units || []).map((u, i) => ({ key: o.base + ':' + i + ':' + u.gen, base: o.base, gen: u.gen, x: u.x, y: u.y }))),
+      (w) => ({ key: w.key, kind: 'other', base: w.base, gen: w.gen, name: 'G' + w.gen, x: w.x, y: w.y, tx: w.x, ty: w.y,
+        rows: FRIEND[w.gen % FRIEND.length], walk: FRIEND[(w.gen + 1) % FRIEND.length], px: 2, bob: Math.random() * 6 }));
+    sync1(OTHER_HARV, list.flatMap(o => (o.harvesters || []).map(h => ({ key: (o.base == null ? 'anon' : o.base) + ':' + h.depot + ':' + h.n, base: o.base == null ? null : o.base, depot: h.depot, n: h.n, x: h.x, y: h.y }))),
+      (w) => ({ key: w.key, kind: 'harvester', base: w.base, depot: w.depot, n: w.n, x: w.x, y: w.y, heading: 0, moving: false }));
+  }
+  // the others move toward where the server last had them, a little each frame
+  function fogOthersStep() {
+    [...OTHER_UNITS, ...OTHER_HARV].forEach(u => {
+      const dx = u.tx - u.x, dy = u.ty - u.y, d = Math.hypot(dx, dy);
+      if (d < 0.01) { u.moving = false; return; }
+      const k = Math.min(1, 0.06); u.x += dx * k; u.y += dy * k; u.moving = true; u.heading = Math.atan2(dy, dx);
+    });
+  }
+  // the position stream: this base's Friends and harvesters, where this page has them; a corrected one is put back
+  async function fogPos() {
+    const units = FRIENDS().filter(ofBase(HOME)).filter(a => a.rid != null).map(a => ({ id: a.rid, x: +a.x.toFixed(3), y: +a.y.toFixed(3) }));
+    // cargo: what a harvester carries home, so a harvester destroyed in an attack spills it where it stood (settleHarvester)
+    const harvesters = ownHarvesters().map(({ d, depot, n }) => ({ depot, n, x: +d.x.toFixed(3), y: +d.y.toFixed(3), cargo: d.cargo ? Record.haulOf(d.f.tier || 1, d.ripe) : 0 }));
+    const r = await fogApi('api/fog/pos', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ base: HOME, units, harvesters }) });
+    if (r.status === 429) { FOG_POS_WAIT = (r.j && r.j.retryMs) || 1000; return; }
+    if (!r.j || !r.j.ok) return;
+    FOG_POS_NEXT = r.j.nextMs || FOG_POS_NEXT;
+    const byRid = new Map(FRIENDS().filter(ofBase(HOME)).map(a => [a.rid, a]));
+    (r.j.corrected || []).forEach(c => { const a = byRid.get(c.id); if (a) { a.x = a.tx = c.x; a.y = a.ty = c.y; } });
+    const own = new Map(ownHarvesters().map(h => [h.depot + ':' + h.n, h.d]));
+    (r.j.harvestersCorrected || []).forEach(c => { const d = own.get(c.depot + ':' + c.n); if (d) { d.x = c.x; d.y = c.y; } });
+    if (r.j.terrainRev != null && r.j.terrainRev !== FOG_REV) fogView(false);
+  }
+  async function fogNews() {
+    const r = await fogApi('api/fog/news');
+    if (!r.j || !r.j.ok) return;
+    const fresh = (r.j.news || []).filter(e => !FOG_NEWS.some(o => o.at === e.at && o.attacker === e.attacker && o.defender === e.defender));
+    FOG_NEWS = r.j.news || [];
+    fresh.forEach(e => { try { dispatchEvent(new CustomEvent('rf:news', { detail: e })); } catch (_) {} });
+  }
+  function fogStart() {
+    if (!FOG_SRV || FOG_STARTED) return; FOG_STARTED = true;
+    fogView(true).catch(e => console.warn('fog: the view could not be read - ' + (e.message || e)));
+    const posLoop = () => { const wait = FOG_POS_WAIT; FOG_POS_WAIT = 0;
+      setTimeout(() => fogPos().catch(() => {}).finally(posLoop), Math.max(wait, FOG_POS_NEXT)); };
+    posLoop();
+    setInterval(() => fogView(false).catch(() => {}), FOG_VIEW_MS);
+    fogNews(); setInterval(() => fogNews().catch(() => {}), 10000);
+  }
+  // FOG OF WAR, for the mini map and the checks. null off the server's fog. Page tiles are base.tiles' (the server's frame).
+  //   state(x, y)    'live' | 'dim' | 'black' for the tile under page point (x, y), as the server last said
+  //   revealed(x, y) whether it is drawn at all (live or dim)
+  //   mask()         { x0, y0, w, h, states } - the last view's box in frame tiles, a byte a tile: 0 black, 1 dim, 2 live
+  //   settings, at   the game's fog settings and the server's clock (wall seconds) the last view was taken at
+  //   others         the bases in sight: { base, name, owner, units, harvesters, buildings } as the server handed them
+  //   news           the attacks, by name only (also the window event `rf:news`, one an attack)
+  //   the window event `rf:fog` ({ why, at, revealed }) fires each time the view changes
+  const fog = !FOG_SRV ? null : { state: (x, y) => FOG_NAMES[fogStateAt(x, y)], revealed: (x, y) => fogStateAt(x, y) > 0,
+    mask: () => (FOG_VIEW ? { x0: FOG_VIEW.x0, y0: FOG_VIEW.y0, w: FOG_VIEW.w, h: FOG_VIEW.h, states: FOG_VIEW.st.slice() } : null),
+    get settings() { return FOG_SETTINGS && Object.assign({}, FOG_SETTINGS); }, get at() { return FOG_AT; },
+    get others() { return [...FOG_OTHERS.values()]; }, get news() { return FOG_NEWS.slice(); }, get count() { return fogCount(); },
+    get units() { return OTHER_UNITS.map(u => ({ base: u.base, gen: u.gen, x: u.x, y: u.y })); }, get harvesters() { return OTHER_HARV.map(h => ({ base: h.base, depot: h.depot, n: h.n, x: h.x, y: h.y })); },
+    terrain: () => WORLDGEN.T.size, refresh: () => fogView(false), pos: () => fogPos() };
+  window.base = { view, hud, fog, play, PLAY, capture, defense, record, spotOf, trees, levelAt, heightAt, tileKey, onLand, TILES, WALLS, PLAN, WATER_SITES, WORLDGEN, get wood() { return purse().wood; }, purse, BASES, HOME, sendToChop, buildings, actors, nodes, drones, tiles, openPanel, startBuild, project, screenToWorld, CAM, reclaim,
     route, bank, siloCap, demolish, refundOf,
     // M11 item 6: the toolkit's walking world as the page built it, and the prop placement API
     nav: { get mode() { return navWorld().mode; }, get why() { return navWorld().why; }, get counts() { return navWorld().counts; },

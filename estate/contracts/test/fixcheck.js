@@ -2118,6 +2118,7 @@ const errorNames = (abi) => Object.fromEntries(abi.filter((e) => e.type === 'err
     // the server's writes and every setter - role-guarded, and §26.3's last row: NOT gated by demo mode at all
     ['RareFightLog.commitFight', () => ask(FL2, 'commitFight', [dgid, 1n, ethers.id('h')], GD)], ['RareFightLog.commitSync', () => ask(FL2, 'commitSync', [dgid, 1n, ethers.id('h')], GD)],
     ['RareOrders.commit', () => ask(ORD, 'commit', [OG, 5n, oHash], GD)], ['RarePartners.freeze', () => ask(RP, 'freeze', [GEN, 1n], GD)],
+    ['RareGame.recordMoves', () => ask(RG, 'recordMoves', [dgid, ethers.ZeroHash, [[GA, 0, '0x']]], GD)],   // M6 item 5, part 29: RECORD_MOVES, the server's write
     ['RarePartners.setPartnerable', () => ask(RP, 'setPartnerable', [GEN, false], GD)], ['RarePartners.setWaitingPeriod', () => ask(RP, 'setWaitingPeriod', [1], GD)],
     ['RareGame.setPartners', () => ask(RG, 'setPartners', [FEES, FEES], GD)],
     ['RareMarket.setTradeable', () => ask(mkt, 'setTradeable', [GEN, true], GD)], ['RareMarket.setFeeBps', () => ask(mkt, 'setFeeBps', [100], GD)], ['RareMarket.setFeeTo', () => ask(mkt, 'setFeeTo', [FEES], GD)],
@@ -3100,6 +3101,212 @@ const errorNames = (abi) => Object.fromEntries(abi.filter((e) => e.type === 'err
       JSON.stringify({ declared, thawed, strangerAfter }));
     ok('RareMarket declares GameRunning(uint256) in its own ABI, so an explorer decodes the refusal against the marketplace',
       !!C.market && C.market.abi.some((f) => f.type === 'error' && f.name === 'GameRunning'), 'no GameRunning in RareMarket ABI');
+  }
+
+  // ---------- 28. M19 item 8: the switch mechanism - a name and a bit in RareRoles (BINDING §64.4, schema `switch`) ----------
+  // A switch is keccak256("rarefriends.switch." + name) -> bool, and that same word is the power that flips it.
+  // setSwitch asks hasPower(sender, key) FIRST, then requireNoGameRunning (ruling 74: "No switch changes once a
+  // game has started"), then refuses a no-op (SwitchUnchanged). requireSwitchOn(key) reverts SwitchOff. Each
+  // switch is its own power, granted through grantPower: a gamemaster given one switch cannot flip another.
+  // A FRESH registry and game, so nothing above is disturbed.
+  console.log('\n--- 28. M19 item 8: the switch mechanism - its own power each, logged, a no-op refused, frozen under a running game ---');
+  {
+    const DEP28 = '0xe000000000000000000000000000000000000028', GM28 = '0xe100000000000000000000000000000000000028';
+    const PA28 = '0xe200000000000000000000000000000000000028', PB28 = '0xe300000000000000000000000000000000000028';
+    const STR28 = '0xe400000000000000000000000000000000000028';
+    for (const a of [DEP28, GM28, PA28, PB28, STR28]) await net.acct(a);
+    const GMROLE = ethers.id('rarefriends.role.gamemaster');
+    const SW = (name) => ethers.id('rarefriends.switch.' + name);
+    const PART = SW('partnership.2'), TECH = SW('technologyCentre'), ROOTSW = SW('collection.' + PA28);
+    const has = (n) => !!C.roles && C.roles.abi.some((f) => f.name === n);
+    ok('RareRoles declares the mechanism: switchOn(bytes32), requireSwitchOn(bytes32), setSwitch(bytes32,bool), SwitchSet(key indexed, on, by indexed), SwitchOff and SwitchUnchanged',
+      has('switchOn') && has('requireSwitchOn') && has('setSwitch') && has('SwitchOff') && has('SwitchUnchanged')
+      && (() => { const e = C.roles.abi.find((f) => f.type === 'event' && f.name === 'SwitchSet');
+        return !!e && e.inputs.map((i) => i.name + ':' + i.type + ':' + !!i.indexed).join(',') === 'key:bytes32:true,on:bool:false,by:address:true'; })(),
+      'the ABI is missing a piece of the mechanism');
+    const R28 = C.roles && has('setSwitch') ? await net.deploy(DEP28, C.roles, [DEP28]) : null;
+    ok('RareRoles stays under the 24,576-byte limit with the switches in it (' + (C.roles ? C.roles.size.toLocaleString('en-US') : '?') + ' bytes)',
+      !!C.roles && C.roles.size < 24576, C.roles ? String(C.roles.size) : 'no RareRoles');
+    const HOUR = 3600n, LEN28 = 168n * HOUR, JW28 = 24n * HOUR, SD28 = 1n * HOUR;
+    const G28 = C.gameC && R28 ? await net.deploy(DEP28, C.gameC, [R28.address, rf.address, FEES, LEN28, JW28, SD28, 500, 3, 2, ethers.id('fixcheck part 28')]) : null;
+    const E28 = Object.assign({}, C.roles ? errorNames(C.roles.abi) : {}, C.gameC ? errorNames(C.gameC.abi) : {});
+    const r28 = async (fn, args, from) => (R28 ? await tryCall(R28, E28, fn, args, from) : 'NO SWITCHES');
+    const g28 = async (fn, args, from) => (G28 ? await tryCall(G28, E28, fn, args, from) : 'NO GAME');
+    const on = async (k) => (R28 ? (await R28.call('switchOn', [k])).out[0] : null);
+    const sw = async (k, v, from) => { const r = await r28('setSwitch', [k, v], from); return [r, (await on(k)) === v]; };
+
+    const unwritten = [await on(PART), await on(TECH)];
+    const gate0 = await r28('requireSwitchOn', [PART], STR28);
+    ok('every switch starts OFF - an unwritten key reads false - and requireSwitchOn refuses it by name (SwitchOff)',
+      !!R28 && unwritten.every((v) => v === false) && gate0 === 'SwitchOff', JSON.stringify({ unwritten, gate0 }));
+
+    let ev = null;
+    try { const res = await R28.call('setSwitch', [PART, true], DEP28); ev = res.events.find((e) => e.name === 'SwitchSet'); } catch (_) { ev = null; }
+    const gate1 = await r28('requireSwitchOn', [PART], STR28);
+    ok('root turns a switch ON: switchOn reads true, requireSwitchOn passes, and SwitchSet(key, true, root) is logged',
+      !!ev && ev.args[0] === PART && ev.args[1] === true && String(ev.args[2]).toLowerCase() === DEP28 && (await on(PART)) === true && gate1 === 'MOVED',
+      JSON.stringify({ ev: ev && ev.args.map(String), gate1 }));
+
+    const noop = await r28('setSwitch', [PART, true], DEP28);
+    ok('a no-op is refused (SwitchUnchanged), so it logs nothing, and the switch still reads ON', noop === 'SwitchUnchanged' && (await on(PART)) === true, noop);
+
+    const gmNo = await sw(TECH, true, GM28);
+    await r28('setRoleMember', [GMROLE, GM28, true], DEP28);
+    const gmUngranted = await sw(PART, false, GM28);
+    const granted = await r28('grantPower', [PART, GMROLE, true], DEP28);
+    const gmOff = await sw(PART, false, GM28), gmOn = await sw(PART, true, GM28), gmOther = await sw(TECH, true, GM28);
+    const strNo = await sw(PART, false, STR28);
+    ok('EACH SWITCH IS ITS OWN POWER: a gamemaster with no grant is refused (PowerNotHeld); granted the partnership switch through grantPower it flips that one each way, and is still refused the technology centre; a stranger is refused throughout',
+      gmNo[0] === 'PowerNotHeld' && gmUngranted[0] === 'PowerNotHeld' && granted === 'MOVED' && gmOff[0] === 'MOVED' && gmOff[1] && gmOn[0] === 'MOVED' && gmOn[1]
+      && gmOther[0] === 'PowerNotHeld' && !gmOther[1] && strNo[0] === 'PowerNotHeld' && (await on(PART)) === true,
+      JSON.stringify({ gmNo, gmUngranted, granted, gmOff, gmOn, gmOther, strNo }));
+    const revoked = await r28('grantPower', [PART, GMROLE, false], DEP28);
+    const gmAfter = await sw(PART, false, GM28);
+    const rooted = await r28('registerRootPower', [ROOTSW], DEP28);
+    const grantRoot = await r28('grantPower', [ROOTSW, GMROLE, true], DEP28);
+    const rootFlips = await sw(ROOTSW, true, DEP28);
+    ok('the grant taken back lands at once (PowerNotHeld again); a switch root keeps to itself is registerRootPower(key) - ungrantable (PowerNotGrantable) and still root\'s to flip',
+      revoked === 'MOVED' && gmAfter[0] === 'PowerNotHeld' && rooted === 'MOVED' && grantRoot === 'PowerNotGrantable' && rootFlips[0] === 'MOVED' && rootFlips[1],
+      JSON.stringify({ revoked, gmAfter, rooted, grantRoot, rootFlips }));
+
+    // a running game: demo OFF, two listed players, a free game created, joined and started
+    await r28('grantPower', [PART, GMROLE, true], DEP28);
+    const pointed = await r28('setGame', [G28 ? G28.address : DEP28], DEP28);
+    if (R28 && (await R28.call('demoMode', [])).out[0] === true) await r28('setDemoMode', [false], DEP28);
+    await r28('setWhitelisted', [[PA28, PB28], true], DEP28);
+    for (const a of [PA28, PB28]) { await rf.call('mint', [a, 10n ** 21n]); if (G28) await rf.call('approve', [G28.address, ethers.MaxUint256], a); }
+    const made = await g28('create', [0n], PA28), gid = G28 ? BigInt((await G28.call('gameCount')).out[0]) : 0n;
+    const joined = await g28('join', [gid], PB28);
+    const whileOpen = await sw(TECH, true, DEP28);
+    ok('a game created and joined but NOT STARTED freezes no switch: root still flips one',
+      pointed === 'MOVED' && made === 'MOVED' && joined === 'MOVED' && whileOpen[0] === 'MOVED' && whileOpen[1], JSON.stringify({ pointed, made, joined, whileOpen }));
+
+    net.travel(Number(JW28 + SD28));
+    const started = await g28('start', [gid], STR28);
+    const running = R28 ? BigInt((await R28.call('runningGames', [])).out[0]) : -1n;
+    const snap = [await on(PART), await on(TECH)];
+    const under = { rootFlip: (await sw(TECH, !snap[1], DEP28))[0], rootSame: (await sw(TECH, snap[1], DEP28))[0], gmGranted: (await sw(PART, !snap[0], GM28))[0] };
+    const stranger = (await sw(PART, !snap[0], STR28))[0], gmOtherUnder = (await sw(TECH, !snap[1], GM28))[0];
+    ok('RULE switch-frozen: ONCE A GAME HAS STARTED (ruling 74), root and a gamemaster holding the switch are each refused (GameRunning) - a flip and a same-value call alike - and both switches read back UNCHANGED',
+      started === 'MOVED' && running === 1n && Object.values(under).every((r) => r === 'GameRunning')
+      && (await on(PART)) === snap[0] && (await on(TECH)) === snap[1], JSON.stringify({ started, running: String(running), under, snap }));
+    ok('RULE switch-power-first: a stranger, and the gamemaster on a switch it was not granted, get PowerNotHeld, never GameRunning - the power is asked first',
+      stranger === 'PowerNotHeld' && gmOtherUnder === 'PowerNotHeld', JSON.stringify({ stranger, gmOtherUnder }));
+    const gateUnder = await r28('requireSwitchOn', [TECH], STR28);
+    ok('reading is never frozen: requireSwitchOn answers under a running game exactly as before', gateUnder === (snap[1] ? 'MOVED' : 'SwitchOff'), gateUnder);
+
+    const declared = await g28('declare', [gid, [PA28, PB28]], DEP28);
+    const thawRoot = await sw(TECH, !(await on(TECH)), DEP28), thawGm = await sw(PART, !(await on(PART)), GM28);
+    ok('the game is declared, runningGames falls to 0, and root and the granted gamemaster flip again - the freeze is the game\'s life, not forever',
+      declared === 'MOVED' && !!R28 && BigInt((await R28.call('runningGames', [])).out[0]) === 0n && thawRoot[0] === 'MOVED' && thawRoot[1] && thawGm[0] === 'MOVED' && thawGm[1],
+      JSON.stringify({ declared, thawRoot, thawGm }));
+  }
+
+  // ---------- 29. M6 item 5, the chain half: a game's moves folded into one word, in the same transaction (BINDING §17.2) ----------
+  // moveRoot[id] = keccak256(abi.encode(moveRoot, uint64 game, actor, kind, seq, body)), folded from zero, and
+  // moveCount[id] beside it. recordMoves asks RECORD_MOVES first, then that the game is Started, then that the batch
+  // names the CURRENT moveRoot (StaleParent otherwise - BINDING §16.5, §17.2.3). Every move is a Move event in the
+  // same transaction. This word is NOT record.js's head (§64.7). A FRESH registry and game.
+  console.log('\n--- 29. M6 item 5: RareGame folds a session\'s moves into moveRoot and moveCount in one transaction, and refuses a stale parent ---');
+  {
+    const DEP29 = '0xe000000000000000000000000000000000000029', SRV29 = '0xe100000000000000000000000000000000000029';
+    const PA29 = '0xe200000000000000000000000000000000000029', PB29 = '0xe300000000000000000000000000000000000029';
+    const STR29 = '0xe400000000000000000000000000000000000029', OUT29 = '0xe500000000000000000000000000000000000029';
+    for (const a of [DEP29, SRV29, PA29, PB29, STR29, OUT29]) await net.acct(a);
+    const GMROLE = ethers.id('rarefriends.role.gamemaster'), RECORD_MOVES = ethers.id('rarefriends.power.recordMoves');
+    const gHas = (n) => !!C.gameC && C.gameC.abi.some((f) => f.name === n);
+    const mvEv = C.gameC ? C.gameC.abi.find((f) => f.type === 'event' && f.name === 'Move') : null;
+    ok('RareGame declares moveRoot(uint256), moveCount(uint256), recordMoves, StaleParent(bytes32 saw, bytes32 is_), and the schema\'s `move` event field for field: Move(game uint64 indexed, actor indexed, kind, seq uint64, parentRoot, body)',
+      gHas('moveRoot') && gHas('moveCount') && gHas('recordMoves') && gHas('StaleParent') && !!mvEv
+      && mvEv.inputs.map((i) => i.name + ':' + i.type + ':' + !!i.indexed).join(',') === 'game:uint64:true,actor:address:true,kind:uint8:false,seq:uint64:false,parentRoot:bytes32:false,body:bytes:false'
+      && C.gameC.abi.find((f) => f.name === 'StaleParent').inputs.map((i) => i.type).join(',') === 'bytes32,bytes32',
+      mvEv ? JSON.stringify(mvEv.inputs) : 'no Move event / recordMoves in RareGame');
+    ok('RareGame stays under the 24,576-byte limit with the moves in it (' + (C.gameC ? C.gameC.size.toLocaleString('en-US') : '?') + ' bytes)',
+      !!C.gameC && C.gameC.size < 24576, C.gameC ? String(C.gameC.size) : 'no RareGame');
+
+    const R29 = C.roles ? await net.deploy(DEP29, C.roles, [DEP29]) : null;
+    const HOUR = 3600n, LEN29 = 168n * HOUR, JW29 = 24n * HOUR, SD29 = 1n * HOUR;
+    const G29 = C.gameC && R29 && gHas('recordMoves') ? await net.deploy(DEP29, C.gameC, [R29.address, rf.address, FEES, LEN29, JW29, SD29, 500, 3, 2, ethers.id('fixcheck part 29')]) : null;
+    const E29 = Object.assign({}, C.roles ? errorNames(C.roles.abi) : {}, C.gameC ? errorNames(C.gameC.abi) : {});
+    const r29 = async (fn, args, from) => (R29 ? await tryCall(R29, E29, fn, args, from) : 'NO ROLES');
+    const g29 = async (fn, args, from) => (G29 ? await tryCall(G29, E29, fn, args, from) : 'NO MOVES');
+    const rootOf = async (id) => (G29 ? (await G29.call('moveRoot', [id])).out[0] : null);
+    const countOf = async (id) => (G29 ? BigInt((await G29.call('moveCount', [id])).out[0]) : null);
+    const coder = ethers.AbiCoder.defaultAbiCoder();
+    // THE READER'S FOLD, written from §17.3 and nothing else: start at zero, fold each Move event in seq order
+    const fold = (evs, from = ethers.ZeroHash) => evs.reduce((root, e) => ethers.keccak256(coder.encode(
+      ['bytes32', 'uint64', 'address', 'uint8', 'uint64', 'bytes'], [root, e.game, e.actor, e.kind, e.seq, e.body])), from);
+    const asEv = (e) => ({ game: e.args[0], actor: e.args[1], kind: Number(e.args[2]), seq: e.args[3], parentRoot: e.args[4], body: e.args[5] });
+    const mv = (actor, kind, body) => [actor, kind, body];
+
+    if (R29) { await r29('setDemoMode', [false], DEP29); await r29('setWhitelisted', [[PA29, PB29], true], DEP29); await r29('setGame', [G29 ? G29.address : DEP29], DEP29); }
+    for (const a of [PA29, PB29]) { await rf.call('mint', [a, 10n ** 21n]); if (G29) await rf.call('approve', [G29.address, ethers.MaxUint256], a); }
+    await r29('setRoleMember', [GMROLE, SRV29, true], DEP29);
+    await r29('grantPower', [RECORD_MOVES, GMROLE, true], DEP29);
+    const madeA = await g29('create', [0n], PA29), gA = G29 ? BigInt((await G29.call('gameCount')).out[0]) : 0n;
+    await g29('join', [gA], PB29);
+    const madeB = await g29('create', [0n], PB29), gB = G29 ? BigInt((await G29.call('gameCount')).out[0]) : 0n;
+    await g29('join', [gB], PA29);
+    const B1 = [mv(PA29, 0, coder.encode(['uint8', 'int16', 'int16'], [1, 10, 12])), mv(PB29, 4, coder.encode(['uint32'], [250])), mv(PA29, 13, '0x')];
+    const beforeStart = await g29('recordMoves', [gA, ethers.ZeroHash, B1], SRV29);
+    ok('an OPEN game takes no move (WrongState): nothing is played before the start, and the record stays at zero',
+      madeA === 'MOVED' && madeB === 'MOVED' && beforeStart === 'WrongState' && (await rootOf(gA)) === ethers.ZeroHash && (await countOf(gA)) === 0n, JSON.stringify({ madeA, madeB, beforeStart }));
+
+    net.travel(Number(JW29 + SD29));
+    const sA = await g29('start', [gA], STR29), sB = await g29('start', [gB], STR29);
+    const stranger = await g29('recordMoves', [gA, ethers.ZeroHash, B1], STR29), player = await g29('recordMoves', [gA, ethers.ZeroHash, B1], PA29);
+    ok('the power is asked first: a stranger and a player of the game are refused (PowerNotHeld), and the record stays at zero',
+      sA === 'MOVED' && sB === 'MOVED' && stranger === 'PowerNotHeld' && player === 'PowerNotHeld' && (await rootOf(gA)) === ethers.ZeroHash && (await countOf(gA)) === 0n,
+      JSON.stringify({ sA, sB, stranger, player }));
+
+    let res1 = null; try { res1 = await G29.call('recordMoves', [gA, ethers.ZeroHash, B1], SRV29); } catch (e) { note('first batch refused: ' + e.message.slice(0, 120)); }
+    const ev1 = res1 ? res1.events.filter((e) => e.name === 'Move').map(asEv) : [];
+    const root1 = await rootOf(gA);
+    const chained = ev1.every((e, i) => e.parentRoot === (i === 0 ? ethers.ZeroHash : fold(ev1.slice(0, i))));
+    ok('the server key folds a batch of 3 IN ONE TRANSACTION: 3 Move events (seq 0, 1, 2, game and actor as sent), moveCount 3, and moveRoot equals the reader\'s fold of those events from zero; each event\'s parentRoot is the word before it',
+      ev1.length === 3 && ev1.map((e) => String(e.seq)).join() === '0,1,2' && ev1.every((e, i) => e.game === gA && e.actor.toLowerCase() === B1[i][0] && e.kind === B1[i][1] && e.body === B1[i][2])
+      && (await countOf(gA)) === 3n && root1 === fold(ev1) && root1 !== ethers.ZeroHash && chained,
+      JSON.stringify({ n: ev1.length, root1, folded: ev1.length ? fold(ev1) : null, chained }));
+    if (res1) note('in-memory execution gas for that 3-move batch: ' + res1.gas.toLocaleString('en-US') + ' (Ethereum rules, a floor, not a price)');
+
+    const replay = await g29('recordMoves', [gA, ethers.ZeroHash, B1], SRV29);
+    const B2 = [mv(PB29, 1, coder.encode(['uint16'], [7]))];
+    const outOfStep = await g29('recordMoves', [gA, ethers.ZeroHash, B2], SRV29);
+    const headNotRoot = await g29('recordMoves', [gA, ethers.id('a record.js head is a different word (BINDING 64.7)'), B2], SRV29);
+    let staleArgs = null;
+    try { await G29.call('recordMoves', [gA, ethers.ZeroHash, B2], SRV29); } catch (e) { try { staleArgs = G29.iface.parseError(e.data).args.map(String); } catch (_) { staleArgs = null; } }
+    ok('RULE stale-parent: the same batch replayed, a second client\'s batch built on the old root, and a batch naming some other word are each refused (StaleParent(saw, is_) naming both words), and moveRoot and moveCount do not move',
+      replay === 'StaleParent' && outOfStep === 'StaleParent' && headNotRoot === 'StaleParent' && !!staleArgs && staleArgs[0] === ethers.ZeroHash && staleArgs[1] === root1
+      && (await rootOf(gA)) === root1 && (await countOf(gA)) === 3n, JSON.stringify({ replay, outOfStep, headNotRoot, staleArgs }));
+
+    let res2 = null; try { res2 = await G29.call('recordMoves', [gA, root1, B2], SRV29); } catch (_) { res2 = null; }
+    const ev2 = res2 ? res2.events.filter((e) => e.name === 'Move').map(asEv) : [];
+    const all = ev1.concat(ev2), root2 = await rootOf(gA);
+    ok('a batch naming the current root lands: seq 3 continues the count, its parentRoot is the first batch\'s word, and the fold of ALL FOUR events from zero equals moveRoot',
+      ev2.length === 1 && ev2[0].seq === 3n && ev2[0].parentRoot === root1 && (await countOf(gA)) === 4n && root2 === fold(all), JSON.stringify({ n: ev2.length, root2 }));
+
+    const swapped = [all[1], all[0], all[2], all[3]], dropped = [all[0], all[2], all[3]], altered = all.map((e, i) => (i === 2 ? Object.assign({}, e, { kind: 12 }) : e));
+    ok('§17.3 holds against this record: a reader folding the events with two swapped, one removed, or one kind altered gets a word that is NOT moveRoot',
+      all.length === 4 && [swapped, dropped, altered].every((evs) => fold(evs) !== root2), all.length === 4 ? 'a tampered history folded to the same word' : all.length + ' events, not 4');
+
+    const outsider = await g29('recordMoves', [gA, root2, [mv(OUT29, 0, '0x')]], SRV29);
+    const empty = await g29('recordMoves', [gA, root2, []], SRV29);
+    const midBatch = await g29('recordMoves', [gA, root2, [mv(PA29, 0, '0x'), mv(OUT29, 0, '0x')]], SRV29);
+    ok('a move by an address not in the game is refused (NotAPlayer) - the whole batch, even when the first move is fine - and an empty batch is refused (NoMoves); nothing moves',
+      outsider === 'NotAPlayer' && empty === 'NoMoves' && midBatch === 'NotAPlayer' && (await rootOf(gA)) === root2 && (await countOf(gA)) === 4n, JSON.stringify({ outsider, empty, midBatch }));
+
+    ok('PER GAME: the other running game\'s moveRoot and moveCount are still zero, and its first batch is folded from zero - it names zero, not game A\'s word',
+      (await rootOf(gB)) === ethers.ZeroHash && (await countOf(gB)) === 0n && (await g29('recordMoves', [gB, root2, B2], SRV29)) === 'StaleParent'
+      && (await g29('recordMoves', [gB, ethers.ZeroHash, B2], SRV29)) === 'MOVED' && (await countOf(gB)) === 1n && (await rootOf(gA)) === root2,
+      JSON.stringify({ rootB: await rootOf(gB) }));
+
+    const declared = await g29('declare', [gA, [PA29, PB29]], DEP29);
+    const afterEnd = await g29('recordMoves', [gA, root2, B2], SRV29);
+    const revoked = await r29('grantPower', [RECORD_MOVES, GMROLE, false], DEP29);
+    const afterRevoke = await g29('recordMoves', [gB, await rootOf(gB), B2], SRV29);
+    ok('once declared the record is closed (WrongState) and keeps its word; and the server key, its power taken back, is refused at once (PowerNotHeld)',
+      declared === 'MOVED' && afterEnd === 'WrongState' && (await rootOf(gA)) === root2 && (await countOf(gA)) === 4n && revoked === 'MOVED' && afterRevoke === 'PowerNotHeld',
+      JSON.stringify({ declared, afterEnd, revoked, afterRevoke }));
   }
 
   console.log(fails ? '\n' + fails + ' check(s) failed' : '\nall nine items hold, and the fight log, and the whitelist, and the duel\'s numbers are state a running game freezes, and a building is a row');

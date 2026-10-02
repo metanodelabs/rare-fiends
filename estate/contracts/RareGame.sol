@@ -44,6 +44,15 @@ import { IRareRoles } from "./RareRoles.sol";
 /// base the player does not hold; `NO_BASE` is accepted only for a player who holds no Genesis at all. The
 /// partner's share goes FIRST, into `RarePartners`, which holds it until the partnership ends (BINDING §77.3), and
 /// the player gets the rest - the pot pays out to the wei, as before. BINDING §76.3.
+///
+/// **The moves (M6 item 5, BINDING §17.2.1-17.2.3, schema `game.moveRoot`, `game.moveCount`, `move`).** Each game
+/// keeps one running word, `moveRoot[id]`, folded from zero, and a counter, `moveCount[id]`. `recordMoves` folds a
+/// session's batch in ONE transaction: every move is emitted as a `Move` event and folded in the same loop, so the
+/// log and the word cannot disagree. The batch names the `moveRoot` it was built against and is refused if that is
+/// not the current one (`StaleParent`). **This word is NOT `record.js`'s head** (BINDING §64.7): the head hashes a
+/// base's STATE as JSON, this hashes a game's HISTORY as ABI words, and a batch's `parentMoveRoot` means this one.
+/// The scoreboard half of §17.2.2 is NOT here: crediting a row from a move needs each kind's `body` laid out, and
+/// the schema has not laid it out.
 contract RareGame is ReentrancyGuard {
     using SafeERC20 for IERC20;
 
@@ -78,6 +87,10 @@ contract RareGame is ReentrancyGuard {
     bytes32 public constant SET_GAME_PARAMS = keccak256("rarefriends.power.setGameParams"); // grantable: the gamemaster may set the length (DESIGN)
     /// @notice declare the placings. Root's, grantable to the game master; the only power `declare` asks for
     bytes32 public constant DECLARE_PLACINGS = keccak256("rarefriends.power.declarePlacings");
+    /// @notice fold a session's moves into a game's record. GRANTABLE, the fourth sibling under ruling 18's pattern
+    /// (RECORD_FIGHT, RECORD_SYNC, RECORD_ORDERS): the server's session write holds it, never root's key, and which
+    /// role holds it is the deployer's at M20 item 9
+    bytes32 public constant RECORD_MOVES = keccak256("rarefriends.power.recordMoves");
 
     IRareRoles public immutable roles;
     IERC20 public immutable rf;
@@ -110,6 +123,20 @@ contract RareGame is ReentrancyGuard {
     mapping(uint256 => mapping(address => bool)) public inGame;
     mapping(uint256 => mapping(address => uint8)) public placeOf;   // 1-based; 0 is unplaced
 
+    /// @notice one move as the server hands it in: who acted, which `moveKind` (its index in the schema's list),
+    /// and the kind's own fields. `kind` is NOT bounded here: a new kind must not need a new games contract, and
+    /// the list is the reader's to name (the schema's `moveKind`)
+    struct MoveIn {
+        address actor;
+        uint8 kind;
+        bytes body;
+    }
+    /// @notice THE RUNNING WORD per game: moveRoot = keccak256(abi.encode(moveRoot, uint64 game, actor, kind, seq,
+    /// body)), from zero. A player re-folds the `Move` events in `seq` order and compares (BINDING §17.3)
+    mapping(uint256 => bytes32) public moveRoot;
+    /// @notice how many moves are folded into `moveRoot`; the next move's `seq`
+    mapping(uint256 => uint64) public moveCount;
+
     event GameCreated(uint256 indexed id, address indexed starter, uint128 entry, bool demo, uint16 cutBps, uint8 places, bytes32 rulesId, uint64 joinClosesAt, uint64 startsAt, uint64 closesAt);
     event Joined(uint256 indexed id, address indexed player, uint128 paid, uint256 players);
     event CutFrozen(uint256 indexed id, uint16 cutBps);
@@ -127,6 +154,10 @@ contract RareGame is ReentrancyGuard {
     event PartnersSet(address partners, address genesis, address by);
     /// @notice beside `Placed`, whose `paid` stays the place's whole prize: this much of it went to the partnership, held until it ends; `partner` is RarePartners
     event PartnerPaid(uint256 indexed id, uint8 place, address indexed player, uint256 base, address partner, uint256 owed);
+    /// @notice ONE EVENT PER MOVE (schema `move`), emitted in the transaction that folds it. `parentRoot` is the
+    /// word this move was folded onto, so each event checks against the one before it; the batch's own parent is
+    /// the first move's
+    event Move(uint64 indexed game, address indexed actor, uint8 kind, uint64 seq, bytes32 parentRoot, bytes body);
 
     error NoSuchGame(uint256 id);
     error WrongState(uint256 id, State state);
@@ -154,6 +185,10 @@ contract RareGame is ReentrancyGuard {
     error HoldsAGenesis(address player);
     /// @notice the partnership layer claimed more than the prize, or a share with nobody to pay
     error BadPartnerClaim(uint256 owed, uint256 prize);
+    /// @notice the batch was built against `saw`, and the game's moveRoot is `is_`: another write landed first,
+    /// or this one is a replay (BINDING §16.5, §17.2.3)
+    error StaleParent(bytes32 saw, bytes32 is_);
+    error NoMoves();
 
     constructor(address roles_, address rf_, address feeTo_, uint64 length_, uint64 joinWindow_, uint64 startDelay_,
                 uint16 cutBps_, uint8 places_, uint8 minPlayers_, bytes32 rulesId_) {
@@ -329,6 +364,34 @@ contract RareGame is ReentrancyGuard {
         rf.forceApprove(address(partners), 0);
         if (owed > prize || held - rf.balanceOf(address(this)) != owed) revert BadPartnerClaim(owed, prize);
         if (owed != 0) emit PartnerPaid(id, place, player, base, address(partners), owed);
+    }
+
+    // ---------- the moves ----------
+
+    /// @notice fold one session's moves into game `id`, in order, in this one transaction (BINDING §17.2.2). The
+    /// power first (RECORD_MOVES), then the game (Started only: before start nothing is played, after declare the
+    /// record is closed), then the parent - `parentMoveRoot` must be the game's current moveRoot or the whole batch
+    /// is refused (StaleParent), which refuses a replay and a batch built on a state that has moved on. Every
+    /// actor must be a player of this game. An empty batch is refused: an idle session is not a move (ruling 49).
+    function recordMoves(uint256 id, bytes32 parentMoveRoot, MoveIn[] calldata moves) external {
+        roles.requirePower(msg.sender, RECORD_MOVES);
+        Game storage g = _game(id);
+        if (g.state != State.Started) revert WrongState(id, g.state);
+        bytes32 root = moveRoot[id];
+        if (parentMoveRoot != root) revert StaleParent(parentMoveRoot, root);
+        uint256 n = moves.length;
+        if (n == 0) revert NoMoves();
+        uint64 seq = moveCount[id];
+        uint64 gid = uint64(id);   // ids are minted by ++gameCount, so this never truncates
+        for (uint256 i = 0; i < n; ++i) {
+            MoveIn calldata m = moves[i];
+            if (!inGame[id][m.actor]) revert NotAPlayer(id, m.actor);
+            emit Move(gid, m.actor, m.kind, seq, root, m.body);
+            root = keccak256(abi.encode(root, gid, m.actor, m.kind, seq, m.body));
+            ++seq;
+        }
+        moveRoot[id] = root;
+        moveCount[id] = seq;
     }
 
     // ---------- the deployer's setters, every one guarded on chain ----------

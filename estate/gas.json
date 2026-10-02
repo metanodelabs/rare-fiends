@@ -8,14 +8,14 @@
   "fitsInOneTx": false,
   "commitFight": 70552,
   "commitSync": 26146,
-  "challenge": 187720,
-  "accept": 30780,
+  "challenge": 187742,
+  "accept": 30802,
   "reveal": 4319,
   "requestRandomness": 101977,
   "settle": 35106,
-  "shadowClaim": 1887016,
-  "measuredAt": "2026-10-01T21:48:41.384Z",
+  "shadowClaim": 1887038,
+  "measuredAt": "2026-10-02T02:12:30.229Z",
   "solc": "0.8.36",
   "note": "execution gas, measured by estate/contracts/paritycheck.js",
-  "sourcesHash": "sha256:5141d99194dab96590a350510fd7f849c329545ad8ea976d19cfc9fd06f9ce9f"
+  "sourcesHash": "sha256:24b6a68db2b5724e4dc48352d646edd158d55acd468654e2dc2d8656f0e60a61"
 }

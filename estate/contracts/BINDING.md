@@ -5140,6 +5140,20 @@ would take, for whoever writes that row:
 **Owed:** a `switch` entity in `schema.json`. Once it exists, this is about 40 lines in `RareRoles`, plus a
 fixcheck part on the pattern of parts 6 and 7.
 
+**BUILT, 2026-10-01 (M19.8), not deployed.** `RareRoles` now holds `mapping(bytes32 => bool) public switchOn`,
+`requireSwitchOn(key)` (reverts `SwitchOff(key)`), and `setSwitch(key, on)`: `hasPower(msg.sender, key)` first
+(`PowerNotHeld`), then `requireNoGameRunning()` (**ruling 74**, *"No switch changes once a game has started"* - the
+undecided point above is decided, for every switch), then `SwitchUnchanged(key)` on a no-op, then
+`SwitchSet(key, on, by)`. Grant one switch with `grantPower(key, GAMEMASTER, true)`; keep one with
+`registerRootPower(key)`. `IRareRoles` carries `switchOn` and `requireSwitchOn` for the contracts that obey. No
+contract obeys one yet. The contract holds only hashes, so a holder of any other power P can write `switchOn[P]`, a
+bit nobody reads. RareRoles grew from 7,547 to 7,924 bytes. The proof is `test/fixcheck.js` part 28 (12 assertions),
+red with the power check removed (4 fail) and with the running-game check removed (1 fails).
+**`schema.json` is updated to match (after the fog merge, da4efed):** `switch` and `switchSet` say `built: RareRoles`, and
+`notBuilt` is gone. `heldWhileGameRuns` is decided (true for every switch, ruling 74). Each field names the line
+that holds it in `beside`, so `schemacheck` holds them to the file. `game.moveRoot`, `game.moveCount` and `move`
+(including `RECORD_MOVES`) are held to `RareGame.sol` the same way.
+
 ### 64.5 M19 item 10 - granting: built, and now it honours the delay
 
 **Granting is the mechanism, and it exists:** root (`DEPLOYER`) holds every power. Root adds and removes
@@ -5181,6 +5195,21 @@ merely incomparable. **Recommended, for whoever writes M6's sync job:** keep bot
 The per-base state head stays the concurrency token and the server's integrity check. The per-game `moveRoot`
 is folded from the batches' moves in order (they are already in each batch) and is what `commitSync` publishes.
 `lastSeen` changes the first and not the second. That is correct: a visit is not a move.
+
+**M6 item 5's chain half, BUILT 2026-10-01, not deployed.** `RareGame` holds `moveRoot[id]` and `moveCount[id]` and
+`recordMoves(id, parentMoveRoot, MoveIn[] {actor, kind, body})`: `RECORD_MOVES` first (a new grantable power,
+`keccak256("rarefriends.power.recordMoves")`, the fourth sibling under ruling 18's pattern), then the game must be
+`Started`, then `parentMoveRoot` must equal the current `moveRoot` (`StaleParent(saw, is_)`), then a non-empty batch
+(`NoMoves`), every actor a player of the game (`NotAPlayer`). Each move is emitted as
+`Move(uint64 indexed game, address indexed actor, uint8 kind, uint64 seq, bytes32 parentRoot, bytes body)` - the
+schema's `move` row field for field - and folded in the same loop:
+`moveRoot = keccak256(abi.encode(moveRoot, uint64 game, actor, kind, seq, body))`, from zero. Each event's
+`parentRoot` is the word that move was folded onto, so the batch's named parent is the first move's. **Chosen here,
+for review:** that encoding of `move`; `kind` unbounded on chain (a new kind must not need a new games contract);
+moves accepted only while `Started`, so a batch landing after `closesAt` but before `declare` is still accepted. **Not built:** the
+scoreboard half of §17.2.2 (each kind's `body` layout is not in the schema, so nothing can be credited from it), and
+the server writer (`record.js`, `serve.py`, in flight elsewhere). Proof: `test/fixcheck.js` part 29, 11 assertions,
+red with the power check, the parent check or the `Started` check removed. `RareGame` 14,361 -> 15,743 bytes.
 
 ## 65. Ruling 54, M20 item 20 - a planted 1/1 terminal's cut, built into `RareMarket` (2026-10-01)
 

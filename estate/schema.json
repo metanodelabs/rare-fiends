@@ -158,6 +158,7 @@
       "note": "A game, and the row that makes every other row replayable. `rulesId` freezes the numbers; `moveRoot` and `moveCount` chain the history together - one word and a counter, and BINDING §19.1 calls them THE NEW THING the deployer's 'we keep the scoreboard and the moves' answer adds to the schema.",
       "gap": "rulesIdInRecord",
       "milestone": "M18",
+      "contract": "RareGame.sol",
       "fields": {
         "id": { "type": "uint64", "note": "The game. Every other row in the schema that is per game points at this, and a number frozen per game is frozen against it." },
         "state": { "type": "enum", "enum": "gameState", "note": "Undecided members - see the enum." },
@@ -178,8 +179,8 @@
         "closesAt": { "type": "uint64", "note": "When the game ends and the pot pays." },
         "pot": { "type": "uint128", "note": "In $RF. The pot pays the three ranked places; a duel is staked separately - see stakeCurrency." },
         "entry": { "type": "uint128", "note": "What joining costs. No value." },
-        "moveRoot": { "type": "bytes32", "note": "The running hash: moveRoot = keccak256(abi.encode(moveRoot, move)), one word, updated in the same transaction as the move. BINDING §17.3 is the six free reads a player uses to prove the history is intact. §17.4 is the honest limit: it proves the record is INTACT, never that it is TRUE." },
-        "moveCount": { "type": "uint64", "note": "How many moves are folded in. Lets a reader know when they have fetched them all." },
+        "moveRoot": { "type": "bytes32", "beside": "mapping(uint256 => bytes32) public moveRoot;", "note": "The running hash: moveRoot = keccak256(abi.encode(moveRoot, move)), one word, updated in the same transaction as the move. BUILT in RareGame (M6 item 5, 2026-10-01), keyed by game id, folded from zero as keccak256(abi.encode(moveRoot, uint64 game, actor, kind, seq, body)) - every input is in the move event. NOT record.js's head (BINDING §64.7). BINDING §17.3 is the six free reads a player uses to prove the history is intact. §17.4 is the honest limit: it proves the record is INTACT, never that it is TRUE." },
+        "moveCount": { "type": "uint64", "beside": "mapping(uint256 => uint64) public moveCount;", "note": "How many moves are folded in. Lets a reader know when they have fetched them all." },
         "finalScoreboard": { "type": "bytes32", "note": "The scoreboard frozen at close. §19.1's last row: a later game or the marketplace may read it, and a live accumulator is not a result." },
         "closeReason": { "type": "enum", "enum": "closeReason", "note": "Undecided." }
       }
@@ -487,15 +488,16 @@
 
     "move": {
       "home": "chain",
-      "note": "ONE EVENT PER MOVE, and events are the move log's home - append-only by construction, because a log cannot be rewritten. Folded into game.moveRoot and credited to the scoreboard IN THE SAME TRANSACTION, by the same function, from the same value. There is no second call to forget, no keeper to fall behind and no indexer to crash.",
+      "note": "ONE EVENT PER MOVE, and events are the move log's home - append-only by construction, because a log cannot be rewritten. Folded into game.moveRoot and credited to the scoreboard IN THE SAME TRANSACTION, by the same function, from the same value. There is no second call to forget, no keeper to fall behind and no indexer to crash. BUILT (M6 item 5's chain half, 2026-10-01): RareGame.recordMoves(id, parentMoveRoot, moves) emits one Move per move and folds it in the same loop, behind RECORD_MOVES (keccak256(\"rarefriends.power.recordMoves\"), grantable - the fourth sibling of RECORD_FIGHT, RECORD_SYNC and RECORD_ORDERS under ruling 18); a game must be Started; every actor must be a player. NOT YET: the scoreboard credit, which needs each kind's body laid out. Proved by contracts/test/fixcheck.js part 29.",
       "event": true,
       "milestone": "M6",
+      "contract": "RareGame.sol",
       "fields": {
-        "game": { "type": "uint64", "indexed": true, "note": "Indexed so a player can fetch a game's whole history with one free log query - step 1 of BINDING §17.3's six free reads." },
+        "game": { "type": "uint64", "indexed": true, "beside": ["event Move(uint64 indexed game, address indexed actor, uint8 kind, uint64 seq, bytes32 parentRoot, bytes body);", "bytes32 public constant RECORD_MOVES = keccak256(\"rarefriends.power.recordMoves\");", "roles.requirePower(msg.sender, RECORD_MOVES);"], "note": "Indexed so a player can fetch a game's whole history with one free log query - step 1 of BINDING §17.3's six free reads." },
         "actor": { "type": "address", "indexed": true, "note": "Who acted." },
-        "kind": { "type": "enum", "enum": "moveKind", "note": "Undecided members, and the enum's note says why that matters more than it looks: a move kind left off the list is a thing that happened and is not in the record." },
+        "kind": { "type": "enum", "enum": "moveKind", "note": "On chain a uint8, the member's index in moveKind, and NOT bounded there: a new kind must not need a new games contract. Undecided members, and the enum's note says why that matters more than it looks: a move kind left off the list is a thing that happened and is not in the record." },
         "seq": { "type": "uint64", "note": "The move's index, equal to game.moveCount before the write. Lets a reader fold in the right order without trusting log ordering." },
-        "parentRoot": { "type": "bytes32", "note": "EVERY BATCH NAMES ITS PARENT. A session's write carries the moveRoot it was built against and is refused if that is not the current root - reverts StaleParent(bytes32 saw, bytes32 is_). This is the compare-and-swap that closes BOTH the two-clients-out-of-step case the deployer flagged (§16.5) and the replayed-batch half of double-crediting (§16.2), with one comparison and one cold SLOAD." },
+        "parentRoot": { "type": "bytes32", "beside": "if (parentMoveRoot != root) revert StaleParent(parentMoveRoot, root);", "note": "EVERY BATCH NAMES ITS PARENT. A session's write carries the moveRoot it was built against and is refused if that is not the current root - reverts StaleParent(bytes32 saw, bytes32 is_). AS BUILT, each event's parentRoot is the word THAT MOVE was folded onto, so each event checks against the one before it and the batch's named parent is its first move's. This is the compare-and-swap that closes BOTH the two-clients-out-of-step case the deployer flagged (§16.5) and the replayed-batch half of double-crediting (§16.2), with one comparison and one cold SLOAD." },
         "body": { "type": "bytes", "note": "The move's own fields, per kind. For a fight it is the INPUTS AND THE RESULT TOGETHER - rulesId, word, line-up, defender's snapshot, revealed orders, outcome - never the result alone." }
       }
     },
@@ -682,25 +684,26 @@
 
     "switch": {
       "home": "chain",
-      "note": "M19 ITEM 8, THE SWITCH MECHANISM ITSELF - SPECIFIED HERE, NOT BUILT. A switch is a NAME AND A BIT, held by the one mechanism and read by the contract that obeys it (requireSwitchOn(key), reverting SwitchOff(key)), never a flag inside that contract - so one mechanism serves the four things DESIGN rides on it: a tradeable asset's switch, a whole collection on or off, more than one partnership (one at a time at launch - built, not live), and the technology centre (built and switched off). Its home is RareRoles (BINDING §64.4), beside the powers it is guarded by. Every switch is OFF until turned on: an unwritten key reads false, which is DESIGN's 'closed until we open it'. Setting one logs switchSet and refuses a no-op (SwitchUnchanged), like DemoModeUnchanged; it needs no delay (M19 item 9: confirmed on the page, instant on chain). ONE INSTANCE PREDATES THE MECHANISM AND STAYS: RareMarket.tradeable[collection] behind SET_TRADEABLE. RareMarket is permanent, so that switch is not moved into this one; it is the same switch in shape - a name and a bit, its own power, a log, a refused no-op - and the deployer page is to list both side by side. schemacheck holds `notBuilt`: the day a contract declares requireSwitchOn, this row must say `built` instead.",
+      "note": "M19 ITEM 8, THE SWITCH MECHANISM ITSELF - BUILT in RareRoles (BINDING §64.4, 2026-10-01; not deployed). A switch is a NAME AND A BIT, held by the one mechanism and read by the contract that obeys it (requireSwitchOn(key), reverting SwitchOff(key)), never a flag inside that contract - so one mechanism serves the four things DESIGN rides on it: a tradeable asset's switch, a whole collection on or off, more than one partnership (one at a time at launch - built, not live), and the technology centre (built and switched off). Its home is RareRoles (BINDING §64.4), beside the powers it is guarded by. Every switch is OFF until turned on: an unwritten key reads false, which is DESIGN's 'closed until we open it'. Setting one logs switchSet and refuses a no-op (SwitchUnchanged), like DemoModeUnchanged; it needs no delay (M19 item 9: confirmed on the page, instant on chain). ONE INSTANCE PREDATES THE MECHANISM AND STAYS: RareMarket.tradeable[collection] behind SET_TRADEABLE. RareMarket is permanent, so that switch is not moved into this one; it is the same switch in shape - a name and a bit, its own power, a log, a refused no-op - and the deployer page is to list both side by side. BUILT: RareRoles.switchOn, requireSwitchOn and setSwitch, proved by contracts/test/fixcheck.js part 28. No contract obeys a switch yet.",
       "milestone": "M19",
-      "notBuilt": { "file": "estate/contracts/RareRoles.sol", "text": "requireSwitchOn" },
+      "built": "RareRoles",
       "fields": {
-        "key": { "type": "bytes32", "key": true, "note": "The mapping's key: keccak256(\"rarefriends.switch.\" + name). THE SAME WORD IS THE POWER THAT FLIPS IT, so there is no second table pairing switches with powers. A per-collection switch names the collection in its name (\"collection.\" + its lowercase hex address); a per-kind tradeable switch, a partnership slot and the technology centre each have a plain name." },
+        "key": { "type": "bytes32", "key": true, "beside": "mapping(bytes32 => bool) public switchOn;", "note": "The mapping's key: keccak256(\"rarefriends.switch.\" + name). THE SAME WORD IS THE POWER THAT FLIPS IT, so there is no second table pairing switches with powers. A per-collection switch names the collection in its name (\"collection.\" + its lowercase hex address); a per-kind tradeable switch, a partnership slot and the technology centre each have a plain name." },
         "name": { "type": "string", "home": "client", "note": "OVERRIDDEN HOME. The readable name the deployer page lists and hashes into `key`. The chain holds only the hash, so the list of names is the page's, and the page proves each by recomputing the key and reading it back." },
-        "on": { "type": "bool", "note": "The bit. False until it is turned on." },
-        "power": { "type": "bytes32", "derived": true, "note": "DERIVED: equal to `key`. A narrow power in RareRoles (M19 item 10): root holds every one, and root grants a gamemaster exactly the switches it may flip with grantPower(key, GAMEMASTER, true) - the partnership switch without the trade switches. A switch root wants kept to itself is registerRootPower(key), irreversibly. So the setter is guarded on chain by hasPower(msg.sender, key)." },
-        "heldWhileGameRuns": { "type": "bool", "decided": false, "note": "NOT DECIDED, AND THE DEPLOYER'S: whether a switch may change while a game is running, as the duel's numbers may not (RareRoles.requireNoGameRunning). Per switch, because the answer may differ - a tradeable switch already changes under a running game, the way the market fee does. Named so the builder asks rather than chooses." }
+        "on": { "type": "bool", "beside": ["mapping(bytes32 => bool) public switchOn;", "if (!switchOn[key]) revert SwitchOff(key);"], "note": "The bit. False until it is turned on." },
+        "power": { "type": "bytes32", "derived": true, "note": "DERIVED: equal to `key`. A narrow power in RareRoles (M19 item 10): root holds every one, and root grants a gamemaster exactly the switches it may flip with grantPower(key, GAMEMASTER, true) - the partnership switch without the trade switches. A switch root wants kept to itself is registerRootPower(key), irreversibly. So the setter is guarded on chain by hasPower(msg.sender, key)." , "beside": "if (!hasPower(msg.sender, key)) revert PowerNotHeld(msg.sender, key);" },
+        "heldWhileGameRuns": { "type": "bool", "decided": true, "beside": ["function setSwitch(bytes32 key, bool on) external {", "requireNoGameRunning();"], "note": "DECIDED, ruling 74 (DESIGN, 2026-10-01): 'No switch changes once a game has started' - TRUE FOR EVERY SWITCH, not per switch. setSwitch asks requireNoGameRunning() after the power and before the no-op check, so a stranger gets PowerNotHeld and never learns a game runs. The tradeable switch is frozen the same way (RareMarket.setTradeable, BINDING §80); the market FEE is a number with its own exemption, not a switch. Reading (requireSwitchOn) is never frozen." }
       }
     },
 
     "switchSet": {
       "home": "chain",
       "event": true,
-      "note": "THE RECORD OF EVERY SWITCH CHANGE - M19 item 9's 'every change is recorded' for the switch, and the only history of it: the mapping holds the present, this event holds how it got there. One event per accepted change; a refused no-op logs nothing. Specified with `switch`, not built.",
+      "note": "THE RECORD OF EVERY SWITCH CHANGE - M19 item 9's 'every change is recorded' for the switch, and the only history of it: the mapping holds the present, this event holds how it got there. One event per accepted change; a refused no-op logs nothing. BUILT with `switch`: RareRoles.SwitchSet.",
       "milestone": "M19",
+      "built": "RareRoles",
       "fields": {
-        "key": { "type": "bytes32", "indexed": true, "note": "Which switch. Indexed so the deployer page fetches one switch's history in one log query." },
+        "key": { "type": "bytes32", "indexed": true, "beside": "event SwitchSet(bytes32 indexed key, bool on, address indexed by);", "note": "Which switch. Indexed so the deployer page fetches one switch's history in one log query." },
         "on": { "type": "bool", "note": "What it was set to." },
         "by": { "type": "address", "indexed": true, "note": "Who flipped it - the deployer or a gamemaster holding the power. The same shape as DemoModeSet(on, by)." }
       }

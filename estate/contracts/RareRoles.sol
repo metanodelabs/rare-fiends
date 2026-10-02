@@ -118,6 +118,16 @@ contract RareRoles {
     /// switch the rule off without a word in the log that says so.
     address public game;
 
+    /// @notice THE SWITCHES (M19 item 8, BINDING §64.4, schema `switch`): a name and a bit. The key is
+    /// `keccak256("rarefriends.switch." + name)`, and THE SAME WORD IS THE POWER THAT FLIPS IT, so there is no
+    /// second table pairing switches with powers: root holds every switch, and a gamemaster holds exactly the
+    /// ones granted to its role with `grantPower(key, GAMEMASTER, true)`. An unwritten key reads false, which
+    /// is DESIGN's "closed until we open it". The contract that obeys a switch reads it here
+    /// (`requireSwitchOn`), never a flag of its own, so one mechanism serves every switch. The chain holds
+    /// only the hash; the readable names are the deployer page's, which proves each by recomputing it.
+    /// Not moved in here: `RareMarket.tradeable`, which predates this and is permanent - the same shape.
+    mapping(bytes32 => bool) public switchOn;
+
     // ---------- events ----------
     // Every change is recorded, each with its own event, and `by` is on all four so a log answers "who".
 
@@ -139,6 +149,8 @@ contract RareRoles {
     event RootPowerRegistered(bytes32 indexed power, address indexed by);
     /// @notice the games contract every running-game guard now reads
     event GameSet(address game, address indexed by);
+    /// @notice a switch was flipped - the switch's whole history; a refused no-op logs nothing (schema `switchSet`)
+    event SwitchSet(bytes32 indexed key, bool on, address indexed by);
 
     // ---------- errors ----------
     // Named, because an unnamed revert in an explorer teaches a player nothing and an explorer does show
@@ -176,6 +188,9 @@ contract RareRoles {
     /// 2026-09-30: "number should NOT be changeable during a running game. period.")
     error GameRunning(uint256 running);
     error NotAContract(address who);
+    /// @notice the switch this action rides on is off
+    error SwitchOff(bytes32 key);
+    error SwitchUnchanged(bytes32 key);
 
     /// @param deployer_ the one address under the DEPLOYER role at launch. More may be added later
     /// without a redeploy, which is the whole reason this contract exists.
@@ -463,6 +478,28 @@ contract RareRoles {
         emit RoleChangeDelaySet(delay, msg.sender);
     }
 
+    // ---------- the switches ----------
+
+    /// @notice the line a contract that obeys a switch puts in front of what the switch gates
+    function requireSwitchOn(bytes32 key) external view {
+        if (!switchOn[key]) revert SwitchOff(key);
+    }
+
+    /// @notice turn one switch on or off. Guarded by the switch's OWN power - its key - so the partnership
+    /// switch can be granted without the trade switches. **Frozen while a game runs** (ruling 74, 2026-10-01:
+    /// "No switch changes once a game has started"), asked after the power, so a stranger learns nothing
+    /// about the game. No delay (M19 item 9: confirmed on the page, instant on chain). A no-op is refused.
+    /// @dev The contract cannot tell a switch's key from any other power's: it holds only the hash. A holder of
+    /// some other power P can therefore write `switchOn[P]` - a bit no contract reads, because every reader
+    /// asks a "rarefriends.switch." name. Harmless, and stated so it is not discovered.
+    function setSwitch(bytes32 key, bool on) external {
+        if (!hasPower(msg.sender, key)) revert PowerNotHeld(msg.sender, key);
+        requireNoGameRunning();
+        if (switchOn[key] == on) revert SwitchUnchanged(key);
+        switchOn[key] = on;
+        emit SwitchSet(key, on, msg.sender);
+    }
+
     // ---------- the running-game rule ----------
 
     /// @notice point the guards at the games contract. ROOT ONLY (MANAGE_ROLES). Refused for zero and for an
@@ -516,4 +553,6 @@ interface IRareRoles {
     function game() external view returns (address);
     function runningGames() external view returns (uint256);
     function requireNoGameRunning() external view;
+    function switchOn(bytes32 key) external view returns (bool);
+    function requireSwitchOn(bytes32 key) external view;
 }

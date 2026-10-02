@@ -1523,6 +1523,7 @@ class NoCache(http.server.SimpleHTTPRequestHandler):
             for r in rows:
                 if r['address'] != me:
                     r.pop('base', None)
+                    r.pop('baseName', None)             # a base's own name is the base's: only its wallet is shown it
         self.send_json(json.dumps({'ok': True, 'at': whitelist_iso(time.time()), 'players': rows}).encode('utf8'))
 
     # ------------------------------------------------------------ the whitelist's three routes (see WHITELIST above)

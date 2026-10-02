@@ -589,7 +589,9 @@ async function sceneGame(s, c) {
   const made = await req(s, 'GET', '/api/record/game', { cookie: c.W });
   const disk = (() => { try { return JSON.parse(fs.readFileSync(gp, 'utf8')); } catch (_) { return null; } })();
   ok('game: a good game.json is read as it is (seed 4242), and only a missing one is made (seed ' + (made.j && made.j.seed) + ', written)',
-    good.status === 200 && good.j.seed === 4242 && made.status === 200 && Number.isInteger(made.j.seed) && disk && disk.seed === made.j.seed, { good: good.j, made: made.j, disk });
+    // a NEW game's seed is WIDE (mapgen.js VERSION 2): hex, 32 digits or more - never a 32-bit number a player could search
+    good.status === 200 && good.j.seed === 4242 && made.status === 200 && typeof made.j.seed === 'string' && /^[0-9a-f]{32,128}$/.test(made.j.seed) &&
+    disk && disk.seed === made.j.seed, { good: good.j, made: made.j, disk });
 }
 
 async function sceneReRead(s, c) {

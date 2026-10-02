@@ -38,8 +38,8 @@ WHAT A PLAYER MAY RECEIVE (and only through these routes):
   - their own base's record, whole (they hold it);
   - /api/fog/view?base=  the fog over their frame (0 black, 1 dim, 2 live), their own Friends where the server has
     them, every OTHER base's Friends and buildings that stand on a LIVE tile (no orders, no purse, no posts' crews,
-    no ledger), their waypoints from Find what is hidden while it lasts, and `terrainRev`, which moves when ground
-    they may see has changed;
+    no ledger), their waypoints from Find what is hidden while it lasts, `piles` - other bases' spilled crystals lying
+    on a LIVE tile, where and how much, never whose - and `terrainRev`, which moves when ground they may see has changed;
   - /api/fog/terrain?base=&i=&j=  one 16 x 16 chunk of THEIR frame: the generator's ground on dim and live tiles,
     and -1 on every other tile - the same -1 for unseen ground, sea never seen, and tiles off the island, so a chunk
     says nothing about what is not revealed;
@@ -154,7 +154,7 @@ def today(now):
 # ---------------------------------------------------------------- ONE BASE, AS THE FOG HOLDS IT
 class Base:
     __slots__ = ('id', 'owner', 'genesis', 'name', 'plot', 'roster', 'buildings', 'keep', 'units', 'seen', 'disc',
-                 'bbox', 'uses', 'waypoints', 'dirty', 'saved', 'last_pos', 'rev', 'depots', 'hpos', 'seeded')
+                 'bbox', 'uses', 'waypoints', 'dirty', 'saved', 'last_pos', 'rev', 'depots', 'hpos', 'seeded', 'spills')
 
     def __init__(self, bid, plot, n):
         self.id, self.plot = bid, plot
@@ -164,6 +164,7 @@ class Base:
         self.depots = {}                          # building id -> (wx, wy, harvesters): every building with harvesters
         self.hpos = {}                            # 'depot:n' -> [wx, wy, t]: each harvester, when accepted
         self.seeded = None                        # the tile the keep radius was last seeded round
+        self.spills = []                          # (wx, wy, crystals): every pile in the ledger's `spills` that lies on a tile
         self.seen = array('I', bytes(4 * n))      # per tile: the second it was last seen, 0 never
         self.disc = bytearray(n)                  # per tile: 1 once seen within keepRadiusTiles of the keep
         self.bbox = None                          # [x0, y0, x1, y1] of every tile ever seen, world, inclusive
@@ -346,6 +347,14 @@ class Fog:
             if isinstance(h, int) and not isinstance(h, bool) and h > 0 and isinstance(x.get('id'), int):
                 b.depots[x['id']] = (x['x'] + cx, x['y'] + cy, h)
         b.depots = {k: v for k, v in b.depots.items() if any(isinstance(x, dict) and x.get('id') == k for x in (L.get('buildings') or []))}
+        # SPILLED CRYSTALS (rulings 70, 88 and 107; record.js `spills`): piles on the ground, each on a tile of this base's
+        # frame. Kept as world tiles so _piles can show them to another player only where it sees LIVE ground.
+        b.spills = []
+        for sp in (L.get('spills') or []):
+            t = sp.get('tile') if isinstance(sp, dict) else None
+            c = sp.get('crystals') if isinstance(sp, dict) else None
+            if isinstance(t, dict) and isinstance(t.get('x'), int) and isinstance(t.get('y'), int) and isinstance(c, int) and not isinstance(c, bool) and c > 0:
+                b.spills.append((int(t['x'] + cx), int(t['y'] + cy), c))
         for k in [k for k in b.units if k not in b.roster]:      # a Friend that left the roster leaves the map
             del b.units[k]
         for k in [k for k in b.hpos if not self._hkey_ok(b, k)]:  # a harvester whose depot went leaves the map
@@ -605,6 +614,21 @@ class Fog:
             return None
         return {'base': o.id, 'owner': o.owner, 'name': o.name, 'units': us, 'buildings': bs, 'harvesters': hs}
 
+    def _piles(self, v, now):
+        """Every OTHER base's spilled crystals that lie on one of v's LIVE tiles, in v's frame - where the pile is and how
+        much is in it, and NOT whose it is: a pile is anybody's to claim (ruling 70), and naming its base would say where
+        that base is (ruling 129), as seeing a harvester must not."""
+        cx, cy = v.home()
+        out = []
+        for o in self.bases.values():
+            if o.id == v.id:
+                continue
+            for wx, wy, c in o.spills:
+                if self.live_world(v, wx, wy, now):
+                    out.append({'x': wx - cx, 'y': wy - cy, 'crystals': c})
+        out.sort(key=lambda p: (p['y'], p['x'], p['crystals']))
+        return out
+
     def peek(self, viewer_ids, target, now=None):
         """Another base as much as one of viewer_ids sees it live (in that viewer's frame, named in `frame`), or None -
         and None for a base that does not exist, so the route cannot tell the two apart."""
@@ -751,6 +775,7 @@ class Fog:
                    for w in b.waypoints for (x, y, k) in w[1]]
             self._save(b, now)
             return {'ok': True, 'at': int(now), 'base': b.id, 'fog': fog, 'own': own, 'ownHarvesters': own_h, 'others': others,
+                    'piles': self._piles(b, now),
                     'waypoints': way, 'terrainRev': b.rev, 'chunk': CHUNK,
                     'plot': {'w': b.plot['w'], 'h': b.plot['h'], 'x0': b.plot['x'] - cx, 'y0': b.plot['y'] - cy},
                     'settings': S}

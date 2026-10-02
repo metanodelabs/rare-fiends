@@ -191,13 +191,20 @@
     }
     return out;
   }
+  const ask = async (u) => { const r = await fetch(u, { cache: 'no-store', credentials: 'same-origin' });
+    if (!r.ok) throw new Error(u + ' answered ' + r.status); return r.json(); };
+  // THE STANDINGS ARE ASKED FOR AT ONCE, beside the session (/api/auth/me), not after it: which base this address owns
+  // is found in them, and waiting for the session first put one more round trip to the server - 288 ms from the
+  // deployer's network, measured - in front of the record every time this page opened (estate/navperf.test.js). The
+  // first read takes this answer; every later one (a name set, a base tab's write) asks again.
+  let standingsEarly = LOCAL ? null : ask('/api/standings');
+  if (standingsEarly) standingsEarly.catch(() => {});
   async function readServer(addr) {
     const out = { where: 'server', base: null, rec: null, pending: 0, refused: null, others: [], none: null };
     if (!addr) return Object.assign(out, { none: 'noaddr' });
-    const ask = async (u) => { const r = await fetch(u, { cache: 'no-store', credentials: 'same-origin' });
-      if (!r.ok) throw new Error(u + ' answered ' + r.status); return r.json(); };
     try {
-      const st = await ask('/api/standings');
+      const early = standingsEarly; standingsEarly = null;
+      const st = await (early || ask('/api/standings'));
       const mine = (st.players || []).filter((p) => String(p.address || '').toLowerCase() === addr.toLowerCase()).map((p) => p.base);
       if (!mine.length) return Object.assign(out, { none: 'nobase' });
       const got = await ask('/api/record/' + encodeURIComponent(mine[0]));
@@ -245,7 +252,7 @@
     { key: 'genesis', label: 'GENESIS', needsAddr: true, wide: true, read: async (a, got) => {
       const r = await ChainLive.genesisOwned(a);
       if (r.vault) return { v: '—', src: '<b>this is the ' + (r.vault === 'redeem' ? 'redeem' : 'fee') + ' vault</b> · a Genesis it holds is the vault\'s, never a person\'s, so none is counted' };
-      const ids = r.tokens.map((t) => t.id), tie = tieOf(got, ids);
+      const ids = r.tokens.map((t) => t.id), tie = tieOf(await got, ids);   // got: the record, or the read of it still under way
       const faces = r.tokens.filter((t) => t.image).map((t) => '<img class="gen" alt="Genesis #' + t.id + '" title="' + esc(t.name || 'Genesis #' + t.id) +
         '" src="' + t.image + '" data-genesis="' + t.id + '">').join('');
       return { v: String(r.balance), src: (faces ? '<span class="faces">' + faces + '</span>' : '') +
@@ -297,7 +304,14 @@
   const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
   // recordOnly: a write from an open base tab re-reads the record's cards, never the chain
   async function fill(addr, recordOnly) {
-    const mine = recordOnly ? seq : ++seq, got = await readRecord(addr);
+    const mine = recordOnly ? seq : ++seq, gotP = readRecord(addr);
+    // THE CHAIN'S CARDS START NOW, beside the server's record. They need only the address, and the chain is the slow
+    // read on this page (each call to the public RPC took 1 to 2 s from the deployer's network, measured 2026-10-02);
+    // they used to wait for the record first - three round trips to our server - before asking anything. The Genesis
+    // card still waits for the record where it shows it (which Genesis owns this base).
+    const early = new Map();
+    if (addr && !recordOnly) SOURCES.filter((s) => s.needsAddr).forEach((s) => { const p = s.read(addr, gotP); p.catch(() => {}); early.set(s.key, p); });
+    const got = await gotP;
     if (mine !== seq) return;
     window.playerPage.record = got;
     showBase(addr, got);
@@ -307,7 +321,7 @@
       const paint = (val, html, read) => { if (mine !== seq) return; v.textContent = val; v.classList.toggle('read', !!read); src.innerHTML = html; card.dataset.state = read ? 'read' : 'none'; };
       if (s.needsAddr && !addr) { paint('—', PINNED === 'bad' ? '?wallet= is not an address, so nothing is read' : 'connect a wallet to read it', false); return; }
       if (s.needsAddr) paint('—', 'reading the chain…', false);
-      try { const r = await s.read(addr, got); paint(r.v, r.src, r.v !== '—'); }
+      try { const r = await (early.get(s.key) || s.read(addr, got)); paint(r.v, r.src, r.v !== '—'); }
       catch (e) { paint('—', 'could not be read · ' + esc(String(e && e.message || e).slice(0, 160)), false); console.warn(s.key, e); }
     }));
   }

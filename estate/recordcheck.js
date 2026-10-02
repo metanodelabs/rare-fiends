@@ -442,15 +442,103 @@ console.log('--- the harvester pays its bill; M13: an attack settled on our serv
   // the base can be raised afterwards - while what stands keeps working (a build replayed at its own level).
   ok(!D1.ledger.buildings.some((b) => b.kind === 'keep') && D1.ledger.keepLost && D1.ledger.keepLost.fight === f.id && D1.ledger.keepLost.by === 10,
     'M13 item 8: the won attack destroyed the keep - it is off the defender\'s buildings and keepLost names fight ' + (D1.ledger.keepLost && D1.ledger.keepLost.fight) + ' by base ' + (D1.ledger.keepLost && D1.ledger.keepLost.by));
-  // The keep's lock (M9 items 8-10) would refuse the raise on a base with no keep for its own reason, so the keep is
-  // stood back up at the level the raise needs IN BOTH ledgers: the one difference between them is keepLost.
+  // M13 ITEM 8 AND ITEM 14 (ruling 77): THE LOCK HOLDS UNTIL A REBUILT KEEP IS FINISHED. It used to hold for good; ruling
+  // 77 lifts it when the rebuilt keep stands. Every assertion here is on a full purse, so it is the lock and not the
+  // purse that refuses.
   { const rich = clone(D1.ledger); rich.base.crystals = 10 ** 7; rich.base.wood = 10 ** 7;
-    const tw0 = rich.buildings.find((b) => b.kind === 'tower'); rich.buildings.push(R.buildingRow(900, 'keep', tw0.level + 1, 0.5, 0.5, false, null, 0));
     const tw = rich.buildings.find((b) => b.kind === 'tower'), S = R.session(rich, R.head(rich));
     const up = S.note('raise', { b: tw.id, level: tw.level + 1 }, 50), same = S.note('raise', { b: tw.id, level: tw.level }, 60);
-    const ctl = clone(rich); delete ctl.keepLost; const Sc = R.session(ctl, R.head(ctl)), upCtl = Sc.note('raise', { b: tw.id, level: tw.level + 1 }, 50);
-    ok(!up && /keep was destroyed/.test((S.refused[0] || {}).why || '') && !!same && !!upCtl,
-      'M13 item 8: with a full purse the tower CANNOT be raised (' + ((S.refused[0] || {}).why) + '); replayed at its own level it can; and the same ledger without keepLost raises it - so it is the lost keep, not the purse, that refuses'); }
+    const hut = S.note('build', { b: rich.nextId, of: 'hut', x: 6.5, y: 6.5 }, 70);
+    ok(!up && /keep was destroyed by an opponent/.test((S.refused[0] || {}).why || '') && !!same && !hut,
+      'M13 item 8: with a full purse and no keep, the tower CANNOT be raised (' + ((S.refused[0] || {}).why) + ') and nothing can be placed; replayed at its own level it can'); }
+
+  // ---------------------------------------------------------------------------------------------------------------
+  // M13 ITEM 14 (rulings 69 and 77): REBUILDING A LOST KEEP. Every assertion is exact arithmetic or an exact boundary
+  // on the game's clock, so only the rule passes: 75 wood and 75 crystals, level 1, the rebuild's own raise time
+  // (values.js rebuildMs, 600 s at row 24's 4 s a unit), the lock lifting at that moment and not one ms before.
+  // ---------------------------------------------------------------------------------------------------------------
+  { const KB = V.kinds.keep.rebuild, KMS = V.kinds.keep.rebuildMs;
+    const lost = clone(D1.ledger); lost.base.crystals = 50000; lost.base.wood = 20000;
+    const tw = lost.buildings.find((b) => b.kind === 'tower'); tw.level = 3;           // a TOWER III, to show levels are kept
+    ok(KB.wood === 7500 && KB.crystals === 7500 && KMS === Math.round((KB.wood + KB.crystals) / 100 * V.buildMsPerUnit) && KMS === 600000,
+      'ruling 77: the keep row\'s rebuild bill is 75 wood + 75 crystals and its raise time is DERIVED from it - ' + KMS / 1000 + ' s by one Friend (row 24, 4 s a unit)');
+    // build refuses a keep on a base that lost one: the first keep is the only free one
+    { const S = R.session(lost, R.head(lost)), m = S.note('build', { b: lost.nextId, of: 'keep', x: 6.5, y: 6.5 }, 100);
+      ok(!m && /put back by rebuild/.test((S.refused[0] || {}).why || '') && S.ledger.base.crystals === 50000 && S.ledger.base.wood === 20000,
+        'M13 item 14: `build` refuses a free Keep I on a base that lost its keep - ' + (S.refused[0] || {}).why); }
+    // rebuild refuses where there was never a lost keep (a fresh base places its first keep with build, free)
+    { const F = R.fresh(0, { crystals: 50000, wood: 20000 }), S = R.session(F, R.head(F)), m = S.note('rebuild', { b: 1, x: 0.5, y: 0.5 }, 1), f = S.note('build', { b: 1, of: 'keep', x: 0.5, y: 0.5 }, 2);
+      ok(!m && /has not lost a keep/.test((S.refused[0] || {}).why || '') && !!f && S.ledger.base.crystals === 50000 && S.ledger.base.wood === 20000,
+        'M13 item 14: `rebuild` refuses a base that never lost a keep (' + (S.refused[0] || {}).why + '), whose first keep `build` places FREE'); }
+    // a taken tile, and a purse one log short, refuse
+    { const S = R.session(lost, R.head(lost)), m = S.note('rebuild', { b: lost.nextId, x: tw.x, y: tw.y }, 100);
+      const poor = clone(lost); poor.base.wood = KB.wood - 1; const P = R.session(poor, R.head(poor)), p = P.note('rebuild', { b: poor.nextId, x: 6.5, y: 6.5 }, 100);
+      ok(!m && /is taken by building/.test((S.refused[0] || {}).why || '') && !p && /cannot pay 7500 wood/.test((P.refused[0] || {}).why || ''),
+        'M13 item 14: a rebuild on a taken tile is refused (' + (S.refused[0] || {}).why + ') and so is one a hundredth of wood short (' + (P.refused[0] || {}).why + ')'); }
+    // THE REBUILD: paid exactly, level 1, the rebuilt mark, the other buildings as they were
+    const S = R.session(lost, R.head(lost)), id = lost.nextId, t0 = 1000;
+    const m = S.note('rebuild', { b: id, x: 6.5, y: 6.5 }, t0), k = S.ledger.buildings.find((b) => b.id === id);
+    ok(!!m && !!k && k.kind === 'keep' && k.level === 1 && k.rebuilt === true && k.startedAt === t0 && S.ledger.base.crystals === 50000 - KB.crystals && S.ledger.base.wood === 20000 - KB.wood
+      && S.ledger.buildings.find((b) => b.id === tw.id).level === 3,
+      'M13 item 14: the rebuild puts a keep back at LEVEL 1 for exactly 75.00 crystals and 75.00 wood (500/200 -> ' + S.ledger.base.crystals / 100 + '/' + S.ledger.base.wood / 100 + '), and the TOWER III keeps its level');
+    const second = S.note('rebuild', { b: id + 1, x: 7.5, y: 7.5 }, t0 + 1);
+    ok(!second && /already stands or is going up/.test((S.refused.slice(-1)[0] || {}).why || ''), 'and a second rebuild while that keep is going up is refused');
+    // UNTIL IT IS FINISHED nothing is raised or placed - the rebuilt keep included - and at the ms it finishes, both are
+    const at = (dt) => { const X = R.session(S.ledger, R.head(S.ledger)); return { up: X.note('raise', { b: id, level: 2 }, t0 + dt), X }; };
+    const plc = (dt) => { const X = R.session(S.ledger, R.head(S.ledger)); return X.note('build', { b: S.ledger.nextId, of: 'hut', x: 7.5, y: 7.5 }, t0 + dt); };
+    const early = at(KMS - 1), done = at(KMS);
+    ok(R.needMs(k) === KMS && R.standingLevel(k, t0 + KMS - 1) === 0 && R.standingLevel(k, t0 + KMS) === 1 && !early.up && /until a rebuilt keep stands/.test((early.X.refused[0] || {}).why || '') && !plc(KMS - 1)
+      && !!done.up && !!plc(KMS),
+      'ruling 77: one ms before the rebuilt keep is finished (' + (KMS - 1) / 1000 + ' s) it cannot be raised and no hut can be placed (' + (early.X.refused[0] || {}).why + '); at ' + KMS / 1000 + ' s both are taken');
+    // the keep-level cap holds the old buildings where they are until the keep is raised again
+    { const X = R.session(S.ledger, R.head(S.ledger)), hut = X.ledger.buildings.find((b) => b.kind === 'hut'), upHut = X.note('raise', { b: hut.id, level: 2 }, t0 + KMS);
+      ok(!upHut && /past the keep, which stands at level 1/.test((X.refused[0] || {}).why || ''),
+        'ruling 77: with the rebuilt keep standing at level 1, a hut cannot rise to level 2 past it - "none goes higher until the keep is raised again" (' + (X.refused[0] || {}).why + ')'); }
+    // what knocking it down gives back: half of what was spent, the rebuild bill counted as its first rung
+    ok(JSON.stringify(R.refund('keep', 1, 0, true)) === JSON.stringify({ wood: KB.wood / 2, crystals: KB.crystals / 2 }) && JSON.stringify(R.refund('keep', 1, 0)) === JSON.stringify({ wood: 0, crystals: 0 }),
+      'a rebuilt keep knocked down refunds half its rebuild bill (37.50 + 37.50); a first keep, which was free, refunds nothing'); }
+  // RULING 72, as ruling 77 reads it: a keep its OWNER knocks down is lost too - locked, and the next one is a rebuild
+  { const lone = R.fresh(0, { crystals: 50000, wood: 20000 }); lone.buildings.push(R.buildingRow(1, 'keep', 1, 0.5, 0.5, false, null, 0)); lone.nextId = 2;
+    const S = R.session(lone, R.head(lone)), dm = S.note('demolish', { b: 1 }, 5), fr = S.note('build', { b: 2, of: 'keep', x: 0.5, y: 0.5 }, 6), rb = S.note('rebuild', { b: 2, x: 0.5, y: 0.5 }, 7);
+    ok(!!dm && !!S.ledger.keepLost && S.ledger.keepLost.fight === null && S.ledger.keepLost.by === 0 && !fr && /knocked down/.test((S.refused[0] || {}).why || '') && !!rb
+      && S.ledger.base.crystals === 50000 - 7500 && S.ledger.base.wood === 20000 - 7500,
+      'ruling 72: a keep knocked down by its owner is LOST (keepLost, no fight) - a free Keep I is refused (' + (S.refused[0] || {}).why + ') and the next keep is a rebuild at 75/75'); }
+
+  // ---------------------------------------------------------------------------------------------------------------
+  // M13 ITEMS 13 AND 17 (rulings 68, 70, 88 and 107 (1)); M13 ITEM 16 (ruling 106): A DESTROYED SILO OR DEPOT SPILLS
+  // WHAT THE STORE LEFT CANNOT HOLD, ONTO A FREE TILE NEXT TO IT, AND NOTHING DESTROYED IS REFUNDED. Read off the
+  // start base: Depot I (240.00) + Silo I (+300.00) = 540.00, holding 500.00. Exact arithmetic on the purse and the pile.
+  // The `attacked` move is driven directly: no fight names a destroyed silo or depot yet (combat.js fights walls only).
+  // ---------------------------------------------------------------------------------------------------------------
+  { const sb = () => { const X = startLedger(); X.base.crystals = 50000; X.base.wood = 1234; return X; };
+    const hit = (X, body) => { const S = R.session(X, R.head(X)), mm = S.note('attacked', Object.assign({ fight: 7, hash: '0x00', by: 9, won: true, lost: [], walls: [] }, body), 900); return { m: mm, S, L: S.ledger, why: (S.refused[0] || {}).why }; };
+    const X0 = sb(), idOf = (kind) => X0.buildings.find((b) => b.kind === kind).id;
+    const nextTo = (b, t) => !!t && Math.max(Math.abs(t.x - Math.floor(b.x)), Math.abs(t.y - Math.floor(b.y))) === 1;
+    const free = (L, t) => !!t && !L.buildings.some((b) => b.kind !== 'wall' && Math.floor(b.x) === t.x && Math.floor(b.y) === t.y);
+    const cap0 = R.storeCap(X0, 900), silo = X0.buildings.find((b) => b.kind === 'silo'), depot = X0.buildings.find((b) => b.kind === 'collectionDepot');
+    // a silo destroyed
+    { const r = hit(sb(), { destroyed: [silo.id] }), cap = R.storeCap(r.L, 900), p = (r.L.spills || [])[0];
+      ok(cap0 === 54000 && !!r.m && cap === 24000 && r.L.base.crystals === 24000 && !!p && p.crystals === 26000 && p.fight === 7 && nextTo(silo, p.tile) && free(r.L, p.tile) && r.L.base.wood === 1234 && !r.L.buildings.some((b) => b.id === silo.id),
+        'M13 item 13 (ruling 70): a destroyed silo spills what the store left cannot hold - 500.00 held, the cap 540.00 -> ' + cap / 100 + ', so ' + (p && p.crystals / 100) + ' lies on tile ' + JSON.stringify(p && p.tile) + ' next to the silo, free, and the purse keeps ' + r.L.base.crystals / 100 + (r.why ? ' - ' + r.why : '')); }
+    // a depot destroyed - and its harvester goes with it
+    { const r = hit(sb(), { destroyed: [depot.id] }), cap = R.storeCap(r.L, 900), p = (r.L.spills || [])[0];
+      ok(!!r.m && cap === 30000 && r.L.base.crystals === 30000 && !!p && p.crystals === 20000 && nextTo(depot, p.tile) && free(r.L, p.tile) && !r.L.buildings.some((b) => b.kind === 'collectionDepot'),
+        'M13 item 17 (ruling 107 (1)): a destroyed collection depot spills as a silo does - the cap 540.00 -> ' + cap / 100 + ', ' + (p && p.crystals / 100) + ' on tile ' + JSON.stringify(p && p.tile) + ' next to the depot, which goes with its harvester' + (r.why ? ' - ' + r.why : '')); }
+    // both, and the keep, in one attack: in the order named, each spilling next to itself; the keep spills nothing (ruling 78)
+    { const r = hit(sb(), { destroyed: [silo.id, depot.id], keep: true }), sp = r.L.spills || [];
+      ok(!!r.m && sp.length === 1 && sp[0].crystals === 26000 && nextTo(silo, sp[0].tile) && r.L.base.crystals === 24000 && !!r.L.keepLost && R.storeCap(r.L, 900) === V.kinds.keep.rebuild.crystals,
+        'silo, depot and keep in one attack: the silo spills 260.00, the depot leaves the keep\'s 240.00 floor which still holds the 240.00 left, and the keep goes LAST and spills nothing - ruling 78 keeps the ' + r.L.base.crystals / 100 + ' above its 75.00' + (r.why ? ' - ' + r.why : '')); }
+    // fits: nothing spills; a building that stores nothing spills nothing; nothing destroyed is refunded (ruling 106)
+    { const lowX = sb(); lowX.base.crystals = 20000; const r = hit(lowX, { destroyed: [silo.id] });
+      // a TOWER II among them: its rungs cost crystals as well as wood, so a salvage of either would show in the purse
+      const hiX = sb(); hiX.buildings.find((b) => b.kind === 'tower').level = 2;
+      const h = hit(hiX, { destroyed: [idOf('hut'), idOf('tower'), idOf('generator')] }), w = hit(sb(), { walls: X0.buildings.filter((b) => b.kind === 'wall').map((b) => b.id), keep: true });
+      ok(!!r.m && !r.L.spills && r.L.base.crystals === 20000 && !!h.m && !h.L.spills && h.L.base.crystals === 50000 && h.L.base.wood === 1234 && !!w.m && w.L.base.crystals === 50000 && w.L.base.wood === 1234,
+        'ruling 106: a silo destroyed with room left spills nothing (200.00 under the 240.00 left); a hut, tower and generator destroyed - which store nothing - spill nothing, and they, four broken walls and the keep refund NOTHING: the purse stays 500.00 / 12.34'); }
+    // refusals: a wall or the keep named as destroyed, a building named twice
+    { const a = hit(sb(), { destroyed: [idOf('wall')] }), b = hit(sb(), { destroyed: [idOf('keep')] }), c = hit(sb(), { destroyed: [silo.id, silo.id] });
+      ok(!a.m && !b.m && !c.m && /goes in `walls`/.test(a.why || '') && /destroyed once/.test(c.why || ''), 'a wall or the keep named in `destroyed`, or a building named twice, is refused - each has its own field'); }
+  }
   // A LOST ATTACK takes nothing and destroys nothing
   const E1 = engage.r;
   ok(E1.defender.ledger.base.crystals === engage.def.ledger.base.crystals && E1.defender.ledger.base.wood === engage.def.ledger.base.wood && E1.attacker.ledger.base.crystals === engage.att.ledger.base.crystals
@@ -474,6 +562,8 @@ console.log('--- the harvester pays its bill; M13: an attack settled on our serv
     'a Friend sent twice, a Friend not on the roster, a side that is not N/E/S/W and a base attacking itself are each Invalid');
 }
 
+// RECORDCHECK_NODE_ONLY=1: stop here, after part (1) - what rebuildproof.test.js's mutants run, each against a mutated record.js
+if (process.env.RECORDCHECK_NODE_ONLY) { console.log('recordcheck (node part only): ' + pass + ' passed, ' + fail + ' failed'); process.exit(fail ? 1 : 0); }
 // ======================================= (2) the page, in a browser =======================================
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

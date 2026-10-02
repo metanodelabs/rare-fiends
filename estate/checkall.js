@@ -489,6 +489,20 @@ const CHECKS = [
                         + 'taken out of a copy turning its own assertion red',
                         'the real chain and Server 1; more than two players; a name on a page other than those it names; '
                         + 'the game\'s Genesis is stood in for on a developer\'s machine (?wallet=&genesis=), not read off chain'],
+  ['rebuildproof.test', 'M13 items 13, 14, 16 and 17: record.js\'s rebuild, lostLock and spill rules each taken out of a copy and '
+                        + 'recordcheck\'s node part turning the credited line red; then in Chrome on serve.py --gate --fog, by real '
+                        + 'taps only, a player knocks down its own keep and rebuilds it for exactly the rebuild bill, the lock holds '
+                        + 'while its builder is pulled off, HALL is raised once it stands, the server\'s record agrees and page and '
+                        + 'record hash the same; a second player sees the rebuilt keep only once in sight',
+                        'a keep lost to an ATTACK rather than knocked down by its owner, driven in the browser; more than two '
+                        + 'players; the real chain (a stand-in answers who holds each Genesis)'],
+  ['minimapfogproof.test', 'THE MINI MAP UNDER THE SERVER\'S FOG (serve.py --gate --fog, as Server 1 runs): a signed-in player '
+                        + 'arrives by a real tap; the mini map\'s own canvas, pixel by pixel, draws every revealed tile the page '
+                        + 'holds as ground and every unrevealed one black; a Friend walks and the map grows; HOME, FRIENDS, the '
+                        + 'toggle and an attack flash on the canvas; 1920x1080 and 390x844; pagewatch clean; and the mini map '
+                        + 'put back on the generator\'s size turns it red with the Server 1 crash (createImageData, width zero)',
+                        'another base on the toggle under the fog (one player only: the flood from its buildings over plot-1 '
+                        + 'ground is not exercised); Server 1 itself; the Friend is walked by setting its target, not by a tap'],
 ];
 const PARITY = ['paritycheck', 'the Solidity and the JavaScript settle the same roll, fight and duel - on the '
                 + "game's OWN four tables, HP, the wall, every weapon and the combat timings, all read out of "

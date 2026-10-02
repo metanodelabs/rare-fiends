@@ -283,6 +283,9 @@
   };
   // every kind's raise time per level, DERIVED from its own materials (row 24) - never typed per row
   Object.values(KINDS).forEach((r) => { r.buildMs = raised(r.cost, r.wood); });
+  // and a REBUILT keep's raise time from its own bill, by the same rule (ruling 77's 75 wood + 75 crystals at row 24's
+  // 4 s a unit: 600 s by one Friend, 2.8 s under the demo switch) - derived here, never typed (record.js needMs reads it)
+  Object.values(KINDS).forEach((r) => { if (r.rebuild) r.rebuildMs = raised([r.rebuild.crystals || 0], [r.rebuild.wood || 0])[0]; });
   // ROW 7 IS A RULE: no level of any building, and no harvester, may be stronger than STRENGTH_MAX. A row that
   // breaks it is a table that cannot load, rather than a ceiling a page mentions and nothing holds.
   Object.entries(KINDS).forEach(([k, r]) => r.strength.forEach((s, i) => {

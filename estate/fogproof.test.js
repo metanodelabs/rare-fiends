@@ -347,6 +347,14 @@ async function scenario(estate, ok, opts = {}) {
           Object.keys(nb).sort().join() === 'at,attacker,defender,kind,won', newsB);
         const vH = (await req(s, 'GET', '/api/fog/view?base=' + base.A, as('A'))).j, eH = vH.others.find((o) => o.base === base.B) || {};
         ok('harvesters: the one destroyed is gone from A\'s view', !(eH.harvesters || []).some((h) => h.depot === 5 && h.n === 2), eH);
+        // SPILLED CRYSTALS ON LIVE GROUND ONLY (M13 items 13, 17 and 18; visibility.py _piles): A's Friend stands on the
+        // lure, so the pile its fight left there is on A's live ground and A is shown it - where and how much, in A's
+        // frame, and NOT whose (a pile is anybody's to claim, and its base would say where B is). C never moved: nothing.
+        const pv = (vH.piles || []).find((q) => q.x === lure[0] - pA.cx && q.y === lure[1] - pA.cy);
+        ok('piles: A is shown the spilled cargo on its live ground - where (' + (lure[0] - pA.cx) + ', ' + (lure[1] - pA.cy) + ') and how much (' + CARGO + '), never whose',
+          pv && pv.crystals === CARGO && Object.keys(pv).sort().join() === 'crystals,x,y' && !JSON.stringify(vH.piles).includes('"base"'), vH.piles);
+        const pC0 = (await req(s, 'GET', '/api/fog/view?base=' + base.C, as('C'))).j;
+        ok('piles: C, whose Friends never moved, is shown no pile', Array.isArray(pC0.piles) && pC0.piles.length === 0, pC0.piles);
         const dB = await req(s, 'POST', '/api/duel', Object.assign(as('A'), { body: { to: String(base.B), game: 'rps', stake: 1 } }));
         ok('bases: nor can B be challenged by its number from a harvester alone', dB.j && dB.j.reason === 'NoOpponent', dB.text);
       }
@@ -431,6 +439,9 @@ async function scenario(estate, ok, opts = {}) {
     await sleep(SETTINGS.dimAfterS * 1000 + 600);
     const v1 = (await req(s, 'GET', '/api/fog/view?base=' + base.A, as('A'))).j;
     ok('fog: ground left behind dims after dimAfterS, and shows no players or buildings', stateA(v1, tB[0], tB[1]) === 1 && !v1.others.some((o) => o.base === base.B), [stateA(v1, tB[0], tB[1]), v1.others.map((o) => o.base), gone]);
+    { const lt = stateA(v1, lure[0], lure[1]), shown = (v1.piles || []).filter((q) => q.x === lure[0] - pA.cx && q.y === lure[1] - pA.cy);
+      ok('piles: every pile A is shown lies on ground its view marks live, and the cargo pile on ground now ' + ['black', 'dim', 'live'][lt] + ' is ' + (lt === 2 ? 'shown' : 'not shown'),
+        (v1.piles || []).every((q) => stateA(v1, q.x + pA.cx, q.y + pA.cy) === 2) && (lt === 2 ? shown.length === 1 : shown.length === 0), [lt, v1.piles]); }
     const peekDim = await req(s, 'GET', '/api/record/' + base.B, as('A'));
     ok('records: a base on dim ground is Unseen again', peekDim.j.reason === 'Unseen', peekDim.text);
     await sleep((SETTINGS.blackAfterS - SETTINGS.dimAfterS) * 1000 + 600);
@@ -516,6 +527,9 @@ const MUTANTS = [
   ['view own base only', [['serve.py', '        return b if b in self.fog_mine() else None', '        return b']], 'terrain: C cannot ask in another base\'s frame'],
   ['first write offered', [['serve.py', "            if verb == 'commit' and FOG.offered(s['address'], base):", "            if verb == 'commit':"]], 'writes: commit, forget, attack-from, view and powers on a base that is not C\'s'],
   ['news names only', [['visibility.py', "'won': fight.get('winner') == 'attack'}", "'won': fight.get('winner') == 'attack', 'where': d and d.home()}"]], 'news: an attack is announced by names only'],
+  ['piles on live ground only', [['visibility.py', "                if self.live_world(v, wx, wy, now):\n                    out.append", "                if True:\n                    out.append"]], 'piles: C, whose Friends never moved, is shown no pile'],
+  ['a pile names its base', [['visibility.py', "out.append({'x': wx - cx, 'y': wy - cy, 'crystals': c})", "out.append({'x': wx - cx, 'y': wy - cy, 'crystals': c, 'base': o.id})"]], 'piles: A is shown the spilled cargo on its live ground'],
+  ['piles are never served', [['visibility.py', "                    'piles': self._piles(b, now),", "                    'piles': [],"]], 'piles: A is shown the spilled cargo on its live ground'],
   ['canonical base id', [['serve.py', "        if s and str(int(base)) == base:", '        if s:']], 'writes: a base id spelled with a leading zero is not the base'],
 ];
 

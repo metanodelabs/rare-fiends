@@ -72,9 +72,11 @@
   // log of how many Friends work its build, [[at, n], ...] in time order (M8 item 3); before its first entry
   // one Friend works. An empty log is left OFF the row (undefined drops out of the head), so a record written
   // before hands existed hashes exactly as it did.
-  const buildingRow = (id, kind, level, x, y, vert, startedAt, harvesters, hands) =>
+  // `rebuilt` (M13 item 14, ruling 77): a keep put back after one was lost - its first level is the `rebuild` bill and
+  // takes that bill's raise time (needMs below), not Keep I's. Left OFF every other row, so no older head moves.
+  const buildingRow = (id, kind, level, x, y, vert, startedAt, harvesters, hands, rebuilt) =>
     ({ id, kind, level, x, y, vert: !!vert, startedAt: startedAt == null ? null : startedAt, harvesters: harvesters || 0,
-       hands: hands && hands.length ? hands.map((h) => [h[0], h[1]]) : undefined });
+       hands: hands && hands.length ? hands.map((h) => [h[0], h[1]]) : undefined, rebuilt: rebuilt ? true : undefined });
   // A roster row (schema rosterRow + towerWatch / wallCrew as `post`): x, y IN SPOTS; order is the index
   // into Combat.ORDERS; post is null, { kind: 'tower', building, slot: 0 } or { kind: 'wall', building, slot }.
   const rosterRow = (id, a) => ({ id, gen: a.gen, name: a.name, rented: !!a.rented, token: a.token == null ? null : a.token,
@@ -104,6 +106,12 @@
     const t = kindRow(kind).buildMs; if (!t || !(t[level - 1] >= 0)) throw new Error(kind + ' has no raise time at level ' + level);
     return t[level - 1];
   }
+  // HOW LONG THIS ROW'S LEVEL TAKES ONE FRIEND. Every row reads raiseMs by its kind and level - except a REBUILT keep on
+  // its first level, which reads the kind's `rebuildMs`: ruling 77's 75 wood and 75 crystals at sweep row 24's 4 s a
+  // unit, derived in values.js from the `rebuild` bill exactly as every rung's time is derived from its own bill. So a
+  // rebuilt keep is not FINISHED the moment it is paid for (Keep I is free, so it would be), and ruling 77's "until the
+  // rebuilt keep is FINISHED, nothing can be upgraded or placed" has a time to run over.
+  const needMs = (b) => (b.rebuilt && b.level === 1 ? kindRow(b.kind).rebuildMs : raiseMs(b.kind, b.level));
   // M8 ITEM 3: each Friend up to the row's ceiling works at one Friend's pace, so n of them take the time
   // down to time / n; past the ceiling another adds nothing. 0 hands is a build left standing with its
   // progress kept - a builder pulled off to fight takes none of it with them.
@@ -121,9 +129,9 @@
     }
     return clock > from ? w + (clock - from) * working(b.kind, n) : w;
   }
-  const progress = (b, clock) => { if (b.startedAt === null) return 1; const need = raiseMs(b.kind, b.level);
+  const progress = (b, clock) => { if (b.startedAt === null) return 1; const need = needMs(b);
     return need === 0 ? 1 : Math.max(0, Math.min(1, worked(b, clock) / need)); };
-  const finished = (b, clock) => b.startedAt === null || worked(b, clock) >= raiseMs(b.kind, b.level);
+  const finished = (b, clock) => b.startedAt === null || worked(b, clock) >= needMs(b);
   const standingLevel = (b, clock) => (finished(b, clock) ? b.level : b.level - 1);
   // WHAT FIGHTS: a building stands in a fight at the level it STANDS at (ruling 64: a section's strength is its
   // standing level's), so one being raised a level is still there, at the level below the one going up. Only a
@@ -134,9 +142,11 @@
   // built; rulings 15 and 28). Hundredths in, hundredths out; the throw is the same tripwire as
   // RareRefund.sol's RoundingWouldLose. `harvesters` is how many a collection depot built: each one's
   // harvCost counts as spent on the depot, so half of each comes back with it (ruling 56, edge 3).
-  function refund(kind, level, harvesters) {
+  // `rebuilt` (M13 item 14): a rebuilt keep's first level was paid at the `rebuild` bill, not Keep I's, so that is what
+  // its first rung counts as spent - half of what was spent, the same rule.
+  function refund(kind, level, harvesters, rebuilt) {
     const out = {}; MATERIALS.forEach(([m]) => { out[m] = 0; });
-    for (let l = 1; l <= level; l++) { const c = materials(kind, l); MATERIALS.forEach(([m]) => { out[m] += c[m]; }); }
+    for (let l = 1; l <= level; l++) { const c = l === 1 && rebuilt ? Object.assign({ crystals: 0, wood: 0 }, kindRow(kind).rebuild) : materials(kind, l); MATERIALS.forEach(([m]) => { out[m] += c[m] || 0; }); }
     if (kind === 'collectionDepot') out.crystals += (harvesters || 0) * V.harvCost;
     MATERIALS.forEach(([m]) => { out[m] /= 2; if (out[m] !== Math.floor(out[m])) throw new Error('a refund would lose a hundredth'); });
     return out;
@@ -168,6 +178,17 @@
       else if (isKeepKind(b.kind)) floor = Math.max(floor, (V.kinds[b.kind].capacity || [])[s - 1] || 0); });
     return any ? depot + silos : keepStands(ledger, clock, without) ? floor : rebuildCap();
   }
+  // M13 ITEMS 8 AND 14 (rulings 37 (d), 72 and 77): A BASE THAT LOST ITS KEEP IS LOCKED - destroyed by an opponent
+  // (settle's `attacked`) or knocked down by its owner (`demolish`), the record's `keepLost` says which. While it is,
+  // nothing is raised and nothing is placed, and it lifts when a REBUILT keep STANDS - finished, never when it is paid
+  // for (ruling 77: "until the rebuilt keep is FINISHED, nothing can be upgraded or placed"). `keepLost` itself stays on
+  // the ledger for good: it is the record that this base has had a keep, so every keep after it is a `rebuild` at the
+  // keep row's `rebuild` bill, and only the first is free.
+  const lostLock = (L, clock) => !!L.keepLost && keepStands(L, clock) < 1;
+  const lostWhy = (L) => (L.keepLost.fight != null ? 'the keep was destroyed by an opponent (fight ' + L.keepLost.fight + ')' : 'the keep was knocked down');
+  // what PLACING one more of `kind` costs this base: level 1's bill, except a keep on a base that has lost one, which is
+  // the `rebuild` bill (ruling 77). The page prices and checks a placement by this, and the moves below pay it.
+  const placeBill = (L, kind) => (isKeepKind(kind) && L && L.keepLost ? Object.assign({}, kindRow(kind).rebuild || no(kind + ' has no rebuild bill')) : materials(kind, 1));
   const siloCap = storeCap;                               // the old name, kept readable: it is the same cap
   // RULINGS 15 AND 56: how much room a knock-down's refund is short of - the purse plus the refund, over the
   // cap the base has once that building is gone (a silo's own refund is not held by that silo; with two
@@ -188,9 +209,10 @@
   const MAX_HAUL = haulOf(V.kinds.collectionDepot.tiers.length, 1);   // the biggest depot's haul from a seam cut at its best stage
   // A SEAM IS NEVER CUT FOR CRYSTALS THE PURSE CANNOT TAKE. When the store is full, gathering is REFUSED and
   // the crystals held are kept (DESIGN.md, M8 item 14: "gathering is refused and the crystals held are kept";
-  // ruling 78: "Gathering stops there"). Nothing spills: a spill is ruled only for a destroyed silo and a won
-  // pot (rulings 70 and 80), and whether a full player may pick spilled crystals up is open ("Not to be
-  // guessed"). So a haul is taken WHOLE or not at all - the `gather` move below refuses one that does not fit,
+  // ruling 78: "Gathering stops there"). Nothing spills: a spill is ruled only for a destroyed silo or depot, a
+  // won pot and a harvester's cargo (rulings 70, 80, 107 and 130), never for a haul that does not fit; and ruling
+  // 107 (3) says a full player cannot pick spilled crystals up until they have room - there is no pick-up move
+  // yet (M13 item 18). So a haul is taken WHOLE or not at all - the `gather` move below refuses one that does not fit,
   // and the page asks this before it resets a seam or sends a harvester out. `held` and `cap` in hundredths.
   // It used to be asked of nobody: the page reset the seam first and let bank() clip, and a full store lost
   // the whole haul (a fresh base holds 240.00 against a 75.00 or 240.00 store - every hand cut was lost).
@@ -237,6 +259,10 @@
       }
       const P = V.kinds[kind].placement || {};
       if (P.maxPerBase && L.buildings.filter((b) => b.kind === kind).length >= P.maxPerBase) no('no more than ' + P.maxPerBase + ' ' + kind);
+      // M13 ITEM 14, ruling 77: the first keep is free and every keep after a lost one is a REBUILD - so `build` never
+      // puts a keep on a base that lost one, and while that base is locked nothing else goes up either
+      if (P.isKeep && L.keepLost) no(lostWhy(L) + ': a lost keep is put back by rebuild, for its rebuild bill');
+      if (lostLock(L, m.at)) no(lostWhy(L) + ': nothing can be placed until a rebuilt keep stands');
       // M9 ITEM 9: the keep's lock is the record's, not only the screen's - nothing that needs a keep goes up
       // until one STANDS (finished, item 10; ruling 77 says the same of a rebuilt keep)
       if (P.needsKeep && keepStands(L, m.at) < 1) no('no keep standing: a ' + kind + ' cannot go up until one does');
@@ -253,7 +279,9 @@
       if (m.level === b.level) { restart(); return; }
       // M13 ITEM 8, ruling 37 (d): a base whose keep an opponent destroyed keeps using what it has and CANNOT
       // UPGRADE IT. Replaying a build at its own level (above) is not an upgrade, and is still allowed.
-      if (L.keepLost) no('the keep was destroyed by an opponent (fight ' + L.keepLost.fight + '): nothing on this base can be raised');
+      // M13 ITEM 14, ruling 77: and it lifts when a rebuilt keep is FINISHED - the rebuilt keep itself included, which
+      // cannot be raised past level 1 while it is still going up.
+      if (lostLock(L, m.at)) no(lostWhy(L) + ': nothing on this base can be raised until a rebuilt keep stands');
       if (m.level !== b.level + 1) no('level ' + m.level + ' is not the next rung after ' + b.level);
       if (m.level > row_.tiers.length) no(b.kind + ' has no level ' + m.level);
       // M9 ITEMS 9 AND 10: NO KEEP, NO UPGRADES - and for every row that says cappedByKeepLevel, no level past the
@@ -273,12 +301,34 @@
     demolish(L, m) {
       const b = building(L, m.b);
       if ((V.kinds[b.kind].placement || {}).isKeep && L.buildings.length > 1) no('the keep goes last');
-      const rf = refund(b.kind, b.level, b.harvesters);
+      const rf = refund(b.kind, b.level, b.harvesters, b.rebuilt);
       const short = refundExempt(b.kind) ? 0 : refundShort(L.base.crystals, rf.crystals, storeCap(L, m.at, b));
       if (short > 0) no('needs ' + (short / V.crystalUnit).toFixed(2) + ' room: the depot and silos left cannot hold the refund of ' + rf.crystals);
       L.base.crystals += rf.crystals; L.base.wood += rf.wood;
       unpostAll(L, (r) => r.post.building === b.id);
       L.buildings.splice(L.buildings.indexOf(b), 1);
+      // RULING 72 (and ruling 77's stated reading, "after loss" is either cause): a keep its owner knocks down is a LOST
+      // keep, exactly as one an opponent destroys - the lock and the rebuild bill read the same field. No fight did it.
+      if (isKeepKind(b.kind)) L.keepLost = { at: m.at, by: L.base.id, fight: null };
+    },
+    // M13 ITEM 14, RULINGS 69 AND 77: A LOST KEEP PUT BACK. Only on a base whose keep was lost (keepLost) and that has
+    // no keep - standing or going up. It costs the keep row's `rebuild` bill (75 wood and 75 crystals), never the free
+    // Keep I, and comes back at LEVEL 1 on a free tile; it takes that bill's raise time (needMs), and until it is
+    // finished the base stays locked (lostLock). The other buildings keep their levels: nothing here touches them, and
+    // the keep-level cap (raise, cappedByKeepLevel) holds them where they are until the keep is raised again.
+    // WHERE: "any free tile of the player's own land" - free is checked here, as `build` checks it; own land is the
+    // page's (foreign()) and the server's, as for every building, because the record holds no ground yet.
+    rebuild(L, m) {
+      const kind = Object.keys(V.kinds).find(isKeepKind) || no('no kind is a keep');
+      if (!L.keepLost) no('this base has not lost a keep: its first keep is placed with build, and is free');
+      if (L.buildings.some((b) => isKeepKind(b.kind))) no('a keep already stands or is going up on this base');
+      if (!Number.isInteger(m.b) || m.b < L.nextId) no('building id ' + m.b + ' is not fresh');
+      const mine = covers({ kind, x: m.x, y: m.y });
+      L.buildings.forEach((b) => { if (b.kind === 'wall') return;
+        if (covers(b).some(([x, y]) => mine.some(([mx, my]) => mx === x && my === y))) no('tile ' + m.x + ',' + m.y + ' is taken by building ' + b.id); });
+      pay(L, placeBill(L, kind));
+      L.buildings.push(buildingRow(m.b, kind, 1, m.x, m.y, false, m.at, 0, undefined, true));
+      L.nextId = m.b + 1;
     },
     // a depot builds one more harvester, up to one a level
     harvester(L, m) {
@@ -356,13 +406,33 @@
     },
     // `attacked` - on the DEFENDER's record: its Friends that went down leave the roster, its wall sections
     // that were broken come down (their crew step off), and if the attack won its keep is destroyed (ruling 37 (d);
-    // keepLost below). THE PURSE IS UNTOUCHED, won or lost (ruling 68, superseding ruling 14: "to get the
+    // keepLost below). THE PURSE GOES TO NOBODY, won or lost (ruling 68, superseding ruling 14: "to get the
     // resources, they must claim the building .. that is the only way.. destroying it in battle is just a
-    // destroyed building"). The silos' spill onto the land around them (M13 item 13) is not written here.
+    // destroyed building"), and NOTHING DESTROYED IS REFUNDED (ruling 106: "damage from weapons is different than
+    // damage from taking down the building.. one can be salvaged the other cannot").
+    // M13 ITEMS 13 AND 17 - `destroyed`, the other buildings the attack destroyed (not walls, not the keep: each has
+    // its own field). Each comes down in the order named, and when one that STORES goes - a silo (rulings 68 and 70)
+    // or a collection depot (ruling 107 (1)) - whatever the base now holds above the store left (storeCap, the one
+    // rule) SPILLS onto a free tile next to it: it leaves the purse and lies in the ledger's `spills`, the same pile a
+    // won pot and a harvester's cargo make, until someone claims it (ruling 88). A depot's harvesters go with it, no
+    // refund (ruling 130's reading of 56). Destroyed buildings come down BEFORE the keep, so a keep lost in the same
+    // attack moves the cap after the spill and spills nothing itself (ruling 78: what is held above the 75.00 "stays").
+    // WHAT NAMES THEM: nothing yet - combat.js fights wall sections and nothing else, so settle() never writes this
+    // field. What destroys a silo or a depot in an attack is not decided (M13 items 13 and 17).
     attacked(L, m) {
       dropFriends(L, m.lost || []);
       (m.walls || []).forEach((id) => { const b = building(L, id); if (b.kind !== 'wall') no('building ' + id + ' is not a wall');
         unpostAll(L, (r) => r.post.building === id); L.buildings.splice(L.buildings.indexOf(b), 1); });
+      const gone = m.destroyed || [];
+      if (!Array.isArray(gone) || new Set(gone).size !== gone.length) no('a building is destroyed once');
+      gone.forEach((id) => { const b = building(L, id);
+        if (b.kind === 'wall' || isKeepKind(b.kind)) no('building ' + id + ' is a ' + b.kind + ': a wall goes in `walls` and the keep in `keep`');
+        unpostAll(L, (r) => r.post.building === id); L.buildings.splice(L.buildings.indexOf(b), 1);
+        const over = L.base.crystals - storeCap(L, m.at);
+        if (over > 0 && (b.kind === 'silo' || b.kind === 'collectionDepot')) {
+          L.base.crystals -= over;
+          L.spills = (L.spills || []).concat([{ fight: m.fight, crystals: over, at: m.at, tile: tileNextTo(L, b) }]);
+        } });
       noLoot(m);
       if (m.keep) {
         if (!m.won) no('only a won attack destroys the keep');
@@ -413,7 +483,11 @@
     const stands = (b) => standingLevel(b, clock) >= 1;
     const silo = L.buildings.filter((b) => b.kind === 'silo' && stands(b)).sort((p, q) => p.id - q.id)[0];
     const by = silo || L.buildings.find((b) => isKeepKind(b.kind) && stands(b));
-    if (!by) return null;
+    return by ? tileNextTo(L, by) : null;
+  }
+  // the first free tile next to building `by` (a building still on the ledger, or one just taken off it), in a fixed
+  // order round its footprint - its own tile when every one round it is taken. Free: no building other than a wall.
+  function tileNextTo(L, by) {
     const taken = new Set(); L.buildings.forEach((b) => { if (b.kind !== 'wall') covers(b).forEach(([x, y]) => taken.add(Math.floor(x) + ',' + Math.floor(y))); });
     const round = []; covers(by).forEach(([x, y]) => [[1, 0], [0, 1], [-1, 0], [0, -1], [1, 1], [-1, 1], [1, -1], [-1, -1]]
       .forEach(([dx, dy]) => round.push([Math.floor(x) + dx, Math.floor(y) + dy])));
@@ -788,7 +862,8 @@
 
   const api = { head, hashOf, canon, baseRow, fresh, buildingRow, rosterRow, finished, standingLevel, refund, refundShort, siloCap, wallSlots,
     MOVES: Object.keys(MOVES), reduce, Refused, session, genesis, apply, defense, spotOf, browserStore, serverStore, POLL_MS, LOG, MAX_HAUL,
-    MATERIALS, materials, raiseMs, ceiling, handsAt, worked, progress, storeCap, stageOf, haulOf, refundExempt, haulFits, storeFull, MIN_HAUL, spillTile,
+    MATERIALS, materials, raiseMs, needMs, ceiling, handsAt, worked, progress, storeCap, stageOf, haulOf, refundExempt, haulFits, storeFull, MIN_HAUL, spillTile, tileNextTo,
+    lostLock, placeBill,
     SERVER_MOVES, ATTACK, groundOf, settle, settleHarvester };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.Record = api;
 })(typeof window !== 'undefined' ? window : globalThis);

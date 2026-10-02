@@ -82,7 +82,7 @@ body.hero :is(.mmap, .mmstack), body.reel :is(.mmap, .mmstack) { display: none !
 }
 `;
 
-  let B, M, W, H, OX, OY, HOME, el, stack, cv, ctx, who, prevB, nextB, openB, homeB2;
+  let B, M, W, H, OX, OY, HOME, FOGW = false, el, stack, cv, ctx, who, prevB, nextB, openB, homeB2;
   let layer = null;                   // the terrain as revealed: W x H pixels, one a tile
   let isOpen = false, at = 0, list = [], heads = [], seenFight = null, fogKind = 'stub';
   // FRIENDS: which of the player's own Friends the last press looked at (the actor, and where it stood in the list),
@@ -111,21 +111,80 @@ body.hero :is(.mmap, .mmstack), body.reel :is(.mmap, .mmstack) { display: none !
     fogKind = 'stub'; stubGrow();
     return (x, y) => { const mx = Math.floor(x + OX), my = Math.floor(y + OY); return mx >= 0 && my >= 0 && mx < W && my < H && STUB[my * W + mx] === 1; };
   }
-  let seen = () => false;
+  let seen = () => false, lit = 0;
   const wx = (i) => (i % W) + 0.5 - OX, wy = (i) => ((i / W) | 0) + 0.5 - OY;
   const revealedBase = (id) => id === HOME || (plotTiles.get(id) || []).some(i => seen(wx(i), wy(i)));
 
+  // ---------------------------------------------------------------- the island under the server's fog (serve.py --fog)
+  // There is no seed and no generator's map: WORLDGEN.M is { W: null, H: null } and the ground arrives in chunks, laid
+  // into WORLDGEN.T (a record a tile, keyed by the game's tileKey, x and y the frame's whole tiles, the home plot's
+  // centre at 0). So the map's size is not known at start and grows as chunks arrive: the frame here is the box round
+  // every tile the page holds, the fog's last view box and the home plot, a margin round it, and it only ever grows
+  // (a map that shrank would jump under the player's thumb). OX, OY put the box's corner at grid (0, 0), so everything
+  // below - wx, wy, the view's box, a tap - reads it unchanged. Which plot a tile is the fog says only for the
+  // player's own (plot 2); another base's ground (plot 1) is found from its buildings, in sight, by a flood over plot-1
+  // tiles - the toggle and an attack's flash reach exactly the bases the fog has shown.
+  const FOG_PAD = 4;
+  let FB = null;                                       // { x0, y0, x1, y1 }: the frame's box in whole tiles, inclusive
+  const tkey = (tx, ty) => (tx + 0.5).toFixed(1) + ',' + (ty + 0.5).toFixed(1);
+  function fogFrame() {
+    const G = B.WORLDGEN, b = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
+    const add = (x0, y0, x1, y1) => { if (x0 < b.x0) b.x0 = x0; if (y0 < b.y0) b.y0 = y0; if (x1 > b.x1) b.x1 = x1; if (y1 > b.y1) b.y1 = y1; };
+    G.T.forEach(r => add(r.x, r.y, r.x, r.y));
+    const m = B.fog && typeof B.fog.mask === 'function' ? B.fog.mask() : null;
+    if (m && m.w > 0 && m.h > 0) add(m.x0, m.y0, m.x0 + m.w - 1, m.y0 + m.h - 1);
+    const h = (G.bases || [])[0];
+    if (h && h.w > 0 && h.h > 0) add(h.x, h.y, h.x + h.w - 1, h.y + h.h - 1);
+    if (!(b.x1 >= b.x0)) { b.x0 = b.y0 = -1; b.x1 = b.y1 = 1; }   // nothing yet: a small box round the plot's centre
+    b.x0 -= FOG_PAD; b.y0 -= FOG_PAD; b.x1 += FOG_PAD; b.y1 += FOG_PAD;
+    if (FB) { b.x0 = Math.min(b.x0, FB.x0); b.y0 = Math.min(b.y0, FB.y0); b.x1 = Math.max(b.x1, FB.x1); b.y1 = Math.max(b.y1, FB.y1); }
+    const grew = !FB || b.x0 !== FB.x0 || b.y0 !== FB.y0 || b.x1 !== FB.x1 || b.y1 !== FB.y1;
+    FB = b; W = b.x1 - b.x0 + 1; H = b.y1 - b.y0 + 1; OX = -b.x0; OY = -b.y0;
+    if (grew && layer) { layer.width = W; layer.height = H; }
+    // the plots: the player's own from the fog's plot 2; another base's from its buildings, over plot-1 ground
+    plotTiles.clear();
+    const idx = (tx, ty) => (ty - b.y0) * W + (tx - b.x0), mine = [];
+    G.T.forEach(r => { if (r.plot === 2) mine.push(idx(r.x, r.y)); });
+    if (mine.length) plotTiles.set(HOME, mine);
+    const others = new Map();
+    (B.buildings || []).forEach(q => { if (q.base == null || q.base === HOME) return;
+      if (!others.has(q.base)) others.set(q.base, []); others.get(q.base).push([Math.floor(q.x), Math.floor(q.y)]); });
+    others.forEach((starts, id) => {
+      const got = new Set(), out = [], todo = starts.slice();
+      while (todo.length && out.length < 4096) {
+        const [tx, ty] = todo.pop(), k = tkey(tx, ty); if (got.has(k)) continue; got.add(k);
+        const r = G.T.get(k); if (!r || r.plot !== 1) continue;
+        out.push(idx(tx, ty)); todo.push([tx + 1, ty], [tx - 1, ty], [tx, ty + 1], [tx, ty - 1]);
+      }
+      if (out.length) plotTiles.set(id, out);
+    });
+    return grew;
+  }
+
   // ---------------------------------------------------------------- the terrain, revealed tiles only
+  const shade = (w, lv) => { const WT = root.MapGen.WATER;
+    return w === WT.SEA ? 24 : w === WT.LAKE ? 30 : (w === WT.RIVER || w === WT.CREEK) ? 46 : 70 + Math.min(6, lv || 0) * 16; };
   function paintLayer() {
+    if (FOGW) fogFrame();
     seen = fog();
     if (!layer) { layer = doc.createElement('canvas'); layer.width = W; layer.height = H; }
-    const g = layer.getContext('2d'), img = g.createImageData(W, H), d = img.data, WT = root.MapGen.WATER;
+    if (FOGW) {                                        // only what the page holds can be ground: lay those, black elsewhere
+      const g = layer.getContext('2d'), img = g.createImageData(W, H), d = img.data, G = B.WORLDGEN;
+      for (let i = 3; i < d.length; i += 4) d[i] = 255;
+      lit = 0;
+      G.T.forEach((r, k) => {
+        const i = (r.y + OY) * W + (r.x + OX);
+        if (i < 0 || i >= W * H || !seen(r.x + 0.5, r.y + 0.5)) return;
+        const c = shade(r.water, G.hill[k]); d[i * 4] = d[i * 4 + 1] = d[i * 4 + 2] = c; lit++;
+      });
+      g.putImageData(img, 0, 0);
+      return;
+    }
+    const g = layer.getContext('2d'), img = g.createImageData(W, H), d = img.data;
+    lit = 0;
     for (let i = 0; i < W * H; i++) {
       let c = 0;                                       // black: not revealed
-      if (seen(wx(i), wy(i))) {
-        const w = M.water[i];
-        c = w === WT.SEA ? 24 : w === WT.LAKE ? 30 : (w === WT.RIVER || w === WT.CREEK) ? 46 : 70 + Math.min(6, M.level[i] || 0) * 16;
-      }
+      if (seen(wx(i), wy(i))) { c = shade(M.water[i], M.level[i]); lit++; }
       d[i * 4] = d[i * 4 + 1] = d[i * 4 + 2] = c; d[i * 4 + 3] = 255;
     }
     g.putImageData(img, 0, 0);
@@ -183,7 +242,8 @@ body.hero :is(.mmap, .mmstack), body.reel :is(.mmap, .mmstack) { display: none !
   // ---------------------------------------------------------------- the bases the toggle reaches
   const short = (a) => (a && /^0x[0-9a-f]{40}$/i.test(a) ? a.slice(0, 6) + '…' + a.slice(-4) : '');
   function refreshList() {
-    const ids = heads.map(h => h.id).filter(id => id !== HOME && plotTiles.has(id) && revealedBase(id)).sort((p, q) => p - q);
+    const known = FOGW ? [...plotTiles.keys()] : heads.map(h => h.id);
+    const ids = known.filter(id => id !== HOME && plotTiles.has(id) && revealedBase(id)).sort((p, q) => p - q);
     const cur = list[at];
     list = [HOME, ...ids];
     at = Math.max(0, list.indexOf(cur));
@@ -213,6 +273,10 @@ body.hero :is(.mmap, .mmstack), body.reel :is(.mmap, .mmstack) { display: none !
     const f = id === HOME ? (B.actors || []).filter(a => a.kind === 'friend' && own(a)) : [];
     if (f.length) return [f.reduce((n, a) => n + a.x, 0) / f.length, f.reduce((n, a) => n + a.y, 0) / f.length];
     if (id === HOME && B.play && B.play.spawn) return B.play.spawn;
+    if (FOGW && id !== HOME) {                         // under the fog: another base is only what the fog has shown of it
+      const b = (B.buildings || []).find(own); if (b) return [b.x, b.y];
+      const T = plotTiles.get(id); if (T && T.length) return [wx(T[0]), wy(T[0])];
+    }
     const p = (B.WORLDGEN.bases || []).find(q => q.id === id);
     return p ? [p.bx + 0.5, p.by + 0.5] : null;
   }
@@ -347,10 +411,11 @@ body.hero :is(.mmap, .mmstack), body.reel :is(.mmap, .mmstack) { display: none !
 
   // ---------------------------------------------------------------- start: once the player's game is up
   function init() {
-    B = root.base; M = B.WORLDGEN.M; W = M.W; H = M.H; OX = B.WORLDGEN.ox; OY = B.WORLDGEN.oy; HOME = B.HOME;
+    B = root.base; M = B.WORLDGEN.M; HOME = B.HOME; FOGW = !!(B.WORLDGEN.fog && B.WORLDGEN.T);
+    if (FOGW) fogFrame(); else { W = M.W; H = M.H; OX = B.WORLDGEN.ox; OY = B.WORLDGEN.oy; }
     // ?ink=light inverts the whole game frame, so the icon pre-inverts only its signal (friends-icon.js FLIP)
     if (root.RFFriendsIcon && new URLSearchParams(location.search).get('ink') === 'light') root.RFFriendsIcon.theme(root.RFFriendsIcon.FLIP);
-    for (let i = 0; i < W * H; i++) { const p = M.plotAt[i]; if (!p) continue; if (!plotTiles.has(p)) plotTiles.set(p, []); plotTiles.get(p).push(i); }
+    if (!FOGW) for (let i = 0; i < W * H; i++) { const p = M.plotAt[i]; if (!p) continue; if (!plotTiles.has(p)) plotTiles.set(p, []); plotTiles.get(p).push(i); }
     build(); paintLayer(); refreshList(); place();
     const repaint = () => { paintLayer(); refreshList(); draw(); };
     root.addEventListener('rf:fog', repaint);
@@ -366,6 +431,8 @@ body.hero :is(.mmap, .mmstack), body.reel :is(.mmap, .mmstack) { display: none !
   root.Minimap = {
     flash, home, jump: (x, y) => { B.view.lookAt(x, y); draw(); }, next: () => step(1), prev: () => step(-1), open, friend: nextFriend,
     state: () => ({ open: isOpen, fog: fogKind, bases: list.slice(), at, flashing: [...flashes.keys()], up: !!el,
-      friend: friendSay ? friendSay.join(' · ') : null, friends: friendsOf().length }),
+      friend: friendSay ? friendSay.join(' · ') : null, friends: friendsOf().length,
+      // the map's frame: the world point at grid (0, 0) is (-ox, -oy), w x h tiles; lit: tiles drawn as ground
+      frame: W ? { ox: OX, oy: OY, w: W, h: H, fog: FOGW } : null, lit }),
   };
 })(window);

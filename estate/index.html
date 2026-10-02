@@ -2635,7 +2635,7 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
   // ceiling - Record.progress over the same row the ledger holds, so the page and the replay cannot
   // disagree about when a building stands. A clip's own override (b.buildMs) and the hero reel's slowed
   // pace are not the game's clock and keep the plain fraction.
-  const asRow = (b) => ({ kind: b.type, level: b.tier || 1, startedAt: b.build.t0, hands: b.hands });
+  const asRow = (b) => ({ kind: b.type, level: b.tier || 1, startedAt: b.build.t0, hands: b.hands, rebuilt: b.rebuilt });
   const buildFrac = (b, t) => (b.buildMs || HERO) ? (t - b.build.t0) / buildMsOf(b) : Record.progress(asRow(b), t);
   // A build finishes on the clock, not on being drawn. It used to be cleared only by drawRaising(),
   // so a building the camera never showed - a depot behind the studio's solo focus - stayed 'going
@@ -3825,10 +3825,12 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
       // M9 ITEM 8: level 1's WHOLE bill - every material it names (Record.materials, ruling 76's table) - is
       // checked before anything is placed and paid in full after, exactly as an upgrade is. It used to check the
       // wood alone and then spend() the crystals, which floors at 0: a building short of crystals went up anyway.
-      const bill = billOf(buildType, 1);
+      // M13 item 14: a keep on a base that lost one is a REBUILD, priced at the keep row's rebuild bill (record.js placeBill)
+      const bill = placeBillOf(buildType), rebuilt = !!KIND[buildType].placement.isKeep && !!keepLostOf(HOME);
       if (!canPay(bill)) { const m = Record.MATERIALS.find(([k]) => (purse()[k] || 0) < bill[k])[0];
         flashNote('needs ' + fmtC(bill[m]) + ' ' + m + (m === 'wood' ? ' — send Friends to the forest' : ' — the seams are where they come from')); return; }
       const nb = { type: buildType, x: tile.x, y: tile.y, tier: 1, base: HOME };
+      if (rebuilt) nb.rebuilt = true;
       if (buildType === 'tower') nb.occupant = null;
       if (buildType === 'wall') nb.crew = [];
       if (buildType === 'collectionDepot') nb.harvesters = 0;
@@ -4114,7 +4116,7 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
   // when a keep is FINISHED, never when one is paid for, and record.js's build and raise refuse on the same number.
   function keepStanding(id = HOME) {
     const k = theKeep(id);
-    return k ? Record.standingLevel({ kind: k.type, level: k.tier || 1, startedAt: k.build ? k.build.t0 : null, hands: k.hands }, now()) : 0;
+    return k ? Record.standingLevel({ kind: k.type, level: k.tier || 1, startedAt: k.build ? k.build.t0 : null, hands: k.hands, rebuilt: k.rebuilt }, now()) : 0;
   }
   // M3 ITEM 3: THE PLACEMENT RULE IS DATA THE BUILDING CARRIES. This used to know the keep by name
   // (`k === 'keep'`). Now it reads the kind's `placement` row from values.js - in the shape of
@@ -4203,6 +4205,8 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
   // M8 ITEM 1: a level is paid in a LIST of materials (Record.materials - the record's own rule, over values.js's
   // per-level columns), so the panel prices, checks and pays every material a level names, not crystals alone.
   const billOf = (k, level) => Record.materials(k, level);
+  // what placing one more of k costs this base: level 1's bill, or for a keep after a lost one the rebuild bill (ruling 77)
+  const placeBillOf = (k) => Record.placeBill(SESSION ? SESSION.ledger : null, k);
   const billText = (bill, none = 'free') => Record.MATERIALS.filter(([m]) => bill[m]).map(([m]) => fmtC(bill[m]) + ' ' + m).join(' + ') || none;
   const canPay = (bill, P = purse()) => Record.MATERIALS.every(([m]) => (P[m] || 0) >= bill[m]);
   function payBill(bill) { const P = purse(); Record.MATERIALS.forEach(([m]) => { if (m === 'crystals') spend(bill[m]); else P[m] = (P[m] || 0) - bill[m]; }); }
@@ -4221,7 +4225,7 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
   // exempt from the test (Record.refundExempt), which matters only once M15 item 12 lets a keep go.
   function refundOf(b) {
     const base = b.base == null ? HOME : b.base, tier = b.tier || 1;
-    const { crystals, wood } = Record.refund(b.type, tier, b.harvesters);   // the arithmetic lives with the record, which replays it
+    const { crystals, wood } = Record.refund(b.type, tier, b.harvesters, b.rebuilt);   // the arithmetic lives with the record, which replays it
     return { crystals, wood, short: Record.refundExempt(b.type) ? 0 : Record.refundShort(purse(base).crystals, crystals, siloCap(base, b)) };
   }
   // the keep goes last: nothing else can stand without it (KIND.keep.sub), so it cannot be knocked down
@@ -4262,7 +4266,7 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
     if (!b.build || b.buildMs || HERO || b.studioRaise) return '';
     const base = b.base == null ? HOME : b.base, t = now(), n = Record.handsAt(b, t), top = Record.ceiling(b.type);
     const have = FRIENDS().filter(ofBase(base)).length, row = asRow(b);
-    const left = Math.max(0, Record.raiseMs(b.type, b.tier || 1) - Record.worked(row, t)), pace = Math.min(n, top);
+    const left = Math.max(0, Record.needMs(row) - Record.worked(row, t)), pace = Math.min(n, top);
     return '<span class="lab">HANDS ON IT</span><div class="kv">' +
       '<span class="k">Friends working</span><span class="v sig" id="phands">' + n + ' of ' + top + '</span>' +
       '<span class="k">Time left</span><span class="v">' + (pace ? Math.ceil(left / pace / 1000) + ' s' : 'paused - nobody on it') + '</span></div>' +
@@ -4307,6 +4311,7 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
       title.textContent = 'BUILD';
       body.innerHTML = '<p class="lede">' + (theKeep()
           ? 'Pick a structure, then tap open ground to site it. A first level is built of logs, so the forest is what limits how fast the base spreads; raising it takes wood and crystals, then crystals.'
+          : keepLostOf(HOME) ? 'Your keep is gone. Rebuild it — nothing can be raised or placed until a rebuilt keep stands.'
           : 'This land is unclaimed. Raise your keep first — nothing else can stand until it does.') + '</p>' +
         '<span class="lab">NEW STRUCTURE</span><div class="cells">' +
         Object.keys(KIND).map(k => {
@@ -4316,7 +4321,7 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
             (buildType === k ? ' aria-pressed="true"' : '') + (lock ? ' disabled' : '') + '>' +
             (pic ? '<img class="pic" src="' + pic + '" alt="" width="40" height="40">' : '<span class="pic none" title="the game has no picture of this building yet"></span>') +
             '<b>' + KIND[k].tiers[0] + '</b>' +
-            '<span class="cost">' + (lock || billText(billOf(k, 1))) + '</span>' +
+            '<span class="cost">' + (lock || (KIND[k].placement.isKeep && keepLostOf(HOME) ? 'REBUILD · ' : '') + billText(placeBillOf(k))) + '</span>' +
             '<span class="sub">' + KIND[k].sub + '</span></button>';
         }).join('') + '</div>';
       body.querySelectorAll('.cell').forEach(c => c.addEventListener('click', () => {
@@ -4339,7 +4344,9 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
     // M9 ITEMS 9 AND 10: NO KEEP, NO UPGRADES - the cell included, whose `cappedByKeepLevel: false` lets it pass
     // the keep's LEVEL and never its absence - and the level is the one the keep STANDS at (keepStanding), so a
     // keep upgrade that is paid for and still going up lifts nothing. record.js `raise` refuses on the same rule.
-    const keepGone = keepLostOf(b.base == null ? HOME : b.base), ks = keepStanding(b.base == null ? HOME : b.base);
+    // M13 ITEM 14, ruling 77: the lock lifts when a REBUILT keep is finished - the rebuilt keep included, which cannot be
+    // raised while it is still going up (record.js lostLock reads the same two things)
+    const ks = keepStanding(b.base == null ? HOME : b.base), keepGone = ks < 1 ? keepLostOf(b.base == null ? HOME : b.base) : null;
     const noKeep = !def.placement.isKeep && ks < 1;
     const capped = !maxed && (!!keepGone || noKeep || (def.placement.cappedByKeepLevel && next > ks));
     const rf = refundOf(b), held = keepHolds(b);          // what knocking it down gives back, and whether it may go
@@ -4382,7 +4389,7 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
                '<span class="k">' + def.tiers[next - 1] + '</span><span class="v sig">' + billText(bill) + '</span>' +
                '<span class="k">You hold</span><span class="v">' + billText(purse(), 'nothing') + '</span></div>') +
       '<button class="go" id="pgo"' + (maxed || capped || !afford ? ' disabled' : '') + '>' +
-      (maxed ? 'MAXED' : capped && keepGone ? 'YOUR KEEP WAS DESTROYED · NOTHING CAN BE RAISED' : capped && noKeep ? 'RAISE A KEEP FIRST' : capped ? 'RAISE THE KEEP TO ' + KIND.keep.tiers[next - 1] + ' FIRST'
+      (maxed ? 'MAXED' : capped && keepGone ? (keepGone.fight != null ? 'YOUR KEEP WAS DESTROYED' : 'YOUR KEEP IS DOWN') + ' · NOTHING CAN BE RAISED UNTIL A REBUILT KEEP STANDS' : capped && noKeep ? 'RAISE A KEEP FIRST' : capped ? 'RAISE THE KEEP TO ' + KIND.keep.tiers[next - 1] + ' FIRST'
         : !afford ? 'NOT ENOUGH ' + shortOf.toUpperCase() : 'RAISE ' + def.tiers[next - 1]) + '</button>' +
       '<button class="go ghost" id="pagain">' +
       'REPLAY CONSTRUCTION</button>' +
@@ -4882,13 +4889,15 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
   // where it lies, with how much is in it. Ruling 70 says anyone may claim it; no move that claims one is built yet
   // (the row *Spilled crystals: what rulings 70 and 80 left*), so this draws what is there and offers no control.
   function spillsOf(id) { const L = id === HOME ? (SESSION && SESSION.ledger) : (OTHERS.has(id) ? OTHERS.get(id).ledger : null); return (L && L.spills) || []; }
+  // Under the server's fog another base's ledger is never here: its piles come in the view's `piles`, only those on LIVE
+  // ground, in this page's frame and without saying whose (visibility.py _piles) - and are drawn the same way.
   function drawSpills(t, near) {
+    const one = (x, y, c) => { const cx = x + 0.5, cy = y + 0.5; if (near(cx, cy)) lifted(cx, cy, () => drawPile(cx, cy, c)); };
     BASES.forEach((id) => spillsOf(id).forEach((sp) => {
       if (!sp || !sp.tile || !(sp.crystals > 0)) return;            // a pile with no tile (no keep standing) has nowhere to be drawn
-      const cx = sp.tile.x + 0.5, cy = sp.tile.y + 0.5;
-      if (!near(cx, cy)) return;
-      lifted(cx, cy, () => drawPile(cx, cy, sp.crystals));
+      one(sp.tile.x, sp.tile.y, sp.crystals);
     }));
+    if (FOG_SRV) FOG_PILES.forEach((p) => { if (p.crystals > 0 && fogStateAt(p.x + 0.5, p.y + 0.5) === 2) one(p.x, p.y, p.crystals); });
   }
   function drawPile(cx, cy, amount) {
     const [px, py] = project(cx, cy), u = 1.5 / SCALE;   // half as large again as a seam's shard: a pile must read beside a keep
@@ -6077,7 +6086,7 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
   function viewLedger(id = HOME) {
     const L = Record.fresh(id, null);
     L.base = Object.assign({}, purse(id)); L.nextId = NEXT_ID;
-    buildings.filter(ofBase(id)).forEach(b => L.buildings.push(Record.buildingRow(b.id, b.type, b.tier || 1, b.x, b.y, b.dir === 'y', b.raisedAt, b.harvesters, b.hands)));
+    buildings.filter(ofBase(id)).forEach(b => L.buildings.push(Record.buildingRow(b.id, b.type, b.tier || 1, b.x, b.y, b.dir === 'y', b.raisedAt, b.harvesters, b.hands, b.rebuilt)));
     L.buildings.sort((p, q) => p.id - q.id);
     FRIENDS().filter(ofBase(id)).forEach(a => { const [x, y] = spotOf(a.tx, a.ty);
       L.roster.push(Record.rosterRow(a.rid, { gen: a.gen, name: a.name, rented: a.rented, token: a.token, offer: a.offer, hired: a.hired,
@@ -6109,7 +6118,9 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
   }
   function noteRaise(b) {
     if (!SESSION || RESTORING || (b.base == null ? HOME : b.base) !== HOME) return;
-    if (b.id == null) { b.id = NEXT_ID++; noteMove(HOME, 'build', { b: b.id, of: b.type, x: b.x, y: b.y, vert: b.dir === 'y' }, b.raisedAt); }
+    // M13 item 14: a keep put back after one was lost is the `rebuild` move, at the rebuild bill (record.js placeBill)
+    if (b.id == null && b.rebuilt) { b.id = NEXT_ID++; noteMove(HOME, 'rebuild', { b: b.id, x: b.x, y: b.y }, b.raisedAt); }
+    else if (b.id == null) { b.id = NEXT_ID++; noteMove(HOME, 'build', { b: b.id, of: b.type, x: b.x, y: b.y, vert: b.dir === 'y' }, b.raisedAt); }
     else noteMove(HOME, 'raise', { b: b.id, level: b.tier || 1 }, b.raisedAt);
   }
   function noteHarvester(f) { if (SESSION && !RESTORING && f.id != null) noteMove(f.base, 'harvester', { b: f.id }); }
@@ -6144,6 +6155,7 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
     if (b.kind === 'wall') { row.dir = b.vert ? 'y' : 'x'; row.crew = []; }
     if (b.kind === 'tower') row.occupant = null;
     if (b.kind === 'collectionDepot') row.harvesters = b.harvesters;
+    if (b.rebuilt) row.rebuilt = true;                 // M13 item 14: a rebuilt keep - its first level runs on the rebuild's time
     return row;
   }
   // RESTORING: the page's view is rebuilt from the record. Buildings are razed and placed again from the
@@ -6679,6 +6691,7 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
   // attack chooser for that base: attackable only while in sight, which is the server's rule too.
   let FOG_VIEW = null, FOG_REV = -1, FOG_SETTINGS = null, FOG_AT = null, FOG_NEWS = [];
   const FOG_OTHERS = new Map(), OTHER_UNITS = [], OTHER_HARV = [], FOG_CHUNKS = new Set();
+  let FOG_PILES = [];                                  // other bases' spilled crystals on live ground: { x, y, crystals }, frame tiles
   let FOG_POS_WAIT = 0, FOG_POS_NEXT = 1000, FOG_STARTED = false;
   function fogStateAt(x, y) {
     if (!FOG_SRV) return 2;
@@ -6707,6 +6720,7 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
       ownHarvesters().forEach(({ d, depot, n }) => { const h = oh.get(depot + ':' + n); if (h) { d.x = h.x; d.y = h.y; } });
     }
     fogOthers(v.others || []);
+    FOG_PILES = Array.isArray(v.piles) ? v.piles : [];
     if (v.terrainRev !== FOG_REV || first) {
       FOG_REV = v.terrainRev;
       FOG_CHUNKS.clear();                              // a moved revision may have revealed ground in a chunk already read
@@ -6798,7 +6812,7 @@ body.reel .armourybtn, body.menu .armourybtn { display: none !important; }
   const fog = !FOG_SRV ? null : { state: (x, y) => FOG_NAMES[fogStateAt(x, y)], revealed: (x, y) => fogStateAt(x, y) > 0,
     mask: () => (FOG_VIEW ? { x0: FOG_VIEW.x0, y0: FOG_VIEW.y0, w: FOG_VIEW.w, h: FOG_VIEW.h, states: FOG_VIEW.st.slice() } : null),
     get settings() { return FOG_SETTINGS && Object.assign({}, FOG_SETTINGS); }, get at() { return FOG_AT; },
-    get others() { return [...FOG_OTHERS.values()]; }, get news() { return FOG_NEWS.slice(); }, get count() { return fogCount(); },
+    get others() { return [...FOG_OTHERS.values()]; }, get piles() { return FOG_PILES.map(p => Object.assign({}, p)); }, get news() { return FOG_NEWS.slice(); }, get count() { return fogCount(); },
     get units() { return OTHER_UNITS.map(u => ({ base: u.base, gen: u.gen, x: u.x, y: u.y })); }, get harvesters() { return OTHER_HARV.map(h => ({ base: h.base, depot: h.depot, n: h.n, x: h.x, y: h.y })); },
     terrain: () => WORLDGEN.T.size, refresh: () => fogView(false), pos: () => fogPos() };
   window.base = { view, hud, fog, play, PLAY, capture, defense, record, spotOf, trees, levelAt, heightAt, tileKey, onLand, TILES, WALLS, PLAN, WATER_SITES, WORLDGEN, get wood() { return purse().wood; }, purse, BASES, HOME, sendToChop, buildings, actors, nodes, drones, tiles, openPanel, startBuild, project, screenToWorld, CAM, reclaim,

@@ -1,0 +1,24 @@
+THE FONTS IN THIS FOLDER
+
+All three families are licensed under the SIL Open Font License, Version 1.1. Each family's licence, with its
+own copyright line, is the matching *-OFL.txt beside this file and must travel with the font files wherever
+they are published. None of the three declares a Reserved Font Name. The files are unmodified: they are the
+woff2 files Google Fonts served for the latin subset, fetched from it 2026-10-01, and the
+copyright and licence URL in each file's own name table were read and match the lines below.
+
+  Silkscreen      silkscreen-400-latin.woff2, silkscreen-700-latin.woff2
+                  Copyright 2001 The Silkscreen Project Authors (https://github.com/googlefonts/silkscreen)
+                  Licence: Silkscreen-OFL.txt
+                  Source: Google Fonts, /s/silkscreen/v6/
+
+  Sometype Mono   sometype-mono-latin.woff2 (variable, wght 400-700; served for 400 and 500)
+                  Copyright 2018 The Sometype Mono Project Authors (https://github.com/googlefonts/sometype-mono)
+                  Licence: SometypeMono-OFL.txt
+                  Source: Google Fonts, /s/sometypemono/v4/
+
+  Archivo         archivo-latin.woff2 (variable, wght 100-900; served for 400, 500, 600 and 700)
+                  Copyright 2020 The Archivo Project Authors (https://github.com/Omnibus-Type/Archivo)
+                  Licence: Archivo-OFL.txt
+                  Source: Google Fonts, /s/archivo/v25/
+
+fonts.css declares them. Every page links fonts/fonts.css; no page reaches Google.

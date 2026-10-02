@@ -1,0 +1,44 @@
+/* THE HOUSE FONTS, SERVED FROM HERE. Every page used to open with a stylesheet from Google Fonts, and a
+ * <link rel="stylesheet"> in the <head> blocks the parse: when Google was unreachable the request hung, the page
+ * never got past it, window.base never appeared, and eleven checks went red (2026-10-01). A player would have
+ * waited on Google the same way. Nothing here reaches off this site.
+ *
+ * These are Google's own files, unmodified, fetched once: the same woff2 the old link served, the same weights, and
+ * only the LATIN subset - every character the pages and their scripts draw is in it (scanned 2026-10-01: nothing in
+ * latin-ext or vietnamese; the arrows, suits and maths signs the pages use are in no subset of these fonts and fall
+ * back to the system face, exactly as they did before). Names are [A-Za-z0-9] (names.py), so a player's name is too.
+ * The unicode-range is Google's latin range, copied, so the browser falls back on exactly the characters it did.
+ *
+ * Archivo and Sometype Mono are variable fonts: Google served one file for every weight, and declared one face per
+ * weight asked for. That is repeated here rather than collapsed into a range, so a weight the pages never asked for
+ * (an 800, say) still snaps to the nearest one declared, as it did - the type looks the same, not merely similar.
+ *
+ * Licences (all SIL OFL 1.1) and where each file came from: CREDITS.txt, beside this file.
+ */
+@font-face { font-family: 'Silkscreen'; font-style: normal; font-weight: 400; font-display: swap;
+  src: url(silkscreen-400-latin.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+@font-face { font-family: 'Silkscreen'; font-style: normal; font-weight: 700; font-display: swap;
+  src: url(silkscreen-700-latin.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+
+@font-face { font-family: 'Sometype Mono'; font-style: normal; font-weight: 400; font-display: swap;
+  src: url(sometype-mono-latin.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+@font-face { font-family: 'Sometype Mono'; font-style: normal; font-weight: 500; font-display: swap;
+  src: url(sometype-mono-latin.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+
+/* Archivo: the landing page and the FAQ only (start.html, faq.html). A page that never names it never fetches it. */
+@font-face { font-family: 'Archivo'; font-style: normal; font-weight: 400; font-stretch: 100%; font-display: swap;
+  src: url(archivo-latin.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+@font-face { font-family: 'Archivo'; font-style: normal; font-weight: 500; font-stretch: 100%; font-display: swap;
+  src: url(archivo-latin.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+@font-face { font-family: 'Archivo'; font-style: normal; font-weight: 600; font-stretch: 100%; font-display: swap;
+  src: url(archivo-latin.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+@font-face { font-family: 'Archivo'; font-style: normal; font-weight: 700; font-stretch: 100%; font-display: swap;
+  src: url(archivo-latin.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }

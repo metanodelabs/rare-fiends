@@ -48,9 +48,9 @@ const IGNORE = [
 ];
 const ignored = (s) => IGNORE.find(([re]) => re.test(s));
 
-// OURS AND NOT OURS, and why this line decides whether these checks are trustworthy. Every page here
-// loads Google's fonts, and the ones reading chain values call two public RPC endpoints. If a check
-// went red because one of those three hosts was unreachable, the check would be reporting the weather,
+// OURS AND NOT OURS, and why this line decides whether these checks are trustworthy. The pages used to
+// load Google's fonts (served from estate/fonts/ since 2026-10-01), and the ones reading chain values call
+// two public RPC endpoints. If a check went red because a host like those was unreachable, it would be reporting the weather,
 // and the lesson taught would be to re-run until green - the lesson `cellcheck` and `woodcheck`
 // already cost this project twice.
 //
@@ -362,7 +362,7 @@ function claimPort(port) {
 
 // WAIT FOR THE GAME, NOT FOR A STOPWATCH. Checks used to sleep 1.5-2.5 s after opening the base and then read
 // `window.base`. Since merge round 3 the page loads more (the template header, session.js, the mini map, names) and
-// it parses only after its stylesheets: under -j 4, or with the font CDN slow, 2 s was not enough and a whole check
+// it parses only after its stylesheets: under -j 4, or with the font CDN slow (as it was then), 2 s was not enough and a whole check
 // went red on "base is not defined". This waits until the game is UP - window.base exists and its clock has moved -
 // with a wall cap that only says the page never came up. `send` is the check's own CDP send(method, params).
 async function waitForGame(send, capMs = 45000) {

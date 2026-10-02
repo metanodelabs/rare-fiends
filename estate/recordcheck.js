@@ -477,8 +477,8 @@ console.log('--- the harvester pays its bill; M13: an attack settled on our serv
 // ======================================= (2) the page, in a browser =======================================
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const BASE = process.env.BASE || 'http://localhost:8765';
-const PORT1 = +(process.env.PORT1 || 9801);
+const BASE = process.env.BASE || require('./pagewatch.js').SITE;
+const PORT1 = +(process.env.PORT1 || require('./pagewatch.js').debugPort(9801));
 async function attachTab(port, pick) {
   let t;
   for (let i = 0; i < 40 && !t; i++) { try { const all = (await (await fetch(`http://127.0.0.1:${port}/json`)).json()).filter((x) => x.type === 'page'); t = pick(all); } catch (_) {} if (!t) await sleep(250); }
@@ -791,7 +791,7 @@ const uniq = (a) => new Set(a).size === a.length;
   // the live claim and the record agree, nothing is held twice. The chain read is the weather: if it fails,
   // that is said beside the result and the part is not counted, not failed.
   console.log('--- (3) a chain-read Friend (?token=) and the restore ---');
-  const PORT2 = +(process.env.PORT2 || 9802), LIVE_TOKEN = 437;
+  const PORT2 = +(process.env.PORT2 || require('./pagewatch.js').debugPort(9802)), LIVE_TOKEN = 437;
   const url2 = BASE + '/base.html?pace=demo&token=' + LIVE_TOKEN;
   const br2 = await launch(url2, PORT2);
   try {

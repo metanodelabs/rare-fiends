@@ -1,12 +1,12 @@
 const { spawn } = require('child_process'); const fs=require('fs'),os=require('os'),path=require('path');
-const CHROME='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'; const PORT=9523;
+const CHROME='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'; const PORT=require('./pagewatch.js').debugPort(9523);
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 (async()=>{
   require("./pagewatch.js").claimPort(PORT);   // never attach to a browser this check did not start
   const prof=fs.mkdtempSync(path.join(os.tmpdir(),'mc-'));
   require("./pagewatch.js").guard(prof);            // close it even if this check throws, or is killed
   const ch=spawn(CHROME,['--headless=new','--enable-unsafe-swiftshader','--hide-scrollbars','--remote-debugging-port='+PORT,
-    '--user-data-dir='+prof,'--window-size=1400,900','http://localhost:8765/mapgen.html?seed=42&players=100'],{stdio:'ignore'});
+    '--user-data-dir='+prof,'--window-size=1400,900',require('./pagewatch.js').SITE+'/mapgen.html?seed=42&players=100'],{stdio:'ignore'});
   let send, sock;
   for(let i=0;i<160&&!send;i++){await sleep(250);try{
     const t=(await(await fetch(`http://127.0.0.1:${PORT}/json`)).json()).find(x=>x.type==='page');

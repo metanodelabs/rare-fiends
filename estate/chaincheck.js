@@ -2,7 +2,7 @@
 // costs straight from Robinhood Chain, fails if either value is written into any page or script, and checks
 // that the COSTS and ATTACK & DEFENSE pages show exactly what the chain says (read through chainlive.js).
 const { spawn } = require('child_process'); const fs=require('fs'),os=require('os'),path=require('path');
-const CHROME='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'; const PORT=9545;
+const CHROME='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'; const PORT=require('./pagewatch.js').debugPort(9545);
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 const RPC='https://rpc.mainnet.chain.robinhood.com';
 const DICE='0xd8a0680e7699526b57140ed4eafdcc7219dc0a0c', PROVIDER='0x8741b8a825644D9Ef18Faf2DAB5e9b47B900F2b6';
@@ -40,12 +40,12 @@ const rpc=async(method,params)=>{const j=await(await fetch(RPC,{method:'POST',he
   const ev=async e=>{const r=await send('Runtime.evaluate',{expression:e,returnByValue:true});return r.exceptionDetails?'THREW: '+r.exceptionDetails.exception.description.split('\n')[0]:r.result.value;};
   const watch = await require('./pagewatch.js').attach(sock, send);
   try {
-    await send('Page.navigate',{url:'http://localhost:8765/costs.html'});
+    await send('Page.navigate',{url:require('./pagewatch.js').SITE+'/costs.html'});
     for(let i=0;i<60&&!(await ev('!!(window.costPage&&costPage.L)'));i++) await sleep(250);
     const c=JSON.parse(await ev('JSON.stringify(costPage.L)'));
     // the fee is exact; a gas estimate moves a little with the chain's state between the two reads
     ok('COSTS shows the chain\'s fee and request gas (' + c.requestGas + ' against ' + reqGas + ')', c.fee===fee && Math.abs(c.requestGas-reqGas) <= reqGas*0.02, JSON.stringify([c.fee,c.requestGas]));
-    await send('Page.navigate',{url:'http://localhost:8765/attack_defense.html'});
+    await send('Page.navigate',{url:require('./pagewatch.js').SITE+'/attack_defense.html'});
     for(let i=0;i<80&&!(await ev('!!(window.combatPage&&combatPage.chain)'));i++) await sleep(250);
     const a=JSON.parse(await ev('JSON.stringify({fee:combatPage.chain.L.fee, rows:document.querySelectorAll("#dice tbody tr").length, line:document.getElementById("feeLine").textContent})'));
     ok('ATTACK & DEFENSE shows the chain\'s fee', a.fee===fee && a.line.startsWith(String(fee)), JSON.stringify(a));

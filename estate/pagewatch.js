@@ -397,4 +397,18 @@ async function freePort(lo, span) {
   throw new Error('no free port in ' + lo + '..' + (lo + span - 1));
 }
 
-module.exports = { attach, IGNORE, shutdown, stillUp, guard, shutdownSync, claimPort, portHolders, waitForGame, freePort };
+// WHERE THE SITE IS, AND WHICH PORTS ARE OURS - two lines every browser check reads instead of typing them.
+//
+// Every check used to carry `http://localhost:8765` and a fixed debug port. That made two things impossible, and
+// both are the reason M22 item 2 could not be done before: (1) a check could not be pointed at a BROKEN COPY of the
+// site, so nobody could show it going red when the page is wrong - `breakall.js` stages a mutated copy, serves it
+// on a port of its own and sets RF_SITE; and (2) two runs on one machine (another agent's suite, a worktree's) fight
+// over the same debug ports, and `checkall.js`'s stray-killer then kills the other run's browser. RF_PORT_OFFSET
+// moves every fixed port a check uses by the same amount, so a second run never shares a port with the first.
+// Unset, both are exactly what the checks always used: :8765, and the port written in the file.
+// `checkall.js` reads the port numbers out of `debugPort(NNNN)` the way it read `PORT = NNNN`, so the stray-killer
+// still finds them.
+const SITE = String(process.env.RF_SITE || 'http://localhost:8765').replace(/\/+$/, '');
+const debugPort = (n) => n + (+process.env.RF_PORT_OFFSET || 0);
+
+module.exports = { attach, IGNORE, shutdown, stillUp, guard, shutdownSync, claimPort, portHolders, waitForGame, freePort, SITE, debugPort };

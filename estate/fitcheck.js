@@ -1,7 +1,7 @@
 // every challenge screen at common screen sizes, opened from the estate the way a player opens it:
 // on laptops nothing may need scrolling; on phones the amount and ACCEPT / DECLINE must be in view
 const { spawn } = require('child_process'); const fs=require('fs'),os=require('os'),path=require('path');
-const CHROME='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'; const PORT=9499;
+const CHROME='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'; const PORT=require('./pagewatch.js').debugPort(9499);
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 const SIZES = [[1128, 920], [1280, 720], [1366, 768], [1440, 900], [1024, 640], [390, 844], [375, 667]];
 (async()=>{
@@ -51,7 +51,7 @@ const SIZES = [[1128, 920], [1280, 720], [1366, 768], [1440, 900], [1024, 640], 
   for (const [W, H] of SIZES) {
     const phone = W < 600;
     await send('Emulation.setDeviceMetricsOverride', { width: W, height: H, deviceScaleFactor: 1, mobile: phone });
-    await send('Page.navigate', { url: 'http://localhost:8765/base.html' }); await sleep(2200); await require('./pagewatch.js').waitForGame(send);
+    await send('Page.navigate', { url: require('./pagewatch.js').SITE+'/base.html' }); await sleep(2200); await require('./pagewatch.js').waitForGame(send);
     // CHALLENGE is opened the way a player opens it at this size, by real taps on where it is drawn: since the template
     // (6b67ed4) it is an entry of the base's header nav, and on a phone that nav is folded behind PAGES - so a phone
     // taps PAGES first. A JS .click() on the button would open it even where no player could reach it.
@@ -102,7 +102,7 @@ const SIZES = [[1128, 920], [1280, 720], [1366, 768], [1440, 900], [1024, 640], 
   for (const [W, H] of SIZES) {
     const phone = W < 600, tag = String(W + 'x' + H).padEnd(9);
     await send('Emulation.setDeviceMetricsOverride', { width: W, height: H, deviceScaleFactor: 1, mobile: phone });
-    await send('Page.navigate', { url: 'http://localhost:8765/bridge.html' });
+    await send('Page.navigate', { url: require('./pagewatch.js').SITE+'/bridge.html' });
     await sleep(300); await until('typeof window.bridge === "object" && bridge.step === 0', 20000);
     if (BREAK === 'bridgetall') await ev('(() => { const d = document.createElement("div"); d.style.height = "3000px"; document.body.appendChild(d); })()');
     if (BREAK === 'bridgecover') await ev('(() => { const d = document.createElement("div"); d.style.cssText = "position:fixed;left:0;right:0;bottom:0;height:45%;z-index:99999;background:rgba(0,0,0,.01)"; document.body.appendChild(d); })()');

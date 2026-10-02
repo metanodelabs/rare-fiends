@@ -29,8 +29,8 @@
 const { spawn } = require('child_process');
 const fs = require('fs'), os = require('os'), path = require('path');
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const PORT = 9567;
-const SITE = process.env.RF_SITE || 'http://localhost:8765';
+const PORT = require('./pagewatch.js').debugPort(9567);
+const SITE = process.env.RF_SITE || require('./pagewatch.js').SITE;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // How many calls the spin signatures must differ by, in at least one kind of path operation, for two
 // drawings to count as two. Measured, not guessed: the SBF afro and the pizza differ by dozens; the same

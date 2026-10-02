@@ -41,7 +41,7 @@ let pass = 0, fail = 0;
 const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); c ? pass++ : fail++; };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const DEFAULT_PORT = 9831, DEFAULT_SERVE = 8831;
+const DEFAULT_PORT = require('./pagewatch.js').debugPort(9831), DEFAULT_SERVE = require('./pagewatch.js').debugPort(8831);
 const PORT = +(process.env.PORT1 || DEFAULT_PORT);           // the debug port
 const SERVE = +(process.env.SERVE_PORT || DEFAULT_SERVE);    // this check's own serve.py
 const SITE = 'http://localhost:' + SERVE;

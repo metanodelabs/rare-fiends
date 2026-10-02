@@ -21,7 +21,7 @@ const fs = require('fs'), os = require('os'), path = require('path'), http = req
 const { spawn } = require('child_process');
 const ESTATE = __dirname, REPO = path.resolve(__dirname, '..');
 const { ethers } = require(path.join(ESTATE, 'contracts', 'node_modules', 'ethers'));
-const PORT = 9583;          // the one debugging port: player A's browser, then player B's (never both at once)
+const PORT = require('./pagewatch.js').debugPort(9583);          // the one debugging port: player A's browser, then player B's (never both at once)
 const watchLib = require(path.join(ESTATE, 'pagewatch.js'));
 const Chance = require(path.join(ESTATE, 'chance.js'));
 const D = JSON.parse(fs.readFileSync(path.join(ESTATE, 'base-data.json'), 'utf8'));

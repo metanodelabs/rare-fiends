@@ -1,14 +1,14 @@
 // The cost tracking page: it reads the Entropy fee and gas price live from Robinhood Chain, prices from the
 // site's feed and gas from the contracts check, discloses the 5%, and its sums add up.
 const { spawn } = require('child_process'); const fs=require('fs'),os=require('os'),path=require('path');
-const CHROME='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'; const PORT=9543;
+const CHROME='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'; const PORT=require('./pagewatch.js').debugPort(9543);
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 (async()=>{
   require("./pagewatch.js").claimPort(PORT);   // never attach to a browser this check did not start
   const prof=fs.mkdtempSync(path.join(os.tmpdir(),'co-'));
   require("./pagewatch.js").guard(prof);            // close it even if this check throws, or is killed
   const ch=spawn(CHROME,['--headless=new','--hide-scrollbars','--remote-debugging-port='+PORT,
-    '--user-data-dir='+prof,'--window-size=1200,900','http://localhost:8765/costs.html'],{stdio:'ignore'});
+    '--user-data-dir='+prof,'--window-size=1200,900',require('./pagewatch.js').SITE+'/costs.html'],{stdio:'ignore'});
   let send, sock;
   for(let i=0;i<160&&!send;i++){await sleep(250);try{
     const t=(await(await fetch(`http://127.0.0.1:${PORT}/json`)).json()).find(x=>x.type==='page');
@@ -74,7 +74,7 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
   ok('the ledger is marked SAMPLE until games are played', /No game has been played yet/.test(text) && await ev('document.querySelectorAll("#ledgerTab tbody tr").length') >= 3, 'no');
   await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true }); await sleep(500);
   ok('nothing scrolls sideways on a phone', await ev('document.documentElement.scrollWidth') <= 390, await ev('document.documentElement.scrollWidth'));
-  await send('Emulation.clearDeviceMetricsOverride'); await send('Page.navigate', { url: 'http://localhost:8765/base.html' }); await sleep(2500);
+  await send('Emulation.clearDeviceMetricsOverride'); await send('Page.navigate', { url: require('./pagewatch.js').SITE+'/base.html' }); await sleep(2500);
   ok('the estate has a COSTS button', await ev('(()=>{const b=document.getElementById("costBtn"); return !!b && b.getAttribute("href")==="costs.html" && b.getBoundingClientRect().width>0;})()') === true, 'missing');
   ok('nothing 404d and nothing was logged as an error, over the cost page and the estate', watch.clean(), watch.why());
   console.log(bad ? '\n' + bad + ' step(s) failed' : '\nthe cost page works');

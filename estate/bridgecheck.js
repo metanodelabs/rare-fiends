@@ -4,7 +4,7 @@
 // shows the model, what crosses over, the message that proves the wallet is yours and the fee.
 // (That the contract holds it all is estate/contracts/paritycheck.js.)
 const { spawn } = require('child_process'); const fs=require('fs'),os=require('os'),path=require('path');
-const CHROME='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'; const PORT=9547;
+const CHROME='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'; const PORT=require('./pagewatch.js').debugPort(9547);
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 // a browser left over from an earlier run still holds this port, and a new run would attach to it and
 // read the page as it was then — so clear it first
@@ -155,7 +155,7 @@ try { require('child_process').execSync('pkill -f "remote-debugging-port=' + POR
   require("./pagewatch.js").claimPort(PORT);   // never attach to a browser this check did not start
   const prof=fs.mkdtempSync(path.join(os.tmpdir(),'br-'));
   require("./pagewatch.js").guard(prof);            // close it even if this check throws, or is killed
-  const ch=spawn(CHROME,['--headless=new','--hide-scrollbars','--remote-debugging-port='+PORT,'--user-data-dir='+prof,'--window-size=1200,900','http://localhost:8765/bridge.html'],{stdio:'ignore'});
+  const ch=spawn(CHROME,['--headless=new','--hide-scrollbars','--remote-debugging-port='+PORT,'--user-data-dir='+prof,'--window-size=1200,900',require('./pagewatch.js').SITE+'/bridge.html'],{stdio:'ignore'});
   let send, sock;
   for(let i=0;i<160&&!send;i++){await sleep(250);try{
     const t=(await(await fetch(`http://127.0.0.1:${PORT}/json`)).json()).find(x=>x.type==='page');

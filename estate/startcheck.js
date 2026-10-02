@@ -1,12 +1,12 @@
 const { spawn } = require('child_process'); const fs=require('fs'),os=require('os'),path=require('path');
-const CHROME='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'; const PORT=9507;
+const CHROME='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'; const PORT=require('./pagewatch.js').debugPort(9507);
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 (async()=>{
   require("./pagewatch.js").claimPort(PORT);   // never attach to a browser this check did not start
   const prof=fs.mkdtempSync(path.join(os.tmpdir(),'sc-'));
   require("./pagewatch.js").guard(prof);            // close it even if this check throws, or is killed
   const ch=spawn(CHROME,['--headless=new','--enable-unsafe-swiftshader','--hide-scrollbars','--remote-debugging-port='+PORT,
-    '--user-data-dir='+prof,'--window-size=1280,720','http://localhost:8765/start.html'],{stdio:'ignore'});
+    '--user-data-dir='+prof,'--window-size=1280,720',require('./pagewatch.js').SITE+'/start.html'],{stdio:'ignore'});
   let send, sock;
   for(let i=0;i<160&&!send;i++){await sleep(250);try{
     const t=(await(await fetch(`http://127.0.0.1:${PORT}/json`)).json()).find(x=>x.type==='page');
@@ -114,7 +114,7 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
   await shot('start-phone.png');
   // ---------- the way in from the estate ----------
   await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 720, deviceScaleFactor: 1, mobile: false });
-  await send('Page.navigate', { url: 'http://localhost:8765/base.html' }); await sleep(2200);
+  await send('Page.navigate', { url: require('./pagewatch.js').SITE+'/base.html' }); await sleep(2200);
   // the template header (6b67ed4): START GAME is the second entry of the header's nav, after MY PROFILE - not a button
   // stacked under CHALLENGE in the frame - and it must be what is drawn at its own centre
   const sg = await ev('JSON.stringify((()=>{const s=document.getElementById("startBtn"); if(!s) return null; const nav=[...document.querySelectorAll("header.top nav :is(a,button)")], r=s.getBoundingClientRect(), h=document.elementFromPoint(r.left+r.width/2, r.top+r.height/2);'

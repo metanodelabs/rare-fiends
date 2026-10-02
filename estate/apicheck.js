@@ -25,7 +25,7 @@ const os = require('os'), path = require('path'), http = require('http');
 const { claimPort } = require('./pagewatch.js');
 
 const HERE = __dirname;
-const PORT = 18790;                                   // outside every check's 93xx-95xx debug range
+const PORT = require('./pagewatch.js').debugPort(18790);                                   // outside every check's 93xx-95xx debug range
 let bad = 0;
 const ok = (n, c, v) => { console.log((c ? '  ok  ' : 'FAIL  ') + n + (c || v == null ? '' : '   -> ' + v)); if (!c) bad++; };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -109,7 +109,7 @@ function request(method, p, body) {
   let listen = '';
   try { listen = execFileSync('lsof', ['-nP', '-a', '-p', String(srv.pid), '-iTCP:' + PORT, '-sTCP:LISTEN'], { encoding: 'utf8' }); } catch (_) {}
   ok('it listens on 127.0.0.1 only (lsof: ' + (listen.split('\n')[1] || '').trim().split(/\s+/).slice(-2).join(' ') + ')',
-    /127\.0\.0\.1:18790/.test(listen) && !/\*:18790|0\.0\.0\.0:18790/.test(listen), listen || 'lsof shows nothing');
+    new RegExp('127\\.0\\.0\\.1:' + PORT + '\\b').test(listen) && !new RegExp('\\*:' + PORT + '\\b|0\\.0\\.0\\.0:' + PORT + '\\b').test(listen), listen || 'lsof shows nothing');
   const lan = Object.values(os.networkInterfaces()).flat().find((i) => i && i.family === 'IPv4' && !i.internal);
   if (lan) {
     const got = await new Promise((res) => {

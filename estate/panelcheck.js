@@ -3,7 +3,7 @@
 const { spawn } = require('child_process');
 const fs = require('fs'); const os = require('os'); const path = require('path');
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const PORT = 9344;
+const PORT = require('./pagewatch.js').debugPort(9344);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 (async () => {
   require("./pagewatch.js").claimPort(PORT);   // never attach to a browser this check did not start
@@ -12,7 +12,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   const ch = spawn(CHROME, ['--headless=new','--disable-gpu','--hide-scrollbars',
     '--remote-debugging-port='+PORT,'--user-data-dir='+profile,
     '--window-size=' + (process.argv[3] || '1000,700'),
-    process.argv[2] || 'http://localhost:8765/base.html?purse=2000&record=0&pace=demo'], { stdio: 'ignore' });
+    process.argv[2] || require('./pagewatch.js').SITE+'/base.html?purse=2000&record=0&pace=demo'], { stdio: 'ignore' });
   let ws, send;
   for (let i = 0; i < 40 && !ws; i++) { await sleep(250);
     try { const t = (await (await fetch(`http://127.0.0.1:${PORT}/json`)).json()).find(x => x.type==='page');

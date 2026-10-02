@@ -48,7 +48,7 @@ async function open(url, port){
   const watch = await require("./pagewatch.js").attach(sock, send);
   return {ev,tapWorld,watch,close:()=>require("./pagewatch.js").shutdown(ch, prof)};
 }
-const BASE = process.env.BASE || 'http://localhost:8765';
+const BASE = process.env.BASE || require('./pagewatch.js').SITE;
 let pass = 0, fail = 0;
 const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); c ? pass++ : fail++; };
 const J = async (p, e) => { const r = await p.ev(e); try { return JSON.parse(r); } catch (_) { throw new Error('eval: ' + r); } };
@@ -75,7 +75,7 @@ async function postTest(p, pick, label) {
 (async () => {
   let worldVert = null;
   for (const seed of [7, 31]) {
-    const p = await open(BASE + '/base.html?world=1&seed=' + seed, 9520 + seed % 10);
+    const p = await open(BASE + '/base.html?world=1&seed=' + seed, require('./pagewatch.js').debugPort(9520 + seed % 10));
     const r = await J(p, "(function(){var B=base.buildings, W=B.filter(function(b){return b.type==='wall'}); return JSON.stringify({tc:base.TILES.collisions, wc:base.WALLS.collisions, occ:base.TILES.count(base.TILES.OCCUPIED), nonWall:B.length-W.length, walls:W.length, edges:base.WALLS.count(), vert:W.filter(function(b){return b.dir==='y'}).length, every:W.every(function(b){var e=base.WALLS.edgeOf(b); return base.WALLS.at(e.tx,e.ty,e.vert)===b})})})()");
     console.log('  seed ' + seed + ': ' + JSON.stringify(r));
     ok(r.tc === 0, `seed ${seed}: TILES.collisions === 0 (got ${r.tc})`);
@@ -103,7 +103,7 @@ async function postTest(p, pick, label) {
     ok(p.watch.clean(), `seed ${seed}: nothing 4xx/5xx, nothing logged as an error (` + p.watch.why() + `)`);
     await p.close();
   }
-  const p = await open(BASE + '/base.html', 9529);
+  const p = await open(BASE + '/base.html', require('./pagewatch.js').debugPort(9529));
   await postTest(p, "true", 'default base, x-axis wall');
   ok(p.watch.clean(), `default base: nothing 4xx/5xx, nothing logged as an error (` + p.watch.why() + `)`);
   await p.close();

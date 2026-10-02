@@ -37,7 +37,7 @@
 // were removed from the game in M8 item 9 and nothing here reads them.
 const { spawn } = require('child_process'); const fs = require('fs'), os = require('os'), path = require('path');
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const PORT = 9557;
+const PORT = require('./pagewatch.js').debugPort(9557);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 (async () => {
@@ -50,7 +50,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     // purse below; since M6/M8 the record keeps its own ledger and rightly refuses a build the ledger cannot
     // pay ("cannot pay 3000 wood: holds 0"), which pagewatch then reports as an error. The record is
     // recordcheck's and buildreloadcheck's; here it is switched off so the fixture stays a fixture.
-    'http://localhost:8765/base.html?record=0'], { stdio: 'ignore' });
+    require('./pagewatch.js').SITE+'/base.html?record=0'], { stdio: 'ignore' });
   let send, sock;
   for (let i = 0; i < 160 && !send; i++) {
     await sleep(250);

@@ -11,7 +11,7 @@
 // The live-base fights (2, 2b) never reach a wall, so they alone could not tell spare from not; 2c fights
 // the game's siegeAtWall fixture twice and does: BREAK=spare turns 2c's "with spare" line red.
 const { spawn } = require('child_process'); const fs = require('fs'), os = require('os'), path = require('path');
-const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'; const PORT = 9561;
+const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'; const PORT = require('./pagewatch.js').debugPort(9561);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 (async () => {
   require('./pagewatch.js').claimPort(PORT);
@@ -21,7 +21,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   // processes still up and left them for guard() to kill (2026-09-30). BREAK=leak skips the shutdown, to
   // prove the "no browser left on the port" line in the proof can go red.
   const ch = spawn(CHROME, ['--headless=new', '--hide-scrollbars', '--remote-debugging-port=' + PORT,
-    '--user-data-dir=' + prof, '--window-size=1200,900', (process.env.CAP_ORIGIN || 'http://localhost:8765') + '/base.html'], { stdio: 'ignore' });
+    '--user-data-dir=' + prof, '--window-size=1200,900', (process.env.CAP_ORIGIN || require('./pagewatch.js').SITE) + '/base.html'], { stdio: 'ignore' });
   let send, sock, bad = 0;
   try {
   for (let i = 0; i < 160 && !send; i++) { await sleep(250); try {

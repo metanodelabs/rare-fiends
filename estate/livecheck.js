@@ -1,6 +1,6 @@
 // change the map, open the studio in the same session, and check the studio shows the change
 const { spawn } = require('child_process'); const fs=require('fs'),os=require('os'),path=require('path');
-const CHROME='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'; const PORT=9451;
+const CHROME='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'; const PORT=require('./pagewatch.js').debugPort(9451);
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 (async()=>{
   require("./pagewatch.js").claimPort(PORT);   // never attach to a browser this check did not start
@@ -11,7 +11,7 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
   // its bay (Record.haulFits), so this opens on values.js's own purse, which has room. (The raises below are short
   // of WOOD since ruling 76, which 2000 crystals never paid: those failures are this check's before and after.)
   const ch=spawn(CHROME,['--headless=new','--enable-unsafe-swiftshader','--hide-scrollbars','--remote-debugging-port='+PORT,
-    '--user-data-dir='+prof,'--window-size=1000,700','http://localhost:8765/base.html?seams=1&pace=demo&record=0'],{stdio:'ignore'});
+    '--user-data-dir='+prof,'--window-size=1000,700',require('./pagewatch.js').SITE+'/base.html?seams=1&pace=demo&record=0'],{stdio:'ignore'});
   let send, sock;
   for(let i=0;i<160&&!send;i++){await sleep(250);try{
     const t=(await(await fetch(`http://127.0.0.1:${PORT}/json`)).json()).find(x=>x.type==='page');

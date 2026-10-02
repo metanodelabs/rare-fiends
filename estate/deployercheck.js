@@ -11,7 +11,7 @@
 // It deletes its own Chrome profile: every check in this directory leaves one behind and the disk
 // filled up because of it.
 const { spawn } = require('child_process'); const fs = require('fs'), os = require('os'), path = require('path');
-const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'; const PORT = 9552;
+const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'; const PORT = require('./pagewatch.js').debugPort(9552);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ---------------------------------------------------------------------------------------------
@@ -100,7 +100,7 @@ let PROF = null, CH = null;
   const prof = PROF = fs.mkdtempSync(path.join(os.tmpdir(), 'dp-'));
   require('./pagewatch.js').guard(prof);       // close it even if this check throws, or is killed
   const ch = CH = spawn(CHROME, ['--headless=new', '--enable-unsafe-swiftshader', '--hide-scrollbars', '--remote-debugging-port=' + PORT,
-    '--user-data-dir=' + prof, '--window-size=1280,900', (process.env.RF_SITE || 'http://localhost:8765') + '/deployer.html'], { stdio: 'ignore' });
+    '--user-data-dir=' + prof, '--window-size=1280,900', (process.env.RF_SITE || require('./pagewatch.js').SITE) + '/deployer.html'], { stdio: 'ignore' });
   // Removing the profile the moment `ch.kill()` returns is the shape that leaks: SIGTERM is a request,
   // a helper process can outlive its parent, and a tree a browser is still writing into throws
   // ENOTEMPTY and leaves the orphan behind while the call looks like it worked. `shutdown()` waits for

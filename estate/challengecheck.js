@@ -1,7 +1,7 @@
 const { spawn } = require('child_process'); const fs=require('fs'),os=require('os'),path=require('path');
-const CHROME='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'; const PORT=9489;
+const CHROME='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'; const PORT=require('./pagewatch.js').debugPort(9489);
 // CH_ORIGIN serves another tree (a worktree's site on its own port) for proving this check before a merge
-const ORIGIN = process.env.CH_ORIGIN || 'http://localhost:8765';
+const ORIGIN = process.env.CH_ORIGIN || require('./pagewatch.js').SITE;
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 (async()=>{
   require("./pagewatch.js").claimPort(PORT);   // never attach to a browser this check did not start

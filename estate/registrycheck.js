@@ -35,8 +35,8 @@
 // is NOT what it runs: the year is shortened to make the unlock reachable.
 'use strict';
 const { spawn } = require('child_process'); const fs = require('fs'), os = require('os'), path = require('path');
-const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'; const PORT = 9563;
-const SITE = process.env.RF_SITE || 'http://localhost:8765';   // RF_SITE: a broken copy, to prove it goes red
+const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'; const PORT = require('./pagewatch.js').debugPort(9563);
+const SITE = process.env.RF_SITE || require('./pagewatch.js').SITE;   // RF_SITE: a broken copy, to prove it goes red
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 (async () => {
   require('./pagewatch.js').claimPort(PORT);

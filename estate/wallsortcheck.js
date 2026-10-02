@@ -1,9 +1,9 @@
 const { spawn } = require('child_process'); const fs=require('fs'),os=require('os'),path=require('path');
-const CHROME='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'; const PORT=9513;
+const CHROME='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'; const PORT=require('./pagewatch.js').debugPort(9513);
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 // The home estate only has walls running along x. Point this at a world to cover the other
 // axis too:  node wallsortcheck.js 'http://localhost:8765/base.html?world=1&seed=3'
-const URL = process.argv[2] || 'http://localhost:8765/base.html';
+const URL = process.argv[2] || require('./pagewatch.js').SITE+'/base.html';
 (async()=>{
   require("./pagewatch.js").claimPort(PORT);   // never attach to a browser this check did not start
   const prof=fs.mkdtempSync(path.join(os.tmpdir(),'wa-'));

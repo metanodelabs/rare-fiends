@@ -30,7 +30,7 @@
 const { spawn } = require('child_process'); const fs = require('fs'), os = require('os'), path = require('path');
 const BREAK = process.env.BREAK || '';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const PORT = 9559;
+const PORT = require('./pagewatch.js').debugPort(9559);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 (async () => {
@@ -39,7 +39,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   require('./pagewatch.js').guard(prof);       // close it even if this check throws, or is killed
   const ch = spawn(CHROME, ['--headless=new', '--enable-unsafe-swiftshader', '--hide-scrollbars',
     '--remote-debugging-port=' + PORT, '--user-data-dir=' + prof, '--window-size=1100,800',
-    'http://localhost:8765/base.html'], { stdio: 'ignore' });
+    require('./pagewatch.js').SITE+'/base.html'], { stdio: 'ignore' });
   let send, sock;
   for (let i = 0; i < 160 && !send; i++) {
     await sleep(250);

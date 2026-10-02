@@ -47,7 +47,7 @@ async function open(url, port){
 (async()=>{
   let bad=0; const ok=(n,c,v)=>{console.log((c?'  ok  ':'FAIL  ')+n+(c?'':'   -> '+v)); if(!c) bad++;};
   // ---- 1. keep first, on an unclaimed estate
-  let p=await open((process.env.CELL_ORIGIN||'http://localhost:8765')+'/base.html?fresh=1',9421);
+  let p=await open((process.env.CELL_ORIGIN||require('./pagewatch.js').SITE)+'/base.html?fresh=1', require('./pagewatch.js').debugPort(9421));
   await p.ev('document.getElementById("buildBtn").click()'); await sleep(300);
   const locked=await p.ev('JSON.stringify([...document.querySelectorAll("#pbody .cell")].map(c=>c.dataset.k+":"+(c.disabled?"L":"o")))');
   // The expected lists are built from the registry the game reads (base.ECON.kinds, in its order) and its
@@ -71,7 +71,7 @@ async function open(url, port){
   // ---- 2. the cell: science gates, reach claims
   // ?record=0 (saving off): ruling 76's materials table charges a cell's levels in wood AND crystals, and the purse is
   // topped up below from the cell's own row - a fixture in the page's purse, which the record would refuse.
-  p=await open((process.env.CELL_ORIGIN||'http://localhost:8765')+'/base.html?seams=1&record=0',9422);
+  p=await open((process.env.CELL_ORIGIN||require('./pagewatch.js').SITE)+'/base.html?seams=1&record=0', require('./pagewatch.js').debugPort(9422));
   const C='base.buildings.find(b=>b.type==="cell")';
   // the bill for raising the cell TO `level`, off values.js's row (cost and wood are per level, index = level - 1)
   const bill=async(level)=>JSON.parse(await p.ev(`JSON.stringify({crystals:base.ECON.kinds.cell.cost[${level}-1]||0, wood:base.ECON.kinds.cell.wood[${level}-1]||0})`));

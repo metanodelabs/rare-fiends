@@ -16,14 +16,14 @@
 // chop faster than one" is now a COMPARISON of the two rates, both measured on that same clock, rather
 // than one absolute number that only holds on an idle machine.
 const { spawn } = require('child_process'); const fs=require('fs'),os=require('os'),path=require('path');
-const CHROME='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'; const PORT=9481;
+const CHROME='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'; const PORT=require('./pagewatch.js').debugPort(9481);
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 (async()=>{
   require("./pagewatch.js").claimPort(PORT);   // never attach to a browser this check did not start
   const prof=fs.mkdtempSync(path.join(os.tmpdir(),'wd-'));
   require("./pagewatch.js").guard(prof);            // close it even if this check throws, or is killed
   const ch=spawn(CHROME,['--headless=new','--enable-unsafe-swiftshader','--hide-scrollbars','--remote-debugging-port='+PORT,
-    '--user-data-dir='+prof,'--window-size=1100,800','http://localhost:8765/base.html'],{stdio:'ignore'});
+    '--user-data-dir='+prof,'--window-size=1100,800',require('./pagewatch.js').SITE+'/base.html'],{stdio:'ignore'});
   // A rejected CDP call used to end this check as an unhandled rejection: a stack trace, no verdict,
   // and nothing in the runner's output to say which line was being attempted. A check that dies without
   // a verdict is worse than one that fails, because there is nothing to read.

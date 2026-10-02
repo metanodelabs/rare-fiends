@@ -23,8 +23,8 @@
 const { spawn } = require('child_process');
 const fs = require('fs'), os = require('os'), path = require('path');
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const PORT = 9565;
-const SITE = process.env.RF_SITE || 'http://localhost:8765';
+const PORT = require('./pagewatch.js').debugPort(9565);
+const SITE = process.env.RF_SITE || require('./pagewatch.js').SITE;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const V = require('./values.js');
 // How late "on time" may be, in game milliseconds. The game's clock moves by at most 100 ms a frame

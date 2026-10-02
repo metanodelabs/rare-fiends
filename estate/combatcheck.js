@@ -2,14 +2,14 @@
 // numbers can be tried without touching the game, and generation 1 to 6 is measured.
 // (That the contract fights the same way is estate/contracts/paritycheck.js.)
 const { spawn } = require('child_process'); const fs=require('fs'),os=require('os'),path=require('path');
-const CHROME='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'; const PORT=9541;
+const CHROME='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'; const PORT=require('./pagewatch.js').debugPort(9541);
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 (async()=>{
   require("./pagewatch.js").claimPort(PORT);   // never attach to a browser this check did not start
   const prof=fs.mkdtempSync(path.join(os.tmpdir(),'cb-'));
   require("./pagewatch.js").guard(prof);            // close it even if this check throws, or is killed
   const ch=spawn(CHROME,['--headless=new','--hide-scrollbars','--remote-debugging-port='+PORT,
-    '--user-data-dir='+prof,'--window-size=1200,900','http://localhost:8765/attack_defense.html'],{stdio:'ignore'});
+    '--user-data-dir='+prof,'--window-size=1200,900',require('./pagewatch.js').SITE+'/attack_defense.html'],{stdio:'ignore'});
   let send, sock;
   for(let i=0;i<160&&!send;i++){await sleep(250);try{
     const t=(await(await fetch(`http://127.0.0.1:${PORT}/json`)).json()).find(x=>x.type==='page');
@@ -180,7 +180,7 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
   ok('nothing scrolls sideways on a phone', await ev('document.documentElement.scrollWidth') <= 390, await ev('document.documentElement.scrollWidth'));
 
   // the estate has its button
-  await send('Emulation.clearDeviceMetricsOverride'); await send('Page.navigate', { url: 'http://localhost:8765/base.html' }); await sleep(2500);
+  await send('Emulation.clearDeviceMetricsOverride'); await send('Page.navigate', { url: require('./pagewatch.js').SITE+'/base.html' }); await sleep(2500);
   ok('the estate has an ATTACK & DEFENSE button', await ev('(()=>{const b=document.getElementById("fightBtn"); return !!b && b.getAttribute("href")==="attack_defense.html" && b.getBoundingClientRect().width>0;})()') === true, 'missing');
   // on the estate, a Friend stands on a spot: taps snap to the middle of a quadrant, and defense() says which
   const onSpot = await ev('base.actors.filter(a=>a.kind==="friend"&&!a.art).every(a=>Number.isInteger(a.tx*2-0.5)&&Number.isInteger(a.ty*2-0.5))');

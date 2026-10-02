@@ -444,6 +444,35 @@ const CHECKS = [
                         + 'keep, a chop or anything after arriving; the deployer\'s wallet; Apache in front (deploy-test.sh\'s '
                         + 'probes); frame rate beyond one printed figure; and the stage is a copy of deploy-test.sh\'s logic, '
                         + 'so the two can drift - it refuses to run if index.html loses the DEV() line deploy-test.sh forces'],
+  ['faqcheck',          'M22 item 9, THE FAQ (one of the two files M23 publishes): both sections and all thirteen questions with '
+                        + 'answers, the four conversions load, a real tap opens and closes a question, the burger menu on top '
+                        + 'where drawn, BRIDGE and CONNECT refuse while nothing is live, APPLY sends nothing until the on-chain '
+                        + 'question is answered and then POSTs every field once, the theme flips, every link of ours 200, two '
+                        + 'phones with no sideways scroll; WATCHES THE PAGE (pagewatch.js)',
+                        'apply.php itself (the POST goes to a stand-in - M22 item 8 owns the form\'s server side); the PUBLISHED '
+                        + 'copy, which deploy-fiends.sh rewrites; whether any answer is TRUE; the conversions\' animation'],
+  ['standingscheck',    'M22 item 9, THE STANDINGS PAGE, both paths: on localhost the sample (pot, players by BANKED, FRIENDS by '
+                        + 'EARNED by a real tap, no HIRED, header sort and reverse, find) read against the file; anywhere else the '
+                        + 'server\'s /api/standings (opened as another host, the answer stood in for): ranked by gathered in '
+                        + 'crystalUnit, name with address, a markup name shown as text and never run, empty and failed answers '
+                        + 'said in words, the sample never asked for; a phone; WATCHES THE PAGE',
+                        'the real /api/standings (serve.py\'s - the answer here is a stand-in shaped as the page reads it); the '
+                        + 'page\'s header entries; whether the sample\'s figures mean anything'],
+  ['browsercheck',      'M22 item 5, THE MINIMUM BROWSER: DESIGN.md says it once ("Chrome 108, Safari 16, Firefox 121"), every '
+                        + 'feature in its table (versions from @mdn/browser-compat-data 8.1.4) across every page and every local '
+                        + 'file a page loads is within it - a feature above it is red with its line - and the checks\' own Chrome '
+                        + 'is at or above it',
+                        'IT RUNS NOTHING IN SAFARI OR FIREFOX - the floor is read off the source; a feature not in its table; a '
+                        + 'feature that exists and behaves differently; files loaded from outside estate/ (three.min.js, '
+                        + 'doopie-mesh.mjs); prefixed forms'],
+  ['motioncheck',       'M22 item 6, THE REDUCED-MOTION POLICY, in Chrome with prefers-reduced-motion: reduce emulated: every '
+                        + 'animation rule on every page (the game twice) found through the CSSOM, an element BUILT from its selector, '
+                        + 'and its computed animation off; nothing running; every file whose code names a glitch asks the query. '
+                        + 'A RATCHET: nine owed places are listed with owners, and the check is red on anything new and on a '
+                        + 'listed entry that has been fixed and not crossed off',
+                        'THE NINE OWED PLACES THEMSELVES - a green run means nothing NEW, not that the game honours reduced motion; '
+                        + 'that a file which asks then draws a still frame; script motion with no @keyframes; the mini map\'s rule '
+                        + '(signed-in map only: read off the file); flashing (WCAG 2.3.1)'],
   ['auth-proof.test',   'the wallet sign-in and the gate (serve.py --gate) against a fresh anvil as chain 4663 with RareRoles '
                         + 'deployed: nonces, signatures, roles read off the chain, sessions, rate limits, the scheme behind a '
                         + 'proxy, and each guard taken out turning its own line red',
@@ -513,8 +542,11 @@ function checkPorts(only) {
     // line took `hit.match(/(\d{4})/)`, which on `open('http://localhost:8765/…', 9421)` returns 8765 -
     // THE LOCAL SERVER'S PORT - and not 9421. Measured the moment the third alternative was added:
     // cellcheck reported 8765 and still did not report its own two ports.
-    const rx = /remote-debugging-port=.{0,12}?(\d{4})|PORT\s*=\s*(\d{4})|\(\s*['"][^'"]*['"]\s*,\s*(9\d{3})\s*\)/g;
-    for (const m of fs.readFileSync(f, 'utf8').matchAll(rx)) { const d = m[1] || m[2] || m[3]; if (d) ports.add(d); }
+    // The fourth alternative is `debugPort(9485)` (pagewatch.js), which is how every check writes its port since
+    // M22 item 2: the number is still in the file, and RF_PORT_OFFSET is added to it at run time.
+    const off = +process.env.RF_PORT_OFFSET || 0;
+    const rx = /remote-debugging-port=.{0,12}?(\d{4})|PORT\s*=\s*(\d{4})|\(\s*['"][^'"]*['"]\s*,\s*(9\d{3})\s*\)|debugPort\(\s*(\d{4,5})\s*[)+]/g;
+    for (const m of fs.readFileSync(f, 'utf8').matchAll(rx)) { const d = m[1] || m[2] || m[3]; if (d) ports.add(d); if (m[4]) ports.add(String(+m[4] + off)); }
   }
   return [...ports];
 }

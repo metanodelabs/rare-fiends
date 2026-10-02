@@ -76,8 +76,20 @@ let PROF = null, CH = null;
     const g = await J('JSON.stringify({ writes: (base.record.store.load(base.HOME) || {}).writes, lw: base.record.lastWrite })');
     ok('a fresh profile: the base opened on its genesis and is saving (writes ' + g.writes + ')', g.writes === 1, JSON.stringify(g));
 
+    // Ruling 76: every raise past level 1 costs wood, and the starting purse holds none - so nothing could be raised out
+    // of it. The base CHOPS the wood the cheapest raise needs (the keep's, HALL - nothing else can rise past the keep)
+    // through the page's own path, sendToChop -> a `chop` move a log, so the record holds every log the page does.
+    // Then the Friends are called off the trees, so the only thing moving the purse is the raise.
+    const needWood = await ev('base.ECON.kinds.keep.wood[1]');
+    const toTrees = () => ev(`(function(){ const fr = base.actors.filter(a => a.base === base.HOME && !a.job), busy = new Set(base.actors.filter(a => a.job).map(a => a.job.tree));
+      fr.forEach(a => { const t = base.trees.filter(t => t.wood > 0 && !busy.has(t)).sort((p, q) => Math.hypot(p.x - a.x, p.y - a.y) - Math.hypot(q.x - a.x, q.y - a.y))[0];
+        if (t) { busy.add(t); base.sendToChop(a, t); } }); return fr.length; })()`);
+    let chopped = false; for (let i = 0, w0 = Date.now(); Date.now() - w0 < 240000; i++) { if (await ev('base.purse().wood >= ' + needWood)) { chopped = true; break; } if (i % 10 === 0) await toTrees(); await sleep(150); }
+    await ev('base.actors.forEach((a) => { if (a.job) { a.job = null; a.tx = a.x; a.ty = a.y; } })'); await sleep(300);
+    ok('the base chops the ' + needWood / 100 + ' wood HALL needs, through the page\'s own path, and the record holds it', chopped && await ev('base.record.parity().same'),
+      'wood ' + await ev('base.purse().wood') + ' of ' + needWood);
     // THE BUILD. Every building's own panel is opened in turn until one offers a live RAISE button the
-    // starting purse can pay for; that button is pressed - the path a player's tap takes.
+    // purse can pay for; that button is pressed - the path a player's tap takes.
     const pick = await J(`JSON.stringify((() => {
       for (const b of base.buildings) {
         if (b.build) continue;
@@ -86,7 +98,7 @@ let PROF = null, CH = null;
         if (go && !go.disabled) return { id: b.id, type: b.type, tier: b.tier || 1, label: go.textContent };
       }
       return null; })())`);
-    ok('a building on the base can be raised out of the starting purse: ' + (pick ? pick.type + ' #' + pick.id + ' at level ' + pick.tier + ' ("' + pick.label + '")' : 'none'),
+    ok('a building on the base can be raised out of the purse: ' + (pick ? pick.type + ' #' + pick.id + ' at level ' + pick.tier + ' ("' + pick.label + '")' : 'none'),
       !!pick, 'no panel offered a live RAISE button');
     if (!pick) throw new Error('nothing to raise');
     const before = await J(`JSON.stringify((() => { document.getElementById('pgo').click();

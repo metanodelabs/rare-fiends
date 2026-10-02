@@ -65,7 +65,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     for (; i < 400 && (await ev('base.simT')) - t0 < ms; i++) await sleep(100);
     if (i >= 400) console.log('  (starved: ' + ms + ' ms of game clock did not pass in 40 s of wall clock)'); };
   try {
-    await sleep(2500);
+    await sleep(2500); await require('./pagewatch.js').waitForGame(send);
     const lock = (k) => ev(`base.lockReason(${JSON.stringify(k)})`);
     const K = await ev('JSON.stringify(Object.keys(base.ECON.kinds))');
     ok('the registry the game reads has nine rows and the capacitor is the ninth', K === '["keep","hut","silo","tower","wall","cell","generator","collectionDepot","capacitor"]', K);

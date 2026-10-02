@@ -183,7 +183,38 @@
       return { friends, blockNumber: Number(blockNumber), hiddenCount: ids.length - friends.length, balance: Number(balance) };
     }
 
-    return { sprites, owned, rpc, manifest };
+    // ---- the Genesis: which ones an account holds, and who holds one ----
+    // DESIGN decision 2: "the Genesis token owns the base". A player starts by choosing which Genesis they play as,
+    // and our server checks the wallet holds it (serve.py, through `genesis-owner` below). The collection is not
+    // enumerable (supportsInterface(0x780e9d63) is false on chain), so what an account holds is read the way owned()
+    // reads Friends: every Transfer TO it since manifest.genesisStartBlock, then ownerOf on each, at one block.
+    // manifest.genesis and manifest.genesisStartBlock are base-data.json's toolkit fields.
+    async function genesisOwnerOf(tokenId, block) {
+      if (!isAddr(manifest.genesis)) throw new TypeError('base-data.json `toolkit` has no genesis address');
+      await checkChain();
+      const w = await call(manifest.genesis, SIG.ownerOf + word(validId(tokenId)), block);
+      return addrOf(w).toLowerCase();
+    }
+    async function genesisOwned(account) {
+      if (!isAddr(account) || eq(account, ZERO)) throw new TypeError('Genesis discovery requires a nonzero account.');
+      if (!isAddr(manifest.genesis)) throw new TypeError('base-data.json `toolkit` has no genesis address');
+      await checkChain();
+      const blockNumber = BigInt(await rpc('eth_blockNumber', []));
+      const START = BigInt(manifest.genesisStartBlock || 0), me = '0x' + word(account), seen = new Set();
+      for (let from = START; from <= blockNumber; from += MAX_BLOCKS_PER_QUERY) {
+        const end = from + MAX_BLOCKS_PER_QUERY - 1n, to = end < blockNumber ? end : blockNumber;
+        const logs = await rpc('eth_getLogs', [{ address: manifest.genesis, topics: [SIG.Transfer, null, me], fromBlock: hexBlock(from), toBlock: hexBlock(to) }]);
+        for (const l of logs) if (l.topics && l.topics.length === 4) seen.add(BigInt(l.topics[3]));
+      }
+      const ids = [...seen].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)), held = [];
+      for (const id of ids) {                         // a token received and sent on again is not held: ownerOf says
+        const o = addrOf(await call(manifest.genesis, SIG.ownerOf + word(id), blockNumber));
+        if (eq(o, account)) held.push(Number(id));
+      }
+      return { genesis: held, blockNumber: Number(blockNumber) };
+    }
+
+    return { sprites, owned, genesisOwned, genesisOwnerOf, rpc, manifest };
   }
 
   // Ruling 25: our drawn Colossus front and back are shown. They exist only for the sets in base-data.json
@@ -214,6 +245,22 @@
     const show = (s) => s.token + ': family ' + s.family + ' ' + s.familyName + ', seed ' + s.seed + ', generation ' + s.generation;
     (async () => {
       if (cmd === 'token') { for (const t of rest) console.log(show(await fc.sprites(t))); return 0; }
+      // serve.py's one question of the chain: who holds this Genesis now. One JSON line:
+      //   { ok: true, owner: '0x..' }             the chain named a holder
+      //   { ok: true, owner: null, why }          the chain ANSWERED that nobody does: ownerOf reverted, which an ERC-721
+      //                                           does for a token that does not exist - an answer, not a failure
+      //   { ok: false, why }                      the chain did not answer (no RPC, wrong chain, a bad reply). Never an
+      //                                           owner, and serve.py never reads it as "nobody" either.
+      if (cmd === 'genesis-owner') {
+        try { console.log(JSON.stringify({ ok: true, token: Number(rest[0]), owner: await fc.genesisOwnerOf(rest[0]) })); }
+        catch (e) {
+          const why = String(e && e.message || e).slice(0, 200);
+          if (/^eth_call: execution reverted\b/i.test(why)) console.log(JSON.stringify({ ok: true, token: Number(rest[0]), owner: null, why: 'Genesis #' + rest[0] + ' does not exist (ownerOf reverted)' }));
+          else console.log(JSON.stringify({ ok: false, why }));
+        }
+        return 0;
+      }
+      if (cmd === 'genesis') { const r = await fc.genesisOwned(rest[0]); console.log('block ' + r.blockNumber + ': Genesis ' + (r.genesis.map((g) => '#' + g).join(' ') || 'none')); return 0; }
       if (cmd === 'wallet') {
         const r = await fc.owned(rest[0]);
         console.log('block ' + r.blockNumber + ': balanceOf ' + r.balance + ', ' + r.friends.length + ' hardwired, ' + r.hiddenCount + ' at generation 0 left out');
@@ -237,7 +284,7 @@
           + drawn + ' drawn clips skipped (ruling 25); ' + bad + ' differ');
         return bad ? 1 : 0;
       }
-      console.error('usage: friend-chain.js token <id...> | wallet <0x...> | --check'); return 2;
+      console.error('usage: friend-chain.js token <id...> | wallet <0x...> | genesis <0x...> | genesis-owner <id> | --check'); return 2;
     })().then((c) => process.exit(c), (e) => { console.error(e.message); process.exit(1); });
   }
 })(typeof window !== 'undefined' ? window : globalThis);

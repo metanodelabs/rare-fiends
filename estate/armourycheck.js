@@ -29,7 +29,7 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
   // `consoleAPICalled` it asked for was parsed and dropped. pagewatch.js is the same enable, kept.
   const watch = await require('./pagewatch.js').attach(sock, send);
   let bad=0; const ok=(n,c,v)=>{console.log((c?'  ok  ':'FAIL  ')+n+(c?'':'   -> '+v)); if(!c) bad++;};
-  await sleep(2000);
+  await sleep(2000); await require('./pagewatch.js').waitForGame(send);
   const click = (sel) => ev(`(()=>{const b=document.querySelector(${JSON.stringify(sel)}); if(!b||b.disabled) return false; b.click(); return true;})()`);
   ok('the ARMOURY button is on the estate', await ev('!!document.getElementById("armouryBtn") && getComputedStyle(document.getElementById("armouryBtn")).display!=="none"'), 'missing');
   await click('#armouryBtn'); await sleep(300);

@@ -294,6 +294,9 @@ contract RareMarket is EIP712 {
     error FeeUnchanged();
     error FeeToUnchanged();
     error TradeableUnchanged(address collection);
+    /// @notice a game is running, so no trading switch can change (ruling 74). Raised by
+    /// `RareRoles.requireNoGameRunning`; declared here so an explorer decodes it against this contract's ABI.
+    error GameRunning(uint256 running);
     /// @notice the collection is not switched on for trading. Named for the collection, because the
     /// player's question is *"why can't I sell this"*.
     error NotTradeable(address collection);
@@ -687,9 +690,11 @@ contract RareMarket is EIP712 {
     /// @notice turn a collection on or off. **Turning one off stops listing, offering, buying and
     /// accepting, and never stops `cancel` or `withdrawOffer`** - the same *entry, never exit* rule demo
     /// mode follows, for the same reason: a switch that traps a token or an allowance is worse than no
-    /// switch.
+    /// switch. **Refused while any game runs** (ruling 74, BINDING §78), asked through `roles` AFTER the
+    /// power, so a stranger gets PowerNotHeld and learns nothing about the game.
     function setTradeable(address collection, bool on) external {
         roles.requirePower(msg.sender, SET_TRADEABLE);
+        roles.requireNoGameRunning();
         if (collection == address(0)) revert ZeroAddress();
         if (tradeable[collection] == on) revert TradeableUnchanged(collection);
         tradeable[collection] = on;

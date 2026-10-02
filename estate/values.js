@@ -12,10 +12,10 @@
 // WHO READS IT, AND NOBODY ELSE DECLARES IT
 //   estate/index.html            <script src="values.js"> then `const V = window.VALUES`; base.ECON is a
 //                                VIEW over it for the economy, deployer and attack pages and the checks
-//   contracts/paritycheck.js     reads MELEE, HP_OF, WALL_HP, WEAPONS and COMBAT out of this file as
-//                                text with its `readConst`, and fights the Solidity with them
+//   contracts/paritycheck.js     reads MELEE, HP_OF, WALL_HP, WEAPONS, COMBAT, DOOPIE_HP and DOOPIE_ARMS
+//                                out of this file as text with its `readConst`, and fights the Solidity with them
 //   estate/gencheck.js           lifts that parser and reads HP_OF from here
-//   estate/hashcheck.js          the same five tables, for the fight's hash
+//   estate/hashcheck.js          the same seven tables, for the fight's hash
 //   estate/combatcheck.js, capturecheck.js   the HP table, the shot timings and the wall's HP
 //
 // WHY A SCRIPT AND NOT JSON. Four checks read the fight's tables as TEXT, `const NAME = <expr>;`,
@@ -43,7 +43,18 @@
   // ---------------------------------------------------------------------------------------------
   // A starting plan, not balance. HP is tier-0 and 1.5x per generation up (the chain's reward
   // weights, compressed). Each evolution is +50% damage and +1 tile of range.
-  const HP_OF = { 0: 1140, 1: 759, 2: 506, 3: 337, 4: 225, 5: 150, 6: 100 };   // slot 0: a 1/1 Doopie, 1140 - DECIDED, ruling 55 (trap only; no weapon, so it never enters a full fight)
+  const HP_OF = { 0: 1140, 1: 759, 2: 506, 3: 337, 4: 225, 5: 150, 6: 100 };   // slot 0: a 1/1 Doopie, 1140 - DECIDED, ruling 55; it fights with DOOPIE_ARMS[0] (ruling 85)
+  // AN ORDINARY DOOPIE'S STRENGTH, BY EVOLUTION (M17 item 14; ruling 81): Evolution 1 is 225 ... Evolution 4 is 759,
+  // the strongest. ITS OWN TABLE (ruling 86, "they are not connected"): the four equal Gens 4 to 1 in HP_OF today,
+  // and changing either table never moves the other. In a fight Evolution e stands in slot 6 + e (7 to 10), after
+  // the six generations, so every fight table is indexed 0 to 10 (combat.js rulesFrom; RareCombat.Rules [11]).
+  const DOOPIE_HP = { 1: 225, 2: 337, 3: 506, 4: 759 };
+  // A DOOPIE'S WEAPON (M17 item 15; ruling 85): each fight slot of a Doopie names the Friend GENERATION whose
+  // weapon in WEAPONS it carries - Evolution 1 (slot 7) the spear of Gen 4, Evolution 2 (8) the bow of Gen 3,
+  // Evolution 3 (9) the crossbow of Gen 2, Evolution 4 (10) the catapult of Gen 1, and the 1/1 (slot 0) the
+  // catapult. The WEAPON is linked by the ruling ("the weapon of the Friend generation"); the strength is not.
+  // Doopies never attack Doopies (ruling 87): combat.js and RareCombat.sol, not a row here.
+  const DOOPIE_ARMS = { 0: 1, 7: 4, 8: 3, 9: 2, 10: 1 };
   const WALL_HP = 400;                                // a level-1 log wall section
   // One weapon per generation, as agreed: weapon, range in tiles, damage per hit, and what it does to buildings
   const WEAPONS = {
@@ -67,8 +78,9 @@
   // ---------------------------------------------------------------------------------------------
   // THE BUILDING REGISTRY (schema: buildingType, one row a kind; placementRule, as `placement`).
   // ---------------------------------------------------------------------------------------------
-  // Per-level arrays are indexed by level - 1, like `cost` always was. `wood` is what level 1 is built
-  // of (logs, in hundredths; upgrades are paid in crystals, which is why the rest of the row is 0).
+  // Per-level arrays are indexed by level - 1, like `cost` always was. `wood` is the logs each level takes and
+  // `cost` the crystals, both in hundredths and both paid at every level that names them (ruling 76's table:
+  // level 1 is wood only, level 2 half wood and half crystals, level 3 and Cell IV crystals).
   // `capacity` is the one number the kind caps - a silo's crystals, a wall's crew; `reach` in tiles;
   // `scienceGen` the worst generation that must be posted to run each level, 0 for none. `footprint` is
   // the tiles the building covers as [dx, dy] offsets from where it is placed, so a building bigger
@@ -91,16 +103,20 @@
   // M8 ITEMS 1, 2, 3 AND 6 - the columns a level is RAISED by. `cost` and `wood` are now BOTH per level and
   // both paid at every level they name (record.js materials(): one list per building per level, read off
   // these two columns, so a level can cost crystals and wood at once and a first level can cost wood only -
-  // a third material is a third column and one row in record.js's MATERIALS, never a special case). The
-  // NUMBERS are today's - wood for level 1, crystals after - held, because question 22's mix is PROPOSED:
-  // each row's `proposed.cost` carries it. `buildMs` is how long each level takes ONE Friend to raise, in
+  // a third material is a third column and one row in record.js's MATERIALS, never a special case).
+  // M8 ITEM 15, RULING 76 (2026-10-01): THE NUMBERS ARE THE APPROVED MATERIALS TABLE (DESIGN.md, *What each
+  // building is built from*). Each rung keeps the total units it cost before - wood and crystals added - so
+  // the raise times derived below and every refund are unchanged; only the mix moved. Level 3 and Cell IV
+  // are crystals standing in for stone, gravel, concrete and titanium, none of which exists yet: each would
+  // be a column here and an entry in MATERIALS. Every row's `decided.cost` and `decided.wood` say so, and
+  // nothing on a row is a mix proposal any more. `buildMs` is how long each level takes ONE Friend to raise, in
   // ms. `hands` is the ceiling on Friends working one build: each Friend up to it takes the time down
   // linearly (time / Friends), and past it another adds nothing.
   //
   // M8 ITEM 13 AND M10 ITEM 9 - THE DECIDED STARTING VALUES (ruling 64, 2026-10-01: the number sweep's rows 5
   // to 43, question 21, approved as starting values; each stays a deployer setting). What a row's numbers
   // ARE is now marked in its `decided` column, each with its sweep row, and `proposed` keeps only what is
-  // still a proposal (question 22's mix, which ruling 64 did not name; the capacitor's keep-cap flag).
+  // still a proposal (the capacitor's keep-cap flag; question 22's mix was decided by ruling 76).
   //   - raise time, row 24: BUILD_MS_PER_UNIT - 4 s per unit of the rung's materials, wood and crystals added
   //     together, by one Friend, by hand. ONE number: every kind's per-level buildMs is DERIVED from it and the
   //     rung's own materials (raised() below), so a rung whose price moves keeps its time in proportion, and
@@ -143,7 +159,6 @@
   // the raise time of each level, from its materials: (crystals + wood) hundredths / 100 units x 4 s - or, under
   // the demo switch, the flat demo pace at every level, exactly as the game ran before ruling 64
   const raised = (cost, wood) => cost.map((c, i) => (DEMO ? BUILD_MS : Math.round((c + (wood[i] || 0)) / 100 * BUILD_MS_PER_UNIT)));
-  const MIX_PROPOSED = (s) => 'today\'s numbers, held; PROPOSED (question 22, not named by ruling 64): level 1 wood only, level 2 half and half, level 3 crystals standing in for materials that do not exist yet - ' + s;
   const PLACE = (over) => Object.assign({ needsKeep: true, isKeep: false, cappedByKeepLevel: true, onWater: false,
     onBaseEdge: false, onClaimedGround: false, maxPerBase: 0, scienceGen: [], needsKind: 0, nextToKind: 0 }, over);
   // the marks every row shares - each names its sweep row, so a value is traced to the ruling that set it
@@ -152,30 +167,36 @@
     hands: 'DECIDED, ruling 64, sweep rows 25 and 27: linear - the time divided by the Friends on it - up to this ceiling, past which another adds nothing',
     strength: 'DECIDED, ruling 64, sweep row 6: each level doubles; capped at STRENGTH_MAX by row 7',
     energy: 'DECIDED, ruling 64, sweep row 29: P drawn while running, by level',
+    cost: 'DECIDED, ruling 76 (question 22): the crystals each level takes - none at level 1, half the rung at level 2, all of it at level 3 and Cell IV, standing in for materials not yet in the game',
+    wood: 'DECIDED, ruling 76 (question 22): the logs each level takes - all of level 1, half of level 2, none above',
   }, extra || {});
   const KINDS = {
-    keep:  { tiers: ['KEEP', 'HALL', 'CITADEL'],        cost: [0, 15000, 45000],      wood: [0, 0, 0],
+    keep:  { tiers: ['KEEP', 'HALL', 'CITADEL'],        cost: [0, 7500, 45000],       wood: [0, 7500, 0],
              // RULING 62, sweep row 45: what the base holds with NO depot and NO silo standing, while the keep
              // stands - at every keep level. A FLOOR, not an addition: record.js storeCap counts it only when
              // nothing else stores, reading it through `placement.isKeep` rather than this kind's name.
              capacity: [24000, 24000, 24000],
+             // RULING 77: what a LOST keep costs to put back - a bill in the purse's own material names, the shape
+             // record.js pay() takes - and it comes back at level 1. The first keep stays free (cost[0], wood[0]).
+             // RULING 78 reads its crystals: with the keep gone and no depot or silo standing, record.js storeCap
+             // holds the base to exactly this much, so a player who has lost everything can gather their way back.
+             rebuild: { wood: 7500, crystals: 7500 },
              strength: [1500, 3000, 6000], energy: [0, 2, 6],
              hands: 4,
              footprint: [[0, 0]], placement: PLACE({ needsKeep: false, isKeep: true, cappedByKeepLevel: false, maxPerBase: 1, scienceGen: [0, 0, 0] }),
-             decided: DECIDED({ capacity: 'DECIDED, ruling 62, sweep row 45: 240.00 while the keep stands, at every level - a floor under the store, not an addition; 0 once the keep is gone and nothing else stores' }),
-             proposed: { cost: MIX_PROPOSED('free / 75 wood + 75 crystals / 450 crystals') },
-             sub: "The Genesis seat. Nothing else can stand until it does, and no building can be raised past the keep's own tier." },
-    hut:   { tiers: ['HUT', 'HOUSE', 'MANSION'],        cost: [4000, 12000, 40000],   wood: [2000, 0, 0],
+             decided: DECIDED({ capacity: 'DECIDED, ruling 62, sweep row 45: 240.00 while the keep stands, at every level - a floor under the store, not an addition; with the keep gone and nothing else storing, the rebuild\'s crystals (ruling 78)',
+               rebuild: 'DECIDED, ruling 77: 75 wood and 75 crystals to put back a lost keep, at level 1; the first keep is free. Ruling 78: its crystals are the store of a base with no keep, no depot and no silo' }),
+             sub: 'The Genesis seat. Raise it first; nothing outranks it.' },
+    hut:   { tiers: ['HUT', 'HOUSE', 'MANSION'],        cost: [0, 6000, 40000],       wood: [6000, 6000, 0],
              strength: [200, 400, 800], energy: [0, 0, 0],
              hands: 4,
              footprint: [[0, 0]], placement: PLACE({ scienceGen: [0, 0, 0] }),
              decided: DECIDED(),
-             proposed: { cost: MIX_PROPOSED('60 wood / 60 + 60 / 400 crystals') },
              // M8 item 9: it used to promise "houses more Friends and adds a slot to your walls", and then
              // "Quarters for your Friends. Each tier is a bigger house." DESIGN.md rules housing out, so
              // none of it was ever true of the code; the line says what the hut is and promises nothing.
-             sub: 'A log cabin with a campfire out front. It holds no Friends - whoever you own can play - and each tier is a bigger one.' },
-    silo:  { tiers: ['SILO I', 'SILO II', 'SILO III'],  cost: [3000, 9000, 30000],    wood: [1500, 0, 0],
+             sub: 'A log cabin. It holds no Friends; each level is a bigger one.' },
+    silo:  { tiers: ['SILO I', 'SILO II', 'SILO III'],  cost: [0, 4500, 30000],       wood: [4500, 4500, 0],
              // what a silo ADDS to the base's reserve, by level (How much you can hold, DECIDED: a silo extends
              // the depot's reserve by a set amount; record.js storeCap sums every standing silo onto the best depot)
              capacity: [30000, 90000, 300000],
@@ -183,32 +204,29 @@
              hands: 4,
              footprint: [[0, 0]], placement: PLACE({ scienceGen: [0, 0, 0] }),
              decided: DECIDED({ capacity: 'DECIDED, ruling 64, sweep row 21: +300 / +900 / +3,000 by level, added up over every standing silo' }),
-             proposed: { cost: MIX_PROPOSED('45 wood / 45 + 45 / 300 crystals') },
-             sub: 'Extends what the base can hold: 300 more crystals, then 900, then 3,000, on top of the depot. The green bar over it shows how full the base is.' },
-    tower: { tiers: ['TOWER I', 'TOWER II', 'TOWER III'], cost: [8000, 24000, 70000], wood: [3000, 0, 0],
+             sub: 'Holds 300 more crystals, then 900, then 3,000, on top of the depot.' },
+    tower: { tiers: ['TOWER I', 'TOWER II', 'TOWER III'], cost: [0, 12000, 70000], wood: [11000, 12000, 0],
              strength: [300, 600, 1200], energy: [0, 3, 6],
              hands: 4,
              footprint: [[0, 0]], placement: PLACE({ scienceGen: [0, 0, 0] }),
              decided: DECIDED(),
-             proposed: { cost: MIX_PROPOSED('110 wood / 120 + 120 / 700 crystals') },
-             sub: 'Needs a Friend standing watch. Their generation sets the defence; the tier sets the reach.' },
-    wall:  { tiers: ['LIGHT', 'STONE', 'CURTAIN'],      cost: [2500, 7500, 25000],    wood: [1000, 0, 0],
+             sub: 'A Friend keeps watch; level sets reach.' },
+    wall:  { tiers: ['LIGHT', 'STONE', 'CURTAIN'],      cost: [0, 3750, 25000],       wood: [3500, 3750, 0],
              // bodies a section holds, shoulder to shoulder. Question 23: the game held 3 at every level
              // here and enforced 3, 4, 5 in two places (the tap and the panel: WALL_CAP + tier - 1) while
              // the HUD multiplied by 3 - one program, two rules. The rule the game enforces is the one
              // written here now, and all three readers read this column.
              capacity: [3, 4, 5],
-             // level 1 names WALL_HP, the fight's own, rather than typing 400 a second time. NOT YET READ BY THE
-             // FIGHT AT LEVELS 2 AND 3: combat.js and RareCombat.sol give every wall WALL_HP whatever its level,
-             // so 800 and 1,600 are the decided numbers and the fight is behind them - owed with the parity check.
+             // level 1 names WALL_HP, the fight's own, rather than typing 400 a second time. THE FIGHT READS THIS
+             // ROW: record.js settle() gives each section strength[standing level - 1] as its own hp, and combat.js
+             // and RareCombat.sol fight a section at the hp it carries (Wall.hp; Rules.wallHp only when it carries none).
              strength: [WALL_HP, 800, 1600], energy: [0, 1, 3],
              hands: 2,
              footprint: [[0, 0]], placement: PLACE({ onBaseEdge: true, scienceGen: [0, 0, 0] }),
              decided: DECIDED({ hands: 'DECIDED, ruling 64, sweep row 27: 2 - a wall is an edge with two faces, one crew a side; linear up to it (row 25)',
-               strength: 'DECIDED, ruling 64, sweep row 6: 400 / 800 / 1,600 - level 1 is WALL_HP; the fight still gives every wall level WALL_HP' }),
-             proposed: { cost: MIX_PROPOSED('35 wood / 37.50 + 37.50 / 250 crystals') },
-             sub: 'Holds a crew shoulder to shoulder. Every body counts the same here, which is what Gen 6 is for.' },
-    cell:  { tiers: ['CELL I', 'CELL II', 'CELL III', 'CELL IV'], cost: [5000, 15000, 40000, 90000], wood: [2000, 0, 0, 0],
+               strength: 'DECIDED, ruling 64, sweep row 6: 400 / 800 / 1,600 - level 1 is WALL_HP; each section fights at its standing level\'s' }),
+             sub: 'Holds a crew; every body on it counts the same.' },
+    cell:  { tiers: ['CELL I', 'CELL II', 'CELL III', 'CELL IV'], cost: [0, 7500, 40000, 90000], wood: [7000, 7500, 0, 0],
              // The ladder is 2, 3, 4, 5 tiles. It held 1.5/2.5/3.5/4.5 and the deployer ruled the document
              // right and the game wrong - "design document is correct, it should use that".
              reach: [2, 3, 4, 5],
@@ -222,17 +240,15 @@
              // to a fourth tier: index.html's `capped` used to know that by name, and now reads it here.
              footprint: [[0, 0]], placement: PLACE({ onClaimedGround: true, cappedByKeepLevel: false, scienceGen: [0, 0, 0, 0] }),
              decided: DECIDED({ strength: 'DECIDED, ruling 64, sweep row 6: 250 / 500 / 1,000, and Cell IV 2,000' }),
-             proposed: { cost: MIX_PROPOSED('70 wood / 75 + 75 / 400 crystals / 900 crystals') },
-             sub: 'An outpost that extends your land. Each level reaches further, toward new seams or a rival. Place another cell on claimed ground to push further still. Levels past the first need science: a qualified Friend posted at the cell.' },
-    generator:  { tiers: ['WATER WHEEL', 'WATER MILL', 'TURBINE'], cost: [5000, 15000, 45000], wood: [2500, 0, 0],
+             sub: 'Extends your land; each level reaches further. Goes on claimed ground.' },
+    generator:  { tiers: ['WATER WHEEL', 'WATER MILL', 'TURBINE'], cost: [0, 7500, 45000], wood: [7500, 7500, 0],
              strength: [200, 400, 800], energy: [0, 0, 0],
              hands: 4,
              supply: [10, 25, 60],                       // P it makes, by level
              footprint: [[0, 0]], placement: PLACE({ onWater: true, scienceGen: [0, 0, 0] }),
              decided: DECIDED({ supply: 'DECIDED, ruling 64, sweep row 31: 10 / 25 / 60 P - a level-1 base runs on its water wheel, just' }),
-             proposed: { cost: MIX_PROPOSED('75 wood / 75 + 75 / 450 crystals') },
-             sub: 'Makes power from running water: a wheel turning in its channel. Each level turns out more.' },
-    collectionDepot: { tiers: ['DEPOT I', 'DEPOT II', 'DEPOT III'], cost: [6000, 18000, 50000], wood: [3000, 0, 0],
+             sub: 'Power from running water: build it on a river or creek.' },
+    collectionDepot: { tiers: ['DEPOT I', 'DEPOT II', 'DEPOT III'], cost: [0, 9000, 50000], wood: [9000, 9000, 0],
              // the crystals the depot itself holds, by level (M8 item 6; How much you can hold, DECIDED: the
              // depot holds crystals and fills up). DECIDED as a starting value, ruling 64, sweep row 20
              capacity: [24000, 72000, 216000],
@@ -240,8 +256,7 @@
              hands: 4,
              footprint: [[0, 0]], placement: PLACE({ scienceGen: [0, 0, 0] }),
              decided: DECIDED({ capacity: 'DECIDED, ruling 64, sweep row 20: 240.00 / 720.00 / 2,160.00 crystals by level - level I equals the starting purse, each level x3' }),
-             proposed: { cost: MIX_PROPOSED('90 wood / 90 + 90 / 500 crystals') },
-             sub: 'Collection depot. It holds the base\'s crystals - 240, then 720, then 2,160 - and builds harvesters that bring what they cut back here. Each level runs one more harvester and adds a crystal to every haul.' },
+             sub: 'Holds 240, 720, then 2,160 crystals; each level runs one more harvester.' },
     // THE NINTH BUILDING (M8 item 11). Decided: four levels; one to a base; it must stand touching a
     // generator, and that generator is the one it serves; it leaks by its own level (10% a day, 5%, 3%,
     // none); it can be captured and destroyed; it opens one game year after a water mill stands (the
@@ -260,11 +275,11 @@
              hands: 4,
              footprint: [[0, 0]], placement: PLACE({ maxPerBase: 1, nextToKind: 'generator', scienceGen: [0, 0, 0, 0] }),
              decided: DECIDED({ hands: 'DECIDED, ruling 64, sweep row 27: 4 for the capacitor; linear up to it (row 25)',
-               cost: 'DECIDED, ruling 64, sweep row 32: the economy page\'s ladder, 300 / 800 / 2,000 / 4,500, 0 wood', capacity: 'DECIDED, ruling 64, sweep row 32: the store, 500 / 1,500 / 4,000 / 10,000 P·h',
+               cost: 'DECIDED, ruling 64, sweep row 32: the economy page\'s ladder, 300 / 800 / 2,000 / 4,500, 0 wood', wood: 'DECIDED, ruling 64, sweep row 32: 0 wood at every level - not a log building; ruling 76 left it unchanged', capacity: 'DECIDED, ruling 64, sweep row 32: the store, 500 / 1,500 / 4,000 / 10,000 P·h',
                release: 'DECIDED, ruling 64, sweep row 32: 15 / 40 / 100 / 250 P at most', strength: 'DECIDED, ruling 64, sweep row 6: 200 / 400 / 800 / 1,600 - the generator\'s ladder, because the two stand touching',
                energy: 'DECIDED, ruling 64, sweep row 29: 0 at every level - a store does not draw' }),
              proposed: { cappedByKeepLevel: 'true as the rule stands; false is way out 1 of three, the deployer\'s to pick' },
-             sub: 'Stores power from the generator it touches and lets it out when that generator goes offline. Leaks by its own level; the fourth leaks nothing. One to a base.' },
+             sub: 'Stores a touching generator\'s power for when it stops. One to a base.' },
   };
   // every kind's raise time per level, DERIVED from its own materials (row 24) - never typed per row
   Object.values(KINDS).forEach((r) => { r.buildMs = raised(r.cost, r.wood); });
@@ -335,6 +350,7 @@
     kinds: KINDS,
     // the fight (schema: rules)
     hp: HP_OF, wallHp: WALL_HP, weapons: WEAPONS, combat: COMBAT,
+    doopieHp: DOOPIE_HP, doopieArms: DOOPIE_ARMS,     // ordinary Doopies' strengths (ruling 81) and every Doopie's weapon (ruling 85)
     // the start
     startBase: START_BASE,
   };

@@ -5,12 +5,12 @@
 <link rel="icon" href="/favicon.ico" sizes="32x32">
 <link rel="icon" type="image/png" sizes="32x32" href="icon-32.png">
 <link rel="apple-touch-icon" sizes="180x180" href="icon-180.png">
-<link rel="manifest" href="site.webmanifest">
+<link rel="manifest" href="site.webmanifest" crossorigin="use-credentials"><!-- with credentials: behind Server 1's login a manifest fetched without them is a 401 -->
 <meta name="theme-color" content="#CCFF00">
 <!-- "on" only where this page is served beside the game and our API (Server 1: deploy/deploy-test.sh writes it).
      rarefiends.com gets this file as it is, "off", so the DEMO button and the whitelist form never show there
      until a deploy turns them on - a form that POSTs to an endpoint the site does not have would be a promise
-     the page cannot keep. Opened from localhost, the page counts as "on" (serve.py answers /api/whitelist). -->
+     the page cannot keep. Opened from localhost, the page counts as "on" (serve.py answers /api/auth and /api/whitelist). -->
 <meta name="rf-app" content="off">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Rare Fiends</title>
@@ -232,7 +232,19 @@ h1 { margin: 0; font-family: var(--display); font-weight: 400; font-size: clamp(
 .wl .msg.bad { color: #ff6b80; }
 .wl .msg.good { color: var(--signal-ink); font-family: var(--display); font-size: 14px; letter-spacing: .08em; }
 .wl .trap { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
-[data-theme="invert"] .wl h2, [data-theme="invert"] .wl .msg.good { -webkit-text-stroke: 3.5px var(--ink); paint-order: stroke fill; }
+/* what the chain says the signed wallet holds, and the CONFIRM that writes it */
+.wl .found { display: grid; gap: 8px; }
+.wl .found[hidden] { display: none; }
+.wl .what { margin: 0; font-size: 14px; line-height: 1.4; }
+.wl .what b { font-family: var(--mono); font-weight: 400; color: var(--signal-ink); }
+.wl .two { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+.wl .no { --home-bg: var(--paper); --home-fg: var(--ink); justify-content: center; font-size: 13px; padding: 10px 12px; }
+/* which wallet will sign, when the browser has more than one (wallet.js, EIP-6963), and the way to pick another */
+.wl .chg { justify-self: center; margin: -2px 0 0; padding: 2px 4px; border: 0; background: none; color: var(--dim); cursor: pointer;
+  font-family: var(--display); font-size: 11px; letter-spacing: .1em; text-decoration: underline; text-underline-offset: 3px; }
+.wl .chg:hover, .wl .chg:focus-visible { color: var(--ink); }
+.wl .chg[hidden] { display: none; }
+[data-theme="invert"] .wl h2, [data-theme="invert"] .wl .msg.good, [data-theme="invert"] .wl .what b { -webkit-text-stroke: 3.5px var(--ink); paint-order: stroke fill; }
 [data-theme="invert"] .wl .msg.bad { color: #c8001e; }
 
 /* ---------- light mode: every run of the theme colour gets its own small bordered box ----------
@@ -319,19 +331,22 @@ h1 { margin: 0; font-family: var(--display); font-weight: 400; font-size: clamp(
       .theme { padding: 7px 8px; }
   .wallet { font-size: 12px; padding: 7px 9px; white-space: nowrap; }
   .play { font-size: 12px; padding: 7px 9px; }
-  /* the whitelist card sits under the title, clear of the readings and the button at the bottom; the labels
-     go (each input keeps an aria-label and a placeholder) and the contact shares a row with JOIN */
+  /* the whitelist card sits under the title, clear of the readings and the button at the bottom; the label
+     goes (the input keeps an aria-label and a placeholder) and the contact shares a row with CONNECT & SIGN */
   /* 22.5vw: the title's box is 33.6vw tall and its letters end two thirds of the way down it */
   .wl { right: 12px; left: 12px; width: auto; top: 22.5vw; bottom: auto; gap: 5px; padding: 9px 12px 10px; }
   .wl h2 { font-size: 15px; }
   .wl .sub { display: none; }
   .wl form { grid-template-columns: minmax(0, 1fr) auto; gap: 5px; }
   .wl label { font-size: 0; gap: 0; }
-  .wl label:first-child { grid-column: 1 / -1; }
+  .wl .found { grid-column: 1 / -1; gap: 5px; }
+  .wl .what { font-size: 13px; }
+  .wl .no { font-size: 12px; padding: 6px 10px; }
   .wl input { font-size: 14px; padding: 6px 8px; }
   .wl .go { font-size: 12px; padding: 6px 10px; align-self: end; }
   .wl .msg { grid-column: 1 / -1; font-size: 13px; }
   .wl .msg.good { font-size: 12px; }
+  .wl .chg { grid-column: 1 / -1; justify-self: end; margin: 0; padding: 0 2px; font-size: 10px; }
   .wl .x { top: 6px; right: 6px; padding: 5px 6px; }
 }
 </style>
@@ -340,7 +355,7 @@ h1 { margin: 0; font-family: var(--display); font-weight: 400; font-size: clamp(
 <header>
   <div class="brand"><i></i>RARE FIENDS</div>
   <span class="sp"></span>
-  <a class="btn play" id="play" href="base.html?pace=demo&amp;demo=1" hidden title="Play the game in demo mode">DEMO</a>
+  <a class="btn play" id="play" href="player.html?pace=demo&amp;demo=1" hidden title="Sign in with your wallet and play in demo mode">DEMO</a>
   <button class="btn theme" id="theme" type="button" aria-label="switch between light and dark"></button>
   <button class="btn burger" id="burger" type="button" aria-expanded="false" aria-controls="menu" aria-label="menu"></button>
   <nav class="menu" id="menu" hidden>
@@ -426,18 +441,23 @@ h1 { margin: 0; font-family: var(--display); font-weight: 400; font-size: clamp(
   <section class="wl" id="wl" aria-labelledby="wlTitle" hidden>
     <button class="btn x" id="wlShut" type="button" aria-label="close the whitelist"></button>
     <h2 id="wlTitle">JOIN THE WHITELIST HERE</h2>
-    <p class="sub">Leave the Robinhood Chain wallet you will play from. We never show the list to anyone.</p>
+    <p class="sub">For holders of a Rare Friends Genesis or Generations NFT. Connect the wallet that holds it and sign:
+      signing is free, and sends nothing on chain.</p>
     <form id="wlForm" novalidate>
-      <label>ROBINHOOD CHAIN WALLET
-        <input name="address" id="wlAddr" aria-label="your Robinhood Chain wallet address" placeholder="0x…" maxlength="42"
-               autocomplete="off" autocapitalize="off" spellcheck="false" required>
-      </label>
       <label class="c"><span>X HANDLE OR EMAIL <i>· OPTIONAL</i></span>
         <input name="contact" id="wlContact" aria-label="your X handle or email, optional" placeholder="@handle or email (optional)"
                maxlength="120" autocomplete="off" autocapitalize="off" spellcheck="false">
       </label>
       <label class="trap" aria-hidden="true"><span>Website</span><input name="website" tabindex="-1" autocomplete="off"></label>
-      <button class="btn go" id="wlGo" type="submit">JOIN</button>
+      <button class="btn go" id="wlGo" type="submit">CONNECT &amp; SIGN</button>
+      <button class="chg" id="wlChg" type="button" hidden></button>
+      <div class="found" id="wlFound" hidden>
+        <p class="what" id="wlWhat"></p>
+        <div class="two">
+          <button class="btn go" id="wlYes" type="button">CONFIRM</button>
+          <button class="btn no" id="wlNo" type="button">NOT NOW</button>
+        </div>
+      </div>
       <p class="msg" id="wlMsg" role="status" aria-live="polite"></p>
     </form>
   </section>
@@ -588,11 +608,46 @@ h1 { margin: 0; font-family: var(--display); font-weight: 400; font-size: clamp(
     || /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
   if (APP) $('play').hidden = false;
 
-  // JOIN THE WHITELIST HERE. The address is checked here for shape, and again by the server, which is the one that
-  // counts (serve.py whitelist_post). Closing the card is remembered in localStorage; the menu brings it back.
+  // SIGNING IN (the deployer's ruling, 2026-10-01): "when you login, you should go directly to your profile page".
+  // DEMO and CONNECT both sign in with the wallet first - the server checks the address is whitelisted, or is the
+  // deployer's - and then open MY PROFILE, never the base. wallet.js and session.js are fetched only here, on the
+  // click, so the published landing page (rf-app off, neither file shipped beside it) asks for nothing it lacks.
+  // On a developer's own machine session.js asks nothing and the click goes straight to the profile.
+  const PROFILE = 'player.html?pace=demo&demo=1';
+  const load = (src) => new Promise((ok, no) => {
+    if (document.querySelector('script[src="' + src + '"]')) { ok(); return; }
+    const s = document.createElement('script'); s.src = src; s.onload = ok; s.onerror = () => no(new Error(src + ' did not load'));
+    document.head.appendChild(s);
+  });
+  let signing = false;
+  async function enter(btn) {
+    if (signing) return;
+    signing = true;
+    const was = btn.innerHTML, say = (t) => { btn.textContent = t; btn.title = t; };
+    const fail = (t) => { say(t); refuse(btn); setTimeout(() => { btn.innerHTML = was; btn.title = ''; }, 2600); };
+    try {
+      await load('wallet.js'); await load('session.js');
+      let m = await RFSession.me(true);
+      if (m.role === 'none') { say('CHECK WALLET'); m = await RFSession.signIn(); }
+      if (m.role === 'none') { fail('NOT ON THE WHITELIST'); return; }
+      location.href = PROFILE;
+    } catch (e) {
+      fail(e && e.code === 'NO_WALLET' ? 'NO WALLET' : e && e.code === 'NO_PICK' ? 'NO WALLET CHOSEN' : e && e.code === 4001 ? 'REFUSED'
+        : e && e.status === 403 ? 'NOT ON THE WHITELIST' : 'DID NOT SIGN IN');
+      console.warn('sign in', e);
+    } finally { signing = false; }
+  }
+  if (APP) $('play').addEventListener('click', (e) => { e.preventDefault(); enter($('play')); });
+
+  // JOIN THE WHITELIST HERE. For holders of a Rare Friends Genesis or Generations NFT, and nobody types an address:
+  // the wallet connects, the server hands back a one-time Sign-In with Ethereum message for that address, the wallet
+  // signs it (free, nothing on chain), and the server checks the signature and reads chain 4663 for what the address
+  // holds. The player sees what was found and presses CONFIRM; only then is anything written (serve.py, whitelist_*).
+  // Closing the card is remembered in localStorage; the menu brings it back.
   (function whitelist() {
     if (!APP) return;
-    const card = $('wl'), form = $('wlForm'), addr = $('wlAddr'), contact = $('wlContact'), go = $('wlGo'), msg = $('wlMsg');
+    const card = $('wl'), form = $('wlForm'), contact = $('wlContact'), go = $('wlGo'), msg = $('wlMsg');
+    const found = $('wlFound'), what = $('wlWhat'), yes = $('wlYes'), no = $('wlNo');
     const KEY = 'rf-wl-shut';
     const shut = () => { try { return localStorage.getItem(KEY) === '1'; } catch (_) { return false; } };
     const remember = (v) => { try { v ? localStorage.setItem(KEY, '1') : localStorage.removeItem(KEY); } catch (_) {} };
@@ -600,39 +655,106 @@ h1 { margin: 0; font-family: var(--display); font-weight: 400; font-size: clamp(
     card.hidden = shut();
     $('wlOpen').hidden = false;
     $('wlShut').onclick = () => { card.hidden = true; remember(true); };
-    $('wlOpen').addEventListener('click', (e) => { e.preventDefault(); setMenu(false); remember(false); card.hidden = false; addr.focus(); });
-    const ADDR = /^0x[0-9a-fA-F]{40}$/, X = /^@?[A-Za-z0-9_]{1,15}$/, MAIL = /^[^@\s]{1,64}@[^@\s.]{1,63}(\.[^@\s.]{1,63})+$/;
+    $('wlOpen').addEventListener('click', (e) => { e.preventDefault(); setMenu(false); remember(false); card.hidden = false; go.focus(); });
+    const X = /^@?[A-Za-z0-9_]{1,15}$/, MAIL = /^[^@\s]{1,64}@[^@\s.]{1,63}(\.[^@\s.]{1,63})+$/;
     const say = (t, kind) => { msg.textContent = t; msg.className = 'msg' + (kind ? ' ' + kind : ''); };
-    form.addEventListener('submit', (e) => {
-      e.preventDefault();
-      const a = addr.value.trim(), c = contact.value.trim();
-      addr.removeAttribute('aria-invalid'); contact.removeAttribute('aria-invalid');
-      if (!ADDR.test(a) || /^0x0{40}$/i.test(a)) {
-        addr.setAttribute('aria-invalid', 'true'); addr.focus();
-        say('Not a wallet address: 0x and 40 hex characters.', 'bad'); refuse(go); return;
-      }
+    const short = (a) => a.slice(0, 6) + '…' + a.slice(-4);
+    const plural = (n, one) => n + ' ' + one + (n === 1 ? '' : 's');
+    const W = { token: null, address: null };
+    const busy = (b, label) => { go.disabled = b; chg.disabled = b; go.textContent = label || 'CONNECT & SIGN'; };
+    // THE WALLET is wallet.js's - the same one session.js signs in with. It lists every wallet the browser announces
+    // (EIP-6963), so Phantom can be chosen even where MetaMask holds window.ethereum, and remembers the choice.
+    const chg = $('wlChg');
+    const showChg = () => {
+      const R = window.RFWallet, name = R && R.wallets().length > 1 ? R.chosen() : '';
+      chg.hidden = go.hidden || !name;
+      if (name) chg.textContent = 'USING ' + name.toUpperCase() + ' · CHANGE WALLET';
+    };
+    load('wallet.js').then(() => { RFWallet.onWallets(showChg); showChg(); }).catch(() => {});
+    chg.addEventListener('click', async () => {
+      try { await RFWallet.change(); say(''); } catch (_) { /* the picker was closed: nothing changes */ }
+      showChg();
+    });
+    const reset = () => { W.token = null; found.hidden = true; go.hidden = false; busy(false); showChg(); };
+    const ask = (url, body) => fetch(url, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : { cache: 'no-store' })
+      .then((r) => r.json().catch(() => ({ ok: false })).then((j) => ({ r, j })));
+    const contactOk = () => {
+      const c = contact.value.trim();
+      contact.removeAttribute('aria-invalid');
       if (c && !(c.length <= 120 && (X.test(c) || MAIL.test(c)))) {
         contact.setAttribute('aria-invalid', 'true'); contact.focus();
-        say('Leave an X @handle, an email, or nothing.', 'bad'); refuse(go); return;
+        say('Leave an X @handle, an email, or nothing.', 'bad'); refuse(go); return false;
       }
-      go.disabled = true; go.textContent = 'SENDING'; say('');
-      const body = { address: a, contact: c, website: form.elements.website.value };
-      fetch('/api/whitelist', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-        .then((r) => r.json().catch(() => ({ ok: false })).then((j) => ({ r, j })))
-        .then(({ r, j }) => {
-          if (r.ok && j.ok) {
-            say('ON THE LIST: ' + a.slice(0, 6) + '…' + a.slice(-4), 'good');
-            addr.value = ''; contact.value = '';
-            return;
-          }
-          if (r.status === 400 && j.error) { addr.setAttribute('aria-invalid', 'true'); say('Refused: ' + j.error + '.', 'bad'); }
-          else if (r.status === 429) say('Too many tries from here. Wait a few minutes.', 'bad');
-          else say('That did not go through. Try again, or DM @rarefiends.', 'bad');
-          refuse(go);
-        })
-        .catch(() => { say('That did not go through. Try again, or DM @rarefiends.', 'bad'); refuse(go); })
-        .finally(() => { go.disabled = false; go.textContent = 'JOIN'; });
+      return true;
+    };
+    const fail = (t) => { say(t, 'bad'); refuse(go); reset(); };
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (go.disabled || !contactOk()) return;
+      say(''); busy(true, 'CONNECTING');
+      let address;
+      try { await load('wallet.js'); address = await RFWallet.connect(); }
+      catch (err) {
+        const c = err && err.code;
+        fail(c === 'NO_WALLET' ? 'No wallet in this browser. Open this page in the browser of the wallet that holds your Friend.'
+          : c === 'NO_PICK' ? 'No wallet was chosen. Nothing was sent.'
+          : c === 'NO_ADDRESS' ? 'The wallet named no address.' : 'The wallet said no. Nothing was sent.');
+        return;
+      }
+      showChg();
+      // the message, made by the server for this address, with a nonce it will take once
+      let n;
+      try { n = await ask('/api/auth/nonce?purpose=whitelist&address=' + encodeURIComponent(address)); }
+      catch (_) { fail('The whitelist did not answer. Try again, or DM @rarefiends.'); return; }
+      if (!n.r.ok || !n.j.ok) { fail(n.r.status === 429 ? 'Too many tries from here. Wait a few minutes.' : 'Refused: ' + (n.j.error || 'try again') + '.'); return; }
+      // Robinhood Chain, if the wallet will go there. The chain comes from the server with the message, so no number is
+      // typed into this page. It does not block: the server checks the signature and reads chain 4663 itself, so a wallet
+      // that refuses or does not know the chain (Phantom's EVM side may not) still signs, with a note saying so.
+      busy(true, 'CHECK YOUR WALLET');
+      const onChain = await RFWallet.toChain(n.j.chain);
+      busy(true, 'SIGN IN YOUR WALLET');
+      if (!onChain.ok) say('Your wallet stayed on its own network. That is fine: signing sends nothing, and we read Robinhood Chain ourselves.');
+      let signature;
+      try { signature = await RFWallet.sign(n.j.message, address); }
+      catch (_) { fail('The signature was refused. Nothing was sent.'); return; }
+      busy(true, 'READING THE CHAIN');
+      let v;
+      try { v = await ask('/api/auth/verify', { message: n.j.message, signature, website: form.elements.website.value }); }
+      catch (_) { fail('That did not go through. Try again, or DM @rarefiends.'); return; }
+      if (v.r.status === 403 && v.j.code === 'none') {
+        fail(short(v.j.address || address) + ' holds no Rare Friends Genesis and no Generations NFT on Robinhood Chain, so it cannot join. Connect the wallet that holds one.');
+        return;
+      }
+      if (!v.r.ok || !v.j.ok) {
+        fail(v.r.status === 429 ? 'Too many tries from here. Wait a few minutes.' : 'Refused: ' + (v.j.error || 'that did not verify') + '.');
+        return;
+      }
+      W.token = v.j.token; W.address = String(address).toLowerCase() === v.j.address ? address : v.j.address;   // the wallet's casing
+      const held = [v.j.genesis ? plural(v.j.genesis, 'Genesis').replace(/Genesiss$/, 'Genesis') : '', v.j.generations ? plural(v.j.generations, 'Generation') : '']
+        .filter(Boolean).join(' and ');
+      what.innerHTML = '';
+      const b = document.createElement('b'); b.textContent = short(W.address);
+      what.append(b, document.createTextNode(' holds ' + held + '. Confirm to join the whitelist with this wallet.'));
+      go.hidden = true; found.hidden = false; say(''); showChg(); yes.focus();
     });
+
+    yes.addEventListener('click', async () => {
+      if (!W.token || yes.disabled || !contactOk()) return;
+      yes.disabled = true; yes.textContent = 'SAVING';
+      try {
+        const { r, j } = await ask('/api/whitelist/confirm', { token: W.token, contact: contact.value.trim(), website: form.elements.website.value });
+        if (r.ok && j.ok) {
+          const a = W.address; reset(); contact.value = '';
+          say('ON THE LIST: ' + short(a), 'good');
+          return;
+        }
+        if (j.code === 'contact') { contact.setAttribute('aria-invalid', 'true'); say('Refused: ' + j.error + '.', 'bad'); refuse(yes); return; }
+        fail(r.status === 429 ? 'Too many tries from here. Wait a few minutes.' : 'Refused: ' + (j.error || 'that did not save') + '.');
+      } catch (_) { fail('That did not go through. Try again, or DM @rarefiends.'); }
+      finally { yes.disabled = false; yes.textContent = 'CONFIRM'; }
+    });
+    no.addEventListener('click', () => { reset(); say('Nothing was written.'); });
   })();
 
   const pad = (n) => String(n).padStart(2, '0');
@@ -724,7 +846,7 @@ h1 { margin: 0; font-family: var(--display); font-weight: 400; font-size: clamp(
       $('lede').textContent = 'Your base is claimed. Build while you wait: the game starts when the clock on the right runs out.';
       cta.textContent = 'JOINED · PLAYER ' + e.players;
       cta.className = 'btn cta in'; cta.disabled = true;
-      $('fine').innerHTML = '<a href="base.html">GO TO YOUR BASE →</a>';
+      $('fine').innerHTML = '<a href="player.html">GO TO YOUR PROFILE →</a>';
     }
     renderSpecs();
     document.querySelectorAll('[data-era]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.era === (e && e.by !== 'you' ? 'open' : e ? '' : 'none'))));
@@ -768,7 +890,7 @@ h1 { margin: 0; font-family: var(--display); font-weight: 400; font-size: clamp(
         '<span class="sub">starts ' + at(e.startAt) + '</span></div>';
   }
 
-  $('wallet').onclick = () => { if (!LIVE) { refuse($('wallet')); return; } connect(); };
+  $('wallet').onclick = () => { if (APP) { enter($('wallet')); return; } if (!LIVE) { refuse($('wallet')); return; } connect(); };
   // the bridge is not open either: the link says so the same way the button does
   document.querySelectorAll('nav a[href="bridge.html"]').forEach((a) => {
     a.addEventListener('click', (e) => { if (LIVE) return; e.preventDefault(); refuse(a); });

@@ -186,15 +186,24 @@ const SEES = (id, r) => `(function(){ const a = base.actors.find(a => a.kind ===
     // THE ATTACK: both records written, the fight counted (item 6)
     const fa = await (await postJ('/api/record/' + AT + '/attack', { on: DF, sent: [0, 1], side: 'E', parent: ga.record.head })).json();
     const sa = (await getJ('/api/record/' + AT)).record, sd = (await getJ('/api/record/' + DF)).record, fl = await getJ('/api/record/fights');
-    ok(fa.ok && fa.fight.won && sa.head === fa.fight.heads.attacker && sd.head === fa.fight.heads.defender && sd.ledger.base.crystals === 0 && sa.ledger.base.crystals === 2 * gd.record.ledger.base.crystals && sd.ledger.keepLost && sd.ledger.keepLost.fight === fa.fight.id,
-      'serve.py settles the attack and writes BOTH records: the attacker at ' + String(sa.head).slice(0, 10) + ' holding ' + sa.ledger.base.crystals + ', the defender at ' + String(sd.head).slice(0, 10) + ' holding 0 with its keep lost to fight ' + (fa.fight && fa.fight.id));
+    // RULING 68: a fight moves no purse - no loot. This used to assert the old rule (the defender emptied to 0 and the
+    // attacker doubled). Both purses must come out exactly as they went in, and they must hold something, or
+    // "unchanged" would pass on two empty purses.
+    const purse = (L) => JSON.stringify({ crystals: L.base.crystals, wood: L.base.wood });
+    ok(fa.ok && fa.fight.won && sa.head === fa.fight.heads.attacker && sd.head === fa.fight.heads.defender
+      && gd.record.ledger.base.crystals > 0 && ga.record.ledger.base.crystals > 0
+      && purse(sd.ledger) === purse(gd.record.ledger) && purse(sa.ledger) === purse(ga.record.ledger)
+      && sd.ledger.keepLost && sd.ledger.keepLost.fight === fa.fight.id,
+      'serve.py settles the attack and writes BOTH records, and moves NEITHER purse (ruling 68): the attacker at ' + String(sa.head).slice(0, 10) + ' holding ' + purse(sa.ledger) + ' (was ' + purse(ga.record.ledger) + '), the defender at ' + String(sd.head).slice(0, 10) + ' holding ' + purse(sd.ledger) + ' (was ' + purse(gd.record.ledger) + ') with its keep lost to fight ' + (fa.fight && fa.fight.id));
     ok(fl.count === fights0 + 1 && fl.fights[fl.fights.length - 1].id === fa.fight.id && fl.fights[fl.fights.length - 1].hash === fa.fight.hash,
       'M13 item 6: the fight counter went ' + fights0 + ' -> ' + fl.count + ', its last line the fight just settled, hash ' + String(fa.fight && fa.fight.hash).slice(0, 10));
     // StaleParent stays safe: the defender's client, still on the head it had before it was attacked, writes a chop
     { const S = R.session(gd.record.ledger, gd.record.head); S.note('chop', {}, 7); const late = await (await postJ('/api/record/' + DF + '/commit', S.batch(8, null, 8))).json();
       const now = (await getJ('/api/record/' + DF)).record;
-      ok(!late.ok && late.reason === 'StaleParent' && late.is === fa.fight.heads.defender && now.head === fa.fight.heads.defender && now.ledger.base.wood === 0,
-        'the defender\'s client writing off its pre-fight head is StaleParent and the server\'s record keeps the fight (wood ' + now.ledger.base.wood + ', not a log)'); }
+      // the record after the late write is the fight's record to the wood: not the 0 the old loot rule left, and not
+      // that plus the client's log (ruling 68 leaves the purse where the fight found it)
+      ok(!late.ok && late.reason === 'StaleParent' && late.is === fa.fight.heads.defender && now.head === fa.fight.heads.defender && now.ledger.base.wood === sd.ledger.base.wood,
+        'the defender\'s client writing off its pre-fight head is StaleParent and the server\'s record keeps the fight (wood ' + now.ledger.base.wood + ', the fight left ' + sd.ledger.base.wood + ', not a log more)'); }
     await postJ('/api/record/' + AT + '/forget', {}); await postJ('/api/record/' + DF + '/forget', {});
 
     console.log('--- (2) two seats on one island, each seeing the other ---');

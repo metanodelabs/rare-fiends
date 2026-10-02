@@ -28,7 +28,7 @@ const URL = process.argv[2] || 'http://localhost:8765/base.html';
     await sleep(250);
   };
   const watch = await require('./pagewatch.js').attach(sock, send);
-  await sleep(1500);
+  await sleep(1500); await require('./pagewatch.js').waitForGame(send);
   // What is really in front: seen from the camera, a point stands in front of a wall if its foot is
   // lower on the screen than the wall line straight above/below it. A wall runs along x by default
   // and along y when dir is 'y', so the whole check is written in (u, v) - u along the wall, v

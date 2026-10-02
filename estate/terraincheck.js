@@ -6,7 +6,7 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
   const prof=fs.mkdtempSync(path.join(os.tmpdir(),'tc-'));
   require("./pagewatch.js").guard(prof);            // close it even if this check throws, or is killed
   const ch=spawn(CHROME,['--headless=new','--enable-unsafe-swiftshader','--hide-scrollbars','--remote-debugging-port='+PORT,
-    '--user-data-dir='+prof,'--window-size=1100,800','http://localhost:8765/base.html'],{stdio:'ignore'});
+    '--user-data-dir='+prof,'--window-size=1100,800','http://localhost:8765/base.html?pace=demo'],{stdio:'ignore'});
   let send, sock;
   for(let i=0;i<160&&!send;i++){await sleep(250);try{
     const t=(await(await fetch(`http://127.0.0.1:${PORT}/json`)).json()).find(x=>x.type==='page');
@@ -33,7 +33,8 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
   await sleep(2000);
   ok('the hill steps up to a summit three levels high', await ev('[base.levelAt(-1.5,2.5),base.levelAt(-1.5,1.5),base.levelAt(-0.5,1.5)].join()') === '1,2,3', await ev('[base.levelAt(-1.5,2.5),base.levelAt(-1.5,1.5),base.levelAt(-0.5,1.5)].join()'));
   ok('water sites are the spring and the foot of the falls', await ev('base.WATER_SITES.join(" ")') === '-0.5,1.5 -0.5,2.5', await ev('base.WATER_SITES.join(" ")'));
-  // earn 25 wood the real way: two Friends to the forest
+  // earn the generator's wood the real way: two Friends to the forest. Ruling 76 made it 75 wood and the base's whole
+  // forest is 21 trees of 3 logs - 63 - so ?pace=demo, where a felled tree regrows in the demo's time and not 15 min.
   for (const [g, grove] of [['G6', 4], ['G5', 5]]) {
     // the chip is found by its generation badge, which is real and on chain, and RENTED is excluded
     // because the rented three are also a Gen 6, a Gen 6 and a Gen 5.
@@ -74,12 +75,16 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
       // one: the tap followed the anchor, the document was replaced, and every assertion after it
       // died with `estate is not defined`. Which tree is tapped is arbitrary anyway, because a
       // Friend sent to any tree works through the whole grove.
-      const T = `base.trees.filter(t=>t.grove===6&&t.wood>0).find(t=>{
-        const p=base.project(t.x,t.y), k=base.fit;
-        const cv=document.getElementById('c'), r=cv.getBoundingClientRect();
-        return document.elementFromPoint((p[0]*k+base.CAM.x*(1-k)+base.viewX)/cv.width*r.width+r.left,
-                                         ((p[1]-18)*k+base.CAM.y*(1-k))/cv.height*r.height+r.top)===cv;})`;
-      await tapWorld(await ev(T+'.x'), await ev(T+'.y'), 18);
+      // Ruling 76 put a generator at more wood than grove 6 holds, so the next tree is ANY grove's: the standing tree
+      // furthest from every Friend (tap() offers a Friend within 22px before a tree - the cellcheck trap) whose tap
+      // point is on the canvas. Asked in one evaluate, so an empty forest comes back as null and is said out loud.
+      const at = await ev(`(()=>{ const cv=document.getElementById('c'), r=cv.getBoundingClientRect(), k=base.fit;
+        const onCanvas=t=>{ const p=base.project(t.x,t.y); return document.elementFromPoint((p[0]*k+base.CAM.x*(1-k)+base.viewX)/cv.width*r.width+r.left,
+                                         ((p[1]-18)*k+base.CAM.y*(1-k))/cv.height*r.height+r.top)===cv; };
+        const far=t=>Math.min(...base.actors.map(a=>Math.hypot(a.x-t.x,a.y-t.y)));
+        const t=base.trees.filter(t=>t.wood>0&&onCanvas(t)).sort((p,q)=>far(q)-far(p))[0]; return t?[t.x,t.y]:null; })()`);
+      if (!Array.isArray(at)) continue;                       // the forest is down: wait for a tree to regrow (demo pace)
+      await tapWorld(at[0], at[1], 18);
     }
   }
   const gSpent = Math.round(await clock() - gt0), wSpent = Math.round((Date.now() - wt0) / 1000);

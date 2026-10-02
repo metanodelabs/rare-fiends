@@ -35,8 +35,14 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
   ok('the numbers the game hasn\'t decided are marked PROPOSED', /PROPOSED/.test(await ev('document.getElementById("numbers").innerText')), 'no tag');
 
   // where a Friend stands: the base is read from the estate, on spots
-  ok('the base is the estate\'s: 36 tiles, its walls, its tower, 9 Friends on their spots',
-    await ev('combatPage.BASE.tiles.length') === 36 && await ev('combatPage.BASE.walls.length') === 4 && await ev('combatPage.BASE.towers.length') === 1 && await ev('combatPage.BASE.defenders.length') === 9,
+  // HOW MANY FRIENDS the base has is the base's own answer, asked of a fresh base.html in a frame here: it was a typed
+  // 9 - six of the base's own and the mockup's three RENTED, which the player's game removed (49dc90e, hiring removed).
+  const NF = await send('Runtime.evaluate', { expression: `new Promise((done) => { const f = document.createElement('iframe'); f.style.cssText = 'position:fixed;left:-2000px;width:900px;height:700px';
+    f.src = 'base.html'; document.body.appendChild(f); const t0 = Date.now();
+    (function w() { try { const b = f.contentWindow.base; if (b && b.defense && b.actors.length) { const n = b.defense().defenders.length, own = b.actors.filter((a) => a.kind === 'friend' && a.base === b.HOME).length; f.remove(); return done([n, own]); } } catch (e) {}
+      if (Date.now() - t0 > 20000) { f.remove(); return done([-1, -1]); } setTimeout(w, 100); })(); })`, awaitPromise: true, returnByValue: true }).then((r) => r.result.value);
+  ok('the base is the estate\'s: 36 tiles, its walls, its tower, and its own ' + NF[0] + ' Friends on their spots (a fresh base.html says ' + NF[0] + ' defenders, ' + NF[1] + ' Friends of its own)',
+    await ev('combatPage.BASE.tiles.length') === 36 && await ev('combatPage.BASE.walls.length') === 4 && await ev('combatPage.BASE.towers.length') === 1 && NF[0] > 4 && NF[0] === NF[1] && await ev('combatPage.BASE.defenders.length') === NF[0],
     await ev('JSON.stringify([combatPage.BASE.tiles.length, combatPage.BASE.walls.length, combatPage.BASE.towers.length, combatPage.BASE.defenders.length])'));
   ok('the tile diagram and every weapon\'s reach are drawn', await ev('document.getElementById("tileCv").width') > 0 && await ev('document.getElementById("reachCv").height') > 100, 'missing');
 
@@ -86,7 +92,7 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
   await ev('[0,1,2,3].forEach(i => document.querySelector("[data-pick=\\"" + i + "\\"]").click())'); await sleep(250);
   ok('PICK MANY picks several Friends at once', await ev('JSON.stringify(combatPage.SET.picks)') === '[0,1,2,3]', await ev('JSON.stringify(combatPage.SET.picks)'));
   await ev('document.querySelector("[data-dorder=\\"2\\"]").click()'); await sleep(300);
-  ok('one order then goes to all of them, and nobody else', await ev('JSON.stringify(combatPage.BASE.defenders.map(d=>d.order))') === '[2,2,2,2,0,0,0,0,0]', await ev('JSON.stringify(combatPage.BASE.defenders.map(d=>d.order))'));
+  ok('one order then goes to all of them, and nobody else', await ev('JSON.stringify(combatPage.BASE.defenders.map(d=>d.order))') === JSON.stringify(Array.from({ length: NF[0] }, (_, i) => (i < 4 ? 2 : 0))), await ev('JSON.stringify(combatPage.BASE.defenders.map(d=>d.order))'));
   await ev('document.querySelector("[data-everyone]").click()'); await sleep(150);
   await ev('document.querySelector("[data-dorder=\\"1\\"]").click()'); await sleep(300);
   ok('EVERYONE gives the order to the whole base', await ev('combatPage.BASE.defenders.every(d => d.order === 1)') === true, await ev('JSON.stringify(combatPage.BASE.defenders.map(d=>d.order))'));

@@ -1,7 +1,7 @@
-// The partnership rules (M16, M20 item 6), each broken once. For every rule fixcheck.js labels `RULE <name>:`
-// in parts 13 and 25, this file breaks the code that enforces it in a COPY of the sources, runs fixcheck against
-// the copy, and requires that exact line to come back FAIL. A rule whose mutant stays green is a rule nothing
-// proves, and this file exits non-zero for it.
+// The partnership rules (M16, M20 item 6), each broken once - and since M20 item 2, the fight's re-point guards
+// (part 26) beside them. For every rule fixcheck.js labels `RULE <name>:` in parts 13, 25 and 26, this file breaks
+// the code that enforces it in a COPY of the sources, runs fixcheck against the copy, and requires that exact line
+// to come back FAIL. A rule whose mutant stays green is a rule nothing proves, and this file exits non-zero for it.
 //
 // Nothing in the worktree is touched: the copy lives in the OS temp directory, as an `estate/` of symlinks with a
 // real `contracts/` beside them (fixcheck reads ../index.html, ../values.js and ../schema.json).
@@ -15,7 +15,7 @@ const CONTRACTS = path.join(__dirname, '..');
 const ESTATE = path.join(CONTRACTS, '..');
 
 // [rule label, file, exact text to find, what to put instead]
-const P = 'RarePartners.sol', G = 'RareGame.sol';
+const P = 'RarePartners.sol', G = 'RareGame.sol', U = 'RareRules.sol', K = 'RareCombat.sol', M = 'RareMarket.sol', O = 'RareOrders.sol';
 const MUTANTS = [
   ['setters-guarded', P, 'roles.requirePower(msg.sender, SET_PARTNERSHIPS);\n        if (collection == address(0))', 'if (collection == address(0))'],
   ['setters-guarded', P, 'roles.requirePower(msg.sender, SET_PARTNERSHIPS);\n        roles.requireNoGameRunning();', 'roles.requireNoGameRunning();'],
@@ -65,6 +65,20 @@ const MUTANTS = [
   ["pause-end-pays", P, "emit Ended(id, msg.sender); }\n        _settle(id, p);", "emit Ended(id, msg.sender); }"],
   ["settle-once", P, "if (p.settled) revert AlreadySettled(id);", ""],
   ["prize-share-settles", P, "if (toB != 0) rf.safeTransfer(p.holderB, toB);", ""],
+  // M20 item 2 (fixcheck part 26): the fight behind RareRules.fight(), one mutant per guard on setFight, and the salt
+  ['fight-repoint-guarded', U, 'roles.requirePower(msg.sender, SET_RULES);\n        roles.requireNoGameRunning();\n        if (fight_ == address(0))', 'roles.requireNoGameRunning();\n        if (fight_ == address(0))'],
+  ['fight-repoint-frozen', U, 'roles.requireNoGameRunning();\n        if (fight_ == address(0))', 'if (fight_ == address(0))'],
+  ['fight-repoint-code', U, 'if (fight_ == address(0)) revert ZeroAddress();', ''],
+  ['fight-repoint-code', U, 'if (fight_.code.length == 0) revert NotAContract(fight_);', ''],
+  // the salt back to the deployment's own address, as the library had it before M20 item 2: a re-point at the same
+  // rules would then change every roll
+  ['fight-salt-is-game', K, 'RareChance.roll(F.word, F.game, block.chainid, F.fightId, F.rolls);', 'RareChance.roll(F.word, address(this), block.chainid, F.fightId, F.rolls);'],
+  // ruling 74, the trading switch (BINDING §80, fixcheck part 27): the freeze removed, and the freeze asked BEFORE the power
+  ['trading-switch-frozen', M, 'roles.requirePower(msg.sender, SET_TRADEABLE);\n        roles.requireNoGameRunning();', 'roles.requirePower(msg.sender, SET_TRADEABLE);'],
+  ['trading-switch-power-first', M, 'roles.requirePower(msg.sender, SET_TRADEABLE);\n        roles.requireNoGameRunning();', 'roles.requireNoGameRunning();\n        roles.requirePower(msg.sender, SET_TRADEABLE);'],
+  // M20 item 10, ruling 59 (part 18): the orders are opened by the key that settles the fight and nobody else.
+  // Not a partnership rule; it lives here because this is the file that breaks a labelled RULE and wants it red.
+  ['orders-opened-by-server', O, 'roles.requirePower(msg.sender, RECORD_FIGHT);\n        Commitment storage c', 'Commitment storage c'],
 ];
 
 function mirror() {
@@ -85,7 +99,7 @@ function mirror() {
 
 const { root, c } = mirror();
 const orig = {};
-for (const f of [P, G]) orig[f] = fs.readFileSync(path.join(c, f), 'utf8');
+for (const f of [P, G, U, K, M, O]) orig[f] = fs.readFileSync(path.join(c, f), 'utf8');
 const run = () => spawnSync(process.execPath, [path.join(c, 'test', 'fixcheck.js')], { cwd: c, encoding: 'utf8', maxBuffer: 64 << 20 });
 
 const base = run();

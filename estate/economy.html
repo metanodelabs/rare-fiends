@@ -241,13 +241,16 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
     const top = dk.tiers.length, twoDepots = cap([D(1), row(4, 'collectionDepot', top)]);
     const none = cap([]);
     // RULING 62 (sweep row 45): with no depot and no silo, the KEEP sets the store - values.js keep.capacity at
-    // every keep level - as a FLOOR, not an addition; with the keep gone too, 0. Run here like the rest, on a
-    // keep alone at each level and on a keep beside depot I. What it should hold is read from values.js, not typed.
+    // every keep level - as a FLOOR, not an addition. RULING 78 (superseding ruling 62's "0"): with the keep gone too,
+    // the store is the keep's REBUILD crystals (values.js keep.rebuild.crystals), so a player can gather back to a keep.
+    // Run here like the rest, on a keep alone at each level, on a keep beside depot I and on nothing at all. What each
+    // should hold is read from values.js, not typed.
     const kk = V.kinds.keep, K = (l) => row(5, 'keep', l);
     const keepAlone = kk ? kk.tiers.map((_, i) => cap([K(i + 1)])) : [];
     const keepWant = kk && Array.isArray(kk.capacity) ? kk.capacity : null;
     const keepDepot = kk ? cap([K(1), D(1)]) : null;
-    return { depot, silo, adds, twoSilos, twoDepots, none, top, keepAlone, keepWant, keepDepot,
+    const noneWant = kk && kk.rebuild && typeof kk.rebuild.crystals === 'number' ? kk.rebuild.crystals : null;
+    return { depot, silo, adds, twoSilos, twoDepots, none, noneWant, top, keepAlone, keepWant, keepDepot,
       siloAdds: twoSilos === depot[0] + 2 * adds[0] && adds.every((a) => a > 0),
       bestDepot: twoDepots === Math.max(depot[0], depot[top - 1]),
       bareUncapped: none === Infinity,
@@ -276,8 +279,10 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
           : '<li><b>DISAGREES - values.js carries no <code>keep.capacity</code></b>: ruling 62 says the keep holds 240.00 when no depot and no silo stand, and the game has no number for it. A keep alone holds <b>' + ST.keepAlone.map(sc).join(' / ') + '</b>.</li>') +
         L(ST.keepNotAdded, 'a keep beside depot I holds <b>' + sc(ST.keepDepot) + '</b> - the depot\'s own; <b>the keep is a floor, not an addition</b>',
           'a keep beside depot I holds ' + sc(ST.keepDepot) + ', not the depot\'s ' + sc(ST.depot[0]) + ': the keep is being added, where ruling 62 makes it a floor') +
-        L(ST.none === 0, 'nothing standing at all - no keep, no depot, no silo: <b>' + sc(ST.none) + '</b>, so gathering is refused and what is held is kept (ruling 62)',
-          'nothing standing at all holds ' + sc(ST.none) + ', where ruling 62 makes it 0') +
+        (ST.noneWant != null
+          ? L(ST.none === ST.noneWant, 'nothing standing at all - no keep, no depot, no silo: <b>' + sc(ST.none) + '</b>, the crystals to rebuild the keep - <b>gathering goes on up to the price of a new keep</b>, and what is held is kept (ruling 78, values.js <code>keep.rebuild</code>)',
+              'nothing standing at all holds ' + sc(ST.none) + ', where ruling 78 makes it the keep\'s rebuild crystals, ' + sc(ST.noneWant))
+          : '<li><b>DISAGREES - values.js carries no <code>keep.rebuild.crystals</code></b>: ruling 78 makes the store of a base with nothing standing the keep\'s rebuild crystals, and the game has no number for it. Nothing standing holds <b>' + sc(ST.none) + '</b>.</li>') +
       '</ul>' +
       (E.siloCaps === true ? '<code>base.bank()</code> clips every crystal entering a purse at this figure, so the game enforces it. ' : '<b>The game reports <code>base.ECON.siloCaps</code> is not true: nothing clips a purse at this figure.</b> ') + T_.game + ' ' +
       (ST.depotProp ? '<br><b>The depot\'s capacity, ' + ST.depot.map(sc).join(' / ') + ', is PROPOSED, not decided</b> (values.js: ' + ST.depotProp.replace(/</g, '&lt;') + '). ' + T_.prop : '') +
@@ -698,7 +703,7 @@ iframe.probe { position: absolute; width: 1px; height: 1px; left: -10px; top: -1
         (!ST ? 'What a depot holds and what a silo adds: this page could not read them.'
           : (ST.depotProp ? 'The depot\'s capacity, ' + ST.depot.map(sc).join(' / ') + ' by level, is proposed and not decided.' : '') +
             (ST.siloProp ? ' What a silo adds, +' + ST.adds.map(sc).join(' / +') + ', is proposed and not decided.' : '')) +
-          (ST && !(ST.keepFloor && ST.keepNotAdded && ST.none === 0) ? ' And the game does not yet hold a base with neither a depot nor a silo to its keep, as ruling 62 decided (see 02).' : ''),
+          (ST && !(ST.keepFloor && ST.keepNotAdded && ST.noneWant != null && ST.none === ST.noneWant) ? ' And the game does not yet hold a base with neither a depot nor a silo to its keep, as ruling 62 decided, or a base with nothing standing to the keep\'s rebuild crystals, as ruling 78 decided (see 02).' : ''),
       ].filter(Boolean).map(x => '<li>' + x + '</li>').join('') + '</ul>'));
 
     $('out').innerHTML = out.join('');

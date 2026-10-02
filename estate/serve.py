@@ -10,6 +10,17 @@ own cache entry. This one says no-store on everything, so the browser always ask
     python3 estate/serve.py 8788       # another port
     python3 estate/serve.py --api 8790 # THE PUBLISHED SHAPE: api/ only, on 127.0.0.1, nothing from disk
     --records=<dir>  --whitelist=<file>  where the game records and the landing page's whitelist are kept
+    --wl-rpc=<url>  --wl-ttl=<s>         the whitelist's chain reads through a test's stand-in, and a nonce's life
+    --gate                               THE GATE: every page and api/ route by the wallet session's role (see AUTH)
+    --auth-config=<file> --auth-rpc=<url>  where RareRoles is recorded (a bridge config: cfg.rareRoles), and the RPC
+                                         its two reads go through; without a RareRoles on record nobody is deployer
+    --session-ttl=<s> --role-ttl=<s>     a session's life (4 h) and how often its role is re-read (5 min) - proofs only
+    --auth-rate=<n>/<window>             signed POSTs per client per window (default 8/600): /api/auth/verify and the
+                                         whitelist's two POSTs share this one bucket. Window in s, or with m or h
+    --auth-nonce-rate=<n>/<window>       GET /api/auth/nonce per client per window (default 20/600)
+    --chain-rate=<n>/<window>            reads of who holds a Genesis that go to the chain, per client per window
+                                         (default 60/600) - the same limiter as --auth-rate, its own bucket
+    --genesis-ttl=<s>                    how long who holds a Genesis is kept before it is read again (default 30)
 
 The `--api` form is M21 item 6, the server side a published bridge needs. rarefiends.com is Apache serving
 static files with system python3 beside it (see deploy/rarefiends.com.conf and run.sh), and the deploy
@@ -25,8 +36,11 @@ import base64
 import functools
 import glob
 import hashlib
+import hmac
+import http.cookies
 import http.server
 import json
+import mimetypes
 import os
 import re
 import secrets
@@ -100,6 +114,10 @@ def record_write(base, rec):
     with open(tmp, 'w', encoding='utf8') as f:
         json.dump(rec, f, separators=(',', ':'))
     os.replace(tmp, record_path(base))
+    # ---- CLOCKWORK HOOK (2 of 3): every write re-seals the base's standing orders if they moved (M20 item 10)
+    if clockwork:
+        clockwork.seal(RECORDS, base, rec)
+    # ---- end CLOCKWORK HOOK (2 of 3)
 
 
 def record_apply(rec, batch):
@@ -113,37 +131,240 @@ def record_apply(rec, batch):
 
 
 def record_heads():
-    """Every record the server holds, by head: what a client polls, so it fetches only what moved."""
+    """Every record the server holds, by head: what a client polls, so it fetches only what moved. `owner` is the
+    wallet a base belongs to (or None): it is how a player's page finds its own base on reload, and how the spawn
+    knows which plots are taken (ruling 43: first come, first served). Standings already show it beside the base.
+    `genesis` is the Genesis token that owns it (ownerTokenId): how a player picks their base back up on reload."""
     out = []
     try:
         names = sorted(os.listdir(RECORDS))
     except OSError:
         return out
+    # M5 NAMES HOOK (6, with base names): `name` is the base's own name and `ownerName` its owner's player name (names.py), so
+    # every page that already polls the heads can say whose base it is - and who fought whom - without asking again.
+    chosen, based = (playernames.load(RECORDS), playernames.load_bases(RECORDS)) if playernames else ({}, {})
     for n in names:
         if n.endswith('.json') and re.fullmatch(BASE_ID, n[:-5]):
             rec = record_read(n[:-5])
             if rec:
-                out.append({'id': rec.get('base'), 'head': rec.get('head'), 'writes': rec.get('writes'), 'at': rec.get('at')})
+                out.append({'id': rec.get('base'), 'head': rec.get('head'), 'writes': rec.get('writes'), 'at': rec.get('at'),
+                            'owner': rec.get('owner'), 'genesis': rec.get('ownerTokenId'),
+                            'name': playernames.base_name_of(based, rec.get('base'), rec.get('ownerTokenId')) if playernames else None,
+                            'ownerName': playernames.name_of(chosen, rec.get('owner')) if playernames else None})
     return out
 
 
+# ------------------------------------------------------------ SEALED ORDERS: what a record shows anyone but its owner
+# DESIGN, What is public (decision 5): standing orders are hidden - THE ONE EXCEPTION to everything being public - and
+# ruling 59: they are opened at the fight, by the server, in the step that settles it. So nothing this server SENDS
+# carries another base's orders; only what it READS (record.js settle(), on the records on disk) and what it
+# journals for the chain (clockwork.py, 0600 under the records) hold them. Three things in a record give them away:
+#   ledger.roster[].order  the orders themselves: dropped from every row
+#   head                   keccak over the canonical ledger, orders included. With the rest of the ledger public, four
+#                          orders a Friend is 4^n guesses - a few thousand hashes for a full base - so the real head
+#                          is as good as the orders. It is replaced by a server-keyed HMAC of (base, head): it still
+#                          changes exactly when the head does (what a client's poll compares), and it is no hash
+#                          of anything a viewer holds. The key is this process's and is never written anywhere.
+#   applied                the batch ids, each a hash over a batch's moves (an `order` move among them): dropped.
+# What is NOT taken: lastFight, and GET /api/record/fights - the orders a fight was fought with ARE the reveal
+# (ruling 59), and the chain publishes the same orders when the server opens the seal (RareOrders.reveal).
+# Who sees orders: the wallet the record names as `owner` - for a Genesis-owned base the token's holder, which
+# owner_now keeps current on a read and every write sets from the session that passed holder_refusal. With no
+# session (a local, ungated server) only a record that names no owner is shown whole - there is no one to hide
+# it from and no one to show it to. The deployer is NOT exempt: the design hides orders from everyone, and the
+# deployer reads the server's disk, not this route.
+_SEAL_KEY = secrets.token_bytes(32)
+
+
+def sealed_head(base, head):
+    """What a non-owner is shown in place of a record's head: changes when the head does, reveals nothing."""
+    if not isinstance(head, str):
+        return head
+    return '0x' + hmac.new(_SEAL_KEY, ('%s|%s' % (base, head)).encode('utf8'), hashlib.sha256).hexdigest()
+
+
+def sees_orders(session, owner, token):
+    """True when the viewer (the request's session, or None) may see the orders of a record with this owner and
+    ownerTokenId. Fails closed: an ownerless record is whole only to a request with no session at all."""
+    if owner:
+        return bool(session) and session.get('address') == owner
+    return session is None and token is None
+
+
+def sealed_record(rec):
+    """A record as anyone but its owner may see it: no standing order, no head that hashes back to one."""
+    if not isinstance(rec, dict):
+        return rec
+    out = {k: v for k, v in rec.items() if k != 'applied'}
+    L = rec.get('ledger')
+    if isinstance(L, dict):
+        L = dict(L)
+        if isinstance(L.get('roster'), list):
+            L['roster'] = [{k: v for k, v in r.items() if k != 'order'} if isinstance(r, dict) else r for r in L['roster']]
+        out['ledger'] = L
+    out['head'] = sealed_head(rec.get('base'), rec.get('head'))
+    out['sealed'] = True
+    return out
+
+
+def record_of_genesis(token):
+    """The base id a Genesis token already owns, or None. DESIGN decision 2: the Genesis token owns the base - one
+    token, one base (schema.json base.ownerTokenId). A wallet holding two Genesis may play two bases."""
+    for h in record_heads():
+        if h.get('genesis') == token:
+            return h.get('id')
+    return None
+
+
+# WHO HOLDS A GENESIS NOW. DESIGN decision 2: "the Genesis token owns the base" - so selling a base is a token
+# transfer, and the wallet a base answers to is whoever holds its ownerTokenId on chain NOW, not the wallet that founded
+# it. That is read on chain and kept for GENESIS_TTL seconds (--genesis-ttl=, default 30), so a buyer has the base and
+# the seller has lost it within that long. Only an answer is kept: a read that failed is asked again next time. A read
+# that has to go to the chain is rate-limited per client (CHAIN_RATE, --chain-rate=, the same limiter as --auth-rate).
+GENESIS_TTL = 30                                        # --genesis-ttl=<s>
+CHAIN_RATE = (60, 600)                                  # --chain-rate=<n>/<window>: chain reads per client per window
+_GEN_CACHE = {}                                         # token -> (state, holder, why, at)
+_GEN_LOCK = threading.Lock()
+_GEN_MAX = 20000
+
+
+def genesis_owner(token):
+    """Who holds Genesis #token on chain 4663 now, as (state, holder, why):
+         ('held', '0x..', None)   the chain answered with a holder
+         ('none', None, why)      the chain answered: nobody (ownerOf reverted - no such token - or the zero address)
+         ('unreadable', None, why) the chain did not answer. NEVER an owner, and never a 'none' either.
+    Read by friend-chain.js - the same reader the page lists a player's Genesis with - through --wl-rpc when a check
+    gives a stand-in chain (the whitelist's holdings read goes there too), else chainlive.js's RPC list."""
+    env = dict(os.environ)
+    if WL_RPC:
+        env['EVM_RPC'] = WL_RPC
+    try:
+        run = subprocess.run(['node', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'sprites', 'friend-chain.js'),
+                              'genesis-owner', str(token)], capture_output=True, timeout=40, env=env)
+        j = json.loads(run.stdout.decode('utf8').strip().splitlines()[-1])
+        if not isinstance(j, dict):
+            raise ValueError('friend-chain.js answered something that is not an object')
+    except Exception as e:                              # node missing, a timeout, or no answer at all
+        return 'unreadable', None, 'the chain could not be read: %s' % e
+    if not j.get('ok'):
+        return 'unreadable', None, 'the chain could not be read: %s' % j.get('why')
+    owner = str(j.get('owner'))
+    if j.get('owner') is None or (EVM_ADDR.fullmatch(owner) and int(owner, 16) == 0):
+        return 'none', None, j.get('why') or 'nobody holds Genesis #%s' % token
+    if not EVM_ADDR.fullmatch(owner):
+        return 'unreadable', None, 'the chain could not be read: ownerOf answered %r' % owner[:60]
+    return 'held', owner.lower(), None
+
+
+def genesis_cached(token):
+    """The kept answer for Genesis #token, or None when there is none younger than GENESIS_TTL."""
+    with _GEN_LOCK:
+        hit = _GEN_CACHE.get(token)
+    if hit and time.time() - hit[3] < GENESIS_TTL:
+        return hit[:3]
+    return None
+
+
+def genesis_keep(token, ans):
+    if ans[0] == 'unreadable':                          # a failure is never kept: the next asker reads again
+        return
+    with _GEN_LOCK:
+        if len(_GEN_CACHE) >= _GEN_MAX:
+            now = time.time()
+            for k in [k for k, v in _GEN_CACHE.items() if now - v[3] >= GENESIS_TTL]:
+                _GEN_CACHE.pop(k, None)
+            if len(_GEN_CACHE) >= _GEN_MAX:
+                _GEN_CACHE.clear()
+        _GEN_CACHE[token] = ans + (time.time(),)
+
+
+class GameUnreadable(Exception):
+    """game.json is there and is not a game. Refused, never replaced: a new seed would move every base's ground."""
+
+
+# ---------------------------------------------------------------- the game: the map a player arrives on
+# "A game only has to store its seed" (mapgen.js). One file beside the records, game.json = { seed, players }, written
+# once - the first time a player's page asks - and read ever after, so every player of this server is on the same
+# generated map and a reload is on the same map again. players is null for the generator's own default (MapGen
+# MAP_DEFAULT.players: 100 is the floor, never sized down - DESIGN "A map starts empty, and is always big enough for
+# 100"). --game-seed=<n> fixes the seed of a NEW game file (a check's scratch server); an existing file always wins,
+# because changing the seed under a running game would move every base's ground.
+GAME_SEED = None
+
+
+def game_path():
+    return os.path.join(RECORDS, 'game.json')
+
+
+def game_read():
+    """The game's { seed, players }, made on first read - and ONLY when there is no file at all. A game.json that is
+    there and cannot be read, or is not a game, raises GameUnreadable (and an OSError raises as itself): it is never
+    quietly replaced, because a new seed under a running game moves every base's ground. Called under _REC_LOCK."""
+    try:
+        with open(game_path(), encoding='utf8') as f:
+            raw = f.read()
+    except FileNotFoundError:
+        return game_new()
+    try:
+        g = json.loads(raw)
+    except ValueError:
+        g = None
+    if not (isinstance(g, dict) and isinstance(g.get('seed'), int) and not isinstance(g.get('seed'), bool)):
+        raise GameUnreadable('game.json is there and is not a game ({ seed, players }): refused, never replaced - '
+                             'a new seed would move every base. Mend or remove %s by hand.' % game_path())
+    return {'seed': g['seed'], 'players': g.get('players') if isinstance(g.get('players'), int) else None}
+
+
+def game_new():
+    """The first read of a server with no game.json: a seed, written once."""
+    g = {'seed': GAME_SEED if GAME_SEED is not None else 1 + secrets.randbelow(2 ** 31 - 2), 'players': None}
+    os.makedirs(RECORDS, mode=0o700, exist_ok=True)
+    tmp = game_path() + '.tmp'
+    with open(tmp, 'w', encoding='utf8') as f:
+        json.dump(g, f)
+    os.replace(tmp, game_path())
+    return g
+
+
 # ---------------------------------------------------------------- the whitelist: one JSON file, beside the records
-# The landing page's JOIN THE WHITELIST HERE form POSTs { address, contact? } to /api/whitelist. One file, a JSON
-# list of { address, contact, at }, written whole and renamed into place like a record. It lives in the DATA root,
-# beside the records directory - never in the repository and never under site/, so nothing serves it:
+# The deployer's rule, 2026-10-01: "to join the whitelist, they must have a rarefriends genesis or generations .. they
+# sign cryptographically that they have the asset and that it is on which wallet address, then the player can confirm".
+# So nobody types an address any more. Three steps, all on this server, nothing sent to or signed on any chain:
+#   GET  /api/auth/nonce?address=0x..&purpose=whitelist  -> { ok, message, chain, expiresIn }   a single-use nonce, kept in
+#        memory, inside an EIP-4361 (Sign-In with Ethereum) message built by estate/whitelist-proof.js for the domain the
+#        page was opened on. (These two were /api/whitelist/nonce and /verify; they are sign-in's now - see AUTH below.)
+#   POST /api/auth/verify { message, signature, website? }  -> { ok, address, role, genesis, generations, token }
+#        the signature must recover to the message's address; the domain, chain 4663 and the times must be right; the
+#        nonce must be one this server issued for that address, unused and unexpired - and it is burned here. Then chain
+#        4663 is READ: balanceOf on Genesis and on Generations. Holding neither is a 403 with a plain reason.
+#   POST /api/whitelist/confirm { token, contact?, website? } -> { ok }   the player has seen what was found and said yes;
+#        only now is the entry written. The token is single-use and short-lived, so confirming needs no second signature.
+# The old POST /api/whitelist { address } is refused with a 400 that says why: a typed address proves nothing.
+#
+# One file, a JSON list, written whole and renamed into place, mode 0600. It lives in the DATA root, beside the records
+# directory - never in the repository and never under site/, so nothing serves it:
 #   on the test server  /srv/rarefriends/data/whitelist/whitelist.json   (deploy/rf-test-record.service passes it)
 #   locally             ~/.cache/rare-fiends-local/whitelist/whitelist.json
 # --whitelist=<file> moves it; with no flag it follows --records (<records>/../whitelist/whitelist.json).
-# What is NOT kept: an IP. The rate limit holds a salted hash of one, in memory only, with a salt made fresh each
-# start, so not even the hash can be matched to anything after a restart. What is never sent back: anything in the
-# file. A new address and one already on the list get the SAME answer, so the endpoint cannot be used to ask
-# whether somebody else's wallet is on it.
+# Each entry: { address, genesis, generations, block, message, signature, contact, at }. One per address: joining again
+# replaces the entry, so the holdings are the newest ones (an empty contact keeps the one already there).
+# What is NOT kept: an IP. The rate limit holds a salted hash of one, in memory only, with a salt made fresh each start.
+# What is never sent back: anything in the file. Confirming a new address and re-confirming one already on the list get
+# the SAME answer. Only the wallet's own signer ever learns what the chain says it holds.
 WHITELIST = None                                        # set in __main__; None means "follow RECORDS"
 _WL_LOCK = threading.Lock()
 WL_MAX = 50000                                          # the file's size cap, in entries
-WL_RATE = (8, 600)                                      # at most 8 POSTs from one address in 600 s
+WL_RATE = (8, 600)                                      # at most 8 POSTs from one address in 600 s (--auth-rate=)
+WL_NONCE_RATE = (20, 600)                               # and at most 20 nonces (--auth-nonce-rate=)
+WL_TTL = 600                                            # a nonce, and the message it is in, lives 10 minutes (--wl-ttl=)
+WL_TOKEN_TTL = 600                                      # what was found may be confirmed for 10 minutes after
+WL_HELD_MAX = 5000                                      # nonces and tokens held at once; past it, refuse rather than grow
+WL_RPC = None                                           # --wl-rpc=<url>: a test's stand-in chain (it must say 4663)
+WL_JS = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'whitelist-proof.js')
 _WL_SALT = secrets.token_bytes(16)
-_WL_HITS = {}                                           # ip hash -> [times], in memory only
+_WL_HITS = {}                                           # (bucket, ip hash) -> [times], in memory only
+_WL_NONCES = {}                                         # nonce -> { address, domain, issuedAt, expirationTime, expires }
+_WL_TOKENS = {}                                         # token -> { address, genesis, generations, block, message, signature, expires }
 EVM_ADDR = re.compile(r'0x[0-9a-fA-F]{40}')
 X_HANDLE = re.compile(r'@?[A-Za-z0-9_]{1,15}')
 EMAIL = re.compile(r'[^@\s]{1,64}@[^@\s.]{1,63}(\.[^@\s.]{1,63})+')
@@ -172,26 +393,196 @@ def whitelist_write(rows):
     os.replace(tmp, p)
 
 
-def whitelist_check(body):
-    """(address, contact) from the POST body, or (None, why). The page checks the same things first; this is
-    the one that counts."""
-    try:
-        j = json.loads(body.decode('utf8'))
-    except (ValueError, UnicodeDecodeError):
-        return None, 'the request is not JSON'
-    if not isinstance(j, dict):
-        return None, 'the request is not JSON'
-    if j.get('website'):                                # the form's trap field: only a robot fills it
-        return None, 'refused'
-    addr = str(j.get('address') or '').strip()
-    if not EVM_ADDR.fullmatch(addr) or int(addr, 16) == 0:
-        return None, 'that is not a Robinhood Chain wallet address (0x and 40 hex characters)'
-    contact = str(j.get('contact') or '').strip()
+def whitelist_contact(raw):
+    """(contact, None) or (None, why). Optional: an X handle or an email, or nothing."""
+    contact = str(raw or '').strip()
     if contact and not (len(contact) <= 120 and (X_HANDLE.fullmatch(contact) or EMAIL.fullmatch(contact))):
         return None, 'the contact is neither an X handle nor an email address'
     if contact and X_HANDLE.fullmatch(contact) and not contact.startswith('@'):
         contact = '@' + contact
-    return (addr.lower(), contact), None
+    return contact, None
+
+
+def whitelist_node(cmd, payload, extra=()):
+    """Run estate/whitelist-proof.js <cmd> with JSON in and JSON out. Raises on anything that is not its answer."""
+    args = ['node', WL_JS, cmd] + (['--rpc=' + WL_RPC] if WL_RPC else []) + list(extra)
+    run = subprocess.run(args, input=json.dumps(payload).encode('utf8'), capture_output=True, timeout=40)
+    out = json.loads(run.stdout.decode('utf8'))
+    if not isinstance(out, dict):
+        raise ValueError('whitelist-proof.js answered something that is not an object')
+    return out
+
+
+def whitelist_iso(t):
+    return time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(t))
+
+
+def whitelist_prune(now):
+    """Forget nonces and tokens that are past use. Called under _WL_LOCK."""
+    for k in [k for k, v in _WL_NONCES.items() if now >= v['expires'] + 60]:
+        _WL_NONCES.pop(k, None)
+    for k in [k for k, v in _WL_TOKENS.items() if now >= v['expires']]:
+        _WL_TOKENS.pop(k, None)
+
+
+# ---------------------------------------------------------------- AUTH: who is signed in, and what the gate lets them see
+# The deployer's ruling, 2026-10-01: a visitor signs in with their wallet; a whitelisted wallet plays; the deployer's
+# wallet gets everything, and the deployer page and the build tools exist for the deployer's wallet alone, "under any
+# circumstances". estate/session.js is the page side; this is the side that decides.
+#
+#   GET  /api/auth/nonce?address=0x..&purpose=signin|whitelist -> { ok, message, chain, expiresIn }
+#        the whole EIP-4361 message, built here by whitelist-proof.js for the host the page was opened on (Host, or
+#        X-Forwarded-Host from loopback only) and the scheme it was opened with (X-Forwarded-Proto from loopback only,
+#        else http). Its nonce is single-use and held for this address and this purpose alone.
+#   POST /api/auth/verify { message, signature } -> { ok, address, role } and Set-Cookie rf_session
+#        (HttpOnly, SameSite=Strict, Path=/, 4 h; Secure only when X-Forwarded-Proto says https). A `whitelist`
+#        message also answers { genesis, generations, token, expiresIn } for /api/whitelist/confirm, or 403 when the
+#        wallet holds neither collection (and then no session is made).
+#   GET  /api/auth/me     -> always 200 { ok, address, role }, role = deployer | player | none
+#   POST /api/auth/logout -> { ok }, the session forgotten and the cookie cleared
+#
+# A ROLE is read, never stored as a fact: at the session's start and again every ROLE_TTL (5 min), so a wallet taken
+# out of a role on chain loses it within 5 minutes without signing out.
+#   deployer  inRole(keccak256("rarefriends.role.deployer"), addr) on RareRoles, at the address --auth-config records
+#             (a bridge config's `rareRoles`), read through --auth-rpc. No RareRoles on record: nobody is deployer.
+#   player    an entry in the signed whitelist (WHITELIST), or isAllowed(addr) on RareRoles.
+#   none      anybody else - including a session whose chain read failed and who is on no list: a read that fails is
+#             never a yes (it is retried after ROLE_RETRY rather than ROLE_TTL).
+# Sessions are held in memory only: a restart signs everybody out, which is the safe direction.
+#
+# THE GATE (--gate; off by default, so every local check runs as it always has). Decided by THE REAL FILE that would
+# be served - os.path.realpath of exactly the path SimpleHTTPRequestHandler would open - so no spelling of a URL (//,
+# %xx, .., ;x, a query) can reach a page under a name the gate does not know:
+#   public    PUBLIC_PAGES  the landing page (site/index.html), hero.html, faq.html, the voxel title page
+#   player    PLAYER_PAGES  the game (site/base.html), player.html, standings.html, bridge.html, costs.html, games.html
+#   deployer  every other page - anything served as HTML that is not one of the nine files above
+# A directory with no index is refused rather than listed. A file that is not HTML is public (the pages' scripts,
+# styles and pictures): nothing in them is a secret, as nothing on chain is.
+# api/: /api/record* and /api/standings need a player; POST /api/claim a player; /api/convert the deployer.
+PUBLIC_PAGES = ('index.html', 'hero.html', 'faq.html', 'rarefiends-title.html')
+PLAYER_PAGES = ('base.html', 'player.html', 'standings.html', 'bridge.html', 'costs.html', 'games.html')   # games.html: M18, the GAMES page
+# ---- M17 DUELS HOOK (1 of 5): the challenge lobby is estate/duels.py; a player reaches challenge.html for a real
+# challenge. Its standalone test bar stays the deployer's (the page shows it to the deployer alone).
+# The published --api shape is staged as serve.py alone (deploy/deploy-api.sh) and refuses /api/duel anyway, so a
+# missing duels.py there is no lobby rather than a server that will not start.
+try:
+    import duels                                        # noqa: E402
+except ImportError:
+    duels = None
+PLAYER_PAGES = PLAYER_PAGES + (duels.PLAYER_PAGES if duels else ())
+# ---- end M17 DUELS HOOK (1 of 5)
+# ---- CLOCKWORK HOOK (1 of 3): estate/clockwork.py journals each base's sealed orders and each fight, under the
+# records, for the timer (estate/clockwork.mjs, deploy/rf-clockwork.timer) that writes them to the chain. It holds
+# no key and touches no chain. Missing (the --api shape stages serve.py alone): no clock, and nothing else changes.
+try:
+    import clockwork                                    # noqa: E402
+except ImportError:
+    clockwork = None
+# ---- end CLOCKWORK HOOK (1 of 3)
+# ---- M5 NAMES HOOK (1 of 5): a name a player chooses is estate/names.py (GET and POST /api/name, and /api/name/base for a home base name); like duels.py, a
+# missing names.py is no names rather than a server that will not start.
+try:
+    import names as playernames                         # noqa: E402 (not `names`: standings() has a local of that name)
+except ImportError:
+    playernames = None
+# ---- end M5 NAMES HOOK (1 of 5)
+HTML_EXT = ('.html', '.htm', '.xhtml', '.xht', '.shtml')
+RANK = {'none': 0, 'player': 1, 'deployer': 2}
+NEED = {'public': 0, 'player': 1, 'deployer': 2}
+GATE = False                                            # --gate
+AUTH_CONFIG = None                                      # --auth-config=<bridge config json>
+AUTH_RPC = None                                         # --auth-rpc=<url>; None is whitelist-proof.js's own (chainlive.js's list)
+SESSION_TTL = 4 * 3600                                  # --session-ttl=<s>
+ROLE_TTL = 300                                          # --role-ttl=<s>
+ROLE_RETRY = 30                                         # after a failed chain read
+SESSIONS_MAX = 20000
+COOKIE = 'rf_session'
+_SESSIONS = {}                                          # token -> { address, role, expires, next }
+_AUTH_LOCK = threading.Lock()
+PURPOSES = ('signin', 'whitelist')
+
+
+def auth_rareroles():
+    """The RareRoles address the bridge config records, or None. Read on every role read, so a deploy that writes the
+    config is seen without a restart. A config for another chain, or an entry that is not an address, is none."""
+    if not AUTH_CONFIG:
+        return None
+    try:
+        with open(AUTH_CONFIG, encoding='utf8') as f:
+            cfg = json.load(f)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(cfg, dict):
+        return None
+    rr = cfg.get('rareRoles')
+    if cfg.get('chainId', 4663) != 4663 or not isinstance(rr, str) or not EVM_ADDR.fullmatch(rr) or int(rr, 16) == 0:
+        return None
+    return rr.lower()
+
+
+def auth_role(address):
+    """(role, read_ok) for an address that has proven itself. read_ok is False when RareRoles is on record and could
+    not be read - the answer is then what the whitelist file alone says, never more."""
+    deployer = allowed = False
+    ok = True
+    rr = auth_rareroles()
+    if rr:
+        try:
+            r = whitelist_node('roles', {'address': address, 'roles': rr}, ['--roles-rpc=' + AUTH_RPC] if AUTH_RPC else [])
+        except Exception as e:                          # node missing, or the helper threw: a no, and said so
+            r = {'ok': False, 'why': str(e)}
+        if r.get('ok'):
+            deployer, allowed = r.get('deployer') is True, r.get('allowed') is True
+        else:
+            ok = False
+            sys.stderr.write('auth: RareRoles could not be read for %s: %s\n' % (address, r.get('why')))
+    if deployer:
+        return 'deployer', ok
+    if allowed or any(isinstance(e, dict) and e.get('address') == address for e in whitelist_read()):
+        return 'player', ok
+    return 'none', ok
+
+
+def session_new(address):
+    """A fresh session for an address whose signature and nonce have just verified: (token, record), or (None, None)
+    when SESSIONS_MAX are already held."""
+    role, ok = auth_role(address)
+    now = time.time()
+    rec = {'address': address, 'role': role, 'expires': now + SESSION_TTL, 'next': now + (ROLE_TTL if ok else ROLE_RETRY)}
+    tok = secrets.token_urlsafe(32)
+    with _AUTH_LOCK:
+        for k in [k for k, v in _SESSIONS.items() if now >= v['expires']]:
+            _SESSIONS.pop(k, None)
+        if len(_SESSIONS) >= SESSIONS_MAX:
+            return None, None
+        _SESSIONS[tok] = rec
+    return tok, rec
+
+
+def page_tier(fs_path):
+    """public | player | deployer for the file at fs_path, by what it really is."""
+    real = os.path.realpath(fs_path)
+    low = real.lower()
+    html = low.endswith(HTML_EXT) or (mimetypes.guess_type(real)[0] or '') in ('text/html', 'application/xhtml+xml')
+    if not html:
+        return 'public'
+    root = os.path.normpath(ROOT)
+    if real in [os.path.realpath(os.path.join(root, n)) for n in PUBLIC_PAGES]:
+        return 'public'
+    if real in [os.path.realpath(os.path.join(root, n)) for n in PLAYER_PAGES]:
+        return 'player'
+    return 'deployer'
+
+
+def api_tier(method, route):
+    """public | player | deployer for an api/ route, as the router below will read it (the path before ? and #)."""
+    if route.startswith('/api/convert'):
+        return 'deployer'
+    if route.startswith('/api/record') or route.startswith('/api/standings'):
+        return 'player'
+    if method == 'POST' and route.startswith('/api/claim'):
+        return 'player'
+    return 'public'
 
 
 class NoCache(http.server.SimpleHTTPRequestHandler):
@@ -200,9 +591,140 @@ class NoCache(http.server.SimpleHTTPRequestHandler):
     follow to a canvas), and - on POST - the attestor, which signs a claim and must hold a key no page may
     see. Local development only; nothing here is deployed."""
 
+    # ------------------------------------------------------------ the session and the gate (see AUTH above)
+    def handle_one_request(self):
+        self.__dict__.pop('_sess', None)                # a session is read per request, never carried to the next
+        super().handle_one_request()
+
+    def session(self):
+        """The signed-in session this request carries, or None. A token this server never issued, or one past its
+        4 hours, is no session. The role is re-read when it is older than ROLE_TTL."""
+        if hasattr(self, '_sess'):
+            return self._sess
+        self._sess = None
+        try:
+            jar = http.cookies.SimpleCookie(self.headers.get('Cookie') or '')
+        except http.cookies.CookieError:
+            return None
+        tok = jar[COOKIE].value if COOKIE in jar else ''
+        if not tok:
+            return None
+        now = time.time()
+        with _AUTH_LOCK:
+            s = _SESSIONS.get(tok)
+            if s and now >= s['expires']:
+                _SESSIONS.pop(tok, None)
+                s = None
+        if not s:
+            return None
+        if now >= s['next']:
+            role, ok = auth_role(s['address'])
+            s['role'], s['next'] = role, now + (ROLE_TTL if ok else ROLE_RETRY)
+        self._sess = s
+        return s
+
+    def role(self):
+        s = self.session()
+        return s['role'] if s else 'none'
+
+    def trusted(self, name):
+        """A forwarding header, believed only from a loopback peer (Apache on the same machine); else ''."""
+        if self.client_address[0] in ('127.0.0.1', '::1') and self.headers.get(name):
+            return self.headers[name].split(',')[-1].strip()
+        return ''
+
+    def https(self):
+        return self.trusted('X-Forwarded-Proto').lower() == 'https'
+
+    def gate_refuse(self, tier, api):
+        """403, said plainly. A page gets a page with the way back to the landing page; an api/ route gets JSON."""
+        role = self.role()
+        if api:
+            self.send_json(json.dumps({'ok': False, 'code': 'gate', 'role': role, 'needs': tier,
+                                       'error': 'sign in with a wallet that may use this'}).encode('utf8'), 403)
+            return
+        body = ('<!doctype html><meta charset="utf-8"><title>Sign in</title><body style="font:16px system-ui;padding:2em">'
+                '<p>This page needs a wallet signed in as %s.</p><p><a href="/">Back to the start</a></p>' %
+                ('the deployer' if tier == 'deployer' else 'a whitelisted player')).encode('utf8')
+        self.send_response(403)
+        self.send_header('Content-Type', 'text/html; charset=utf-8')
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        if self.command != 'HEAD':
+            self.wfile.write(body)
+
+    def api_gate(self, method):
+        """True when the api/ route may go on; otherwise the 403 is already sent. Off without --gate."""
+        if not GATE:
+            return True
+        tier = api_tier(method, self.path.split('?', 1)[0].split('#', 1)[0])
+        if RANK[self.role()] >= NEED[tier]:
+            return True
+        self.gate_refuse(tier, True)
+        return False
+
+    def send_head(self):
+        """SimpleHTTPRequestHandler's, behind the gate: the file it would open is found the way it finds it, and the
+        file's real path decides. A directory with no index is refused rather than listed."""
+        if '\0' in self.translate_path(self.path):      # %00: open() would raise, and the stdlib drops the connection
+            self.send_error(404, 'no such file')
+            return None
+        if GATE:
+            path = self.translate_path(self.path)
+            if os.path.isdir(path):
+                if urllib.parse.urlsplit(self.path).path.endswith('/'):
+                    idx = [os.path.join(path, n) for n in ('index.html', 'index.htm') if os.path.isfile(os.path.join(path, n))]
+                    if not idx:
+                        self.send_error(404, 'no such page')
+                        return None
+                    path = idx[0]
+                else:
+                    return super().send_head()          # the stdlib's redirect to the same path with a slash
+            if os.path.exists(path):
+                tier = page_tier(path)
+                if RANK[self.role()] < NEED[tier]:
+                    self.gate_refuse(tier, False)
+                    return None
+        return super().send_head()
+
+    def odd_target(self):
+        """Under the gate, a request line is a path and nothing else: an absolute URL (GET http://x/api/claim, which
+        urlsplit would route by its path while a prefix test saw none) or a path opening with // (which urlsplit
+        reads as a host) is refused, so the router and the gate always read the same path. True when refused."""
+        if GATE and (not self.path.startswith('/') or self.path.startswith('//')):
+            self.send_error(400, 'a request names a path on this site and nothing else')
+            return True
+        return False
+
+    def do_HEAD(self):                                 # noqa: N802
+        if self.odd_target():
+            return
+        super().do_HEAD()
+
     def do_GET(self):                                  # noqa: N802 (the stdlib's own name)
+        if self.odd_target():
+            return
+        if self.path.startswith('/api/') and not self.api_gate('GET'):
+            return
         if self.path.startswith('/api/record'):
             self.record_get()
+            return
+        parts = urllib.parse.urlsplit(self.path)
+        if parts.path == '/api/auth/nonce':
+            self.auth_nonce(parts.query)
+            return
+        if parts.path == '/api/auth/me':
+            s = self.session()
+            self.send_json(json.dumps({'ok': True, 'address': s['address'] if s else None, 'role': s['role'] if s else 'none'}).encode('utf8'))
+            return
+        if playernames and parts.path in ('/api/name', '/api/name/base'):     # M5 NAMES HOOK (2 of 5): GET
+            playernames.Names(self, RECORDS, record_read).route('GET', parts.path, parts.query)
+            return
+        if parts.path == '/api/standings':
+            self.standings()
+            return
+        if duels and (parts.path == '/api/duel' or parts.path.startswith('/api/duel/')):   # M17 DUELS HOOK (2 of 5): GET
+            self.duels().route('GET', parts.path)
             return
         if self.path.startswith('/api/'):
             try:
@@ -216,12 +738,31 @@ class NoCache(http.server.SimpleHTTPRequestHandler):
     # thing on this server that is not a proxy: the attestor holds a key, so it runs as its own process
     # and this handler never sees the key, only its answer.
     def do_POST(self):                                 # noqa: N802
+        if self.odd_target():
+            return
+        if self.path.startswith('/api/') and not self.api_gate('POST'):
+            return
         parts = urllib.parse.urlsplit(self.path)
         if parts.path.startswith('/api/record/'):
             self.record_post(parts.path)
             return
+        if parts.path == '/api/auth/verify':
+            self.auth_verify()
+            return
+        if parts.path == '/api/auth/logout':
+            self.auth_logout()
+            return
         if parts.path == '/api/whitelist':
             self.whitelist_post()
+            return
+        if parts.path == '/api/whitelist/confirm':
+            self.whitelist_confirm()
+            return
+        if playernames and parts.path in ('/api/name', '/api/name/base'):     # M5 NAMES HOOK (3 of 5): POST
+            playernames.Names(self, RECORDS, record_read).route('POST', parts.path, parts.query)
+            return
+        if duels and (parts.path == '/api/duel' or parts.path.startswith('/api/duel/')):   # M17 DUELS HOOK (3 of 5): POST
+            self.duels().route('POST', parts.path)
             return
         if parts.path not in ('/api/claim', '/api/convert'):
             self.send_error(404, 'nothing here takes a POST')
@@ -299,12 +840,28 @@ class NoCache(http.server.SimpleHTTPRequestHandler):
         path = urllib.parse.urlsplit(self.path).path.rstrip('/')
         if path == '/api/record':
             with _REC_LOCK:
-                self.send_json(json.dumps({'ok': True, 'records': record_heads()}).encode('utf8'))
+                heads = record_heads()
+            s = self.session()                          # SEALED ORDERS: another base's head is sealed, as its record is
+            for h in heads:
+                if not sees_orders(s, h.get('owner'), h.get('genesis')):
+                    h['head'], h['sealed'] = sealed_head(h.get('id'), h.get('head')), True
+            self.send_json(json.dumps({'ok': True, 'records': heads}).encode('utf8'))
             return
         if path == '/api/record/fights':
             with _REC_LOCK:
                 fights = self.fights_read()
             self.send_json(json.dumps({'ok': True, 'count': len(fights), 'fights': fights[-50:]}).encode('utf8'))
+            return
+        if path == '/api/record/game':                  # the map every player of this server arrives on
+            try:
+                with _REC_LOCK:
+                    g = game_read()
+            except (GameUnreadable, OSError) as e:      # refused, said why; the file is left exactly as it is
+                self.log_message('game: %s', e)
+                self.send_json(json.dumps({'ok': False, 'reason': 'GameUnreadable', 'why': str(e)}).encode('utf8'), 503)
+                return
+            s = self.session()
+            self.send_json(json.dumps(dict(g, ok=True, me=s['address'] if s else None)).encode('utf8'))
             return
         m = re.fullmatch(r'/api/record/(%s)' % BASE_ID, path)
         if not m:
@@ -312,8 +869,31 @@ class NoCache(http.server.SimpleHTTPRequestHandler):
             return
         with _REC_LOCK:
             rec = record_read(m.group(1))
+        if rec and rec.get('ownerTokenId') is not None and self.session():
+            rec = self.owner_now(m.group(1), rec)
+        if rec and not sees_orders(self.session(), rec.get('owner'), rec.get('ownerTokenId')):
+            rec = sealed_record(rec)                    # SEALED ORDERS: only the owner reads their own
         out = {'ok': True, 'record': rec} if rec else {'ok': False, 'reason': 'NoRecord', 'base': int(m.group(1))}
         self.send_json(json.dumps(out).encode('utf8'))
+
+    def owner_now(self, base, rec):
+        """A Genesis-owned record as it stands NOW: its `owner` is whoever holds its ownerTokenId on chain (decision 2 -
+        a sale is a token transfer), and when that has changed since it was written the record on disk is brought up
+        to date. Only a read the chain answered moves it: one that fails, or that this client's chain-read allowance
+        will not cover, leaves the record as written - a read route never refuses over the chain."""
+        tok = rec['ownerTokenId']
+        ans = genesis_cached(tok)
+        if ans is None and not self.rate_spent('chain', CHAIN_RATE):
+            ans = genesis_owner(tok)
+            genesis_keep(tok, ans)
+        if not ans or ans[0] != 'held' or ans[1] == rec.get('owner'):
+            return rec
+        with _REC_LOCK:
+            cur = record_read(base)
+            if cur and cur.get('ownerTokenId') == tok and cur.get('owner') != ans[1]:
+                cur['owner'] = ans[1]
+                record_write(base, cur)
+            return cur or rec
 
     def record_post(self, path):
         m = re.fullmatch(r'/api/record/(%s)/(commit|forget|attack)' % BASE_ID, path)
@@ -330,7 +910,11 @@ class NoCache(http.server.SimpleHTTPRequestHandler):
             return
         body = self.rfile.read(n) if n else b''
         if verb == 'forget':
+            if self.refused(self.holder_refusal(record_read(base))):    # the chain read, outside the lock
+                return
             with _REC_LOCK:
+                if self.refused(self.holder_refusal(record_read(base))):
+                    return
                 try:
                     os.remove(record_path(base))
                 except OSError:
@@ -355,10 +939,42 @@ class NoCache(http.server.SimpleHTTPRequestHandler):
         if forged:
             self.send_json(json.dumps({'ok': False, 'reason': 'Invalid', 'why': 'a fight is settled by our server, never written by a client: ' + ', '.join(forged)}).encode('utf8'))
             return
+        # THE GENESIS THAT OWNS THE BASE (DESIGN decision 2; schema.json base.ownerTokenId). A base with an ownerTokenId
+        # answers to whoever holds that token on chain now (holder_refusal). A base WITHOUT one - none yet, or a record
+        # written before a base belonged to a Genesis - is taken or kept by a signed-in wallet only by naming the Genesis
+        # it plays as in `genesisToken` (claim_refusal): checked here and never believed - held by THIS session's wallet
+        # on chain now, and owning no other base. It is taken off the batch before apply() sees it - it is not one of the
+        # record's fields - and written onto the record beside `owner`, by this code alone. So no base is taken or kept
+        # without a Genesis. The chain is read OUTSIDE the lock (a read can take seconds) and the answer is kept, so
+        # the same checks run again under the lock on the record as it is then, from what was kept.
+        token = batch.pop('genesisToken', None)
+        s = self.session()
+        if self.refused(self.base_refusal(base, record_read(base), token, s)):
+            return
         try:
             with _REC_LOCK:                             # read, apply, write: one at a time, so the second of two is StaleParent
-                out = record_apply(record_read(base), batch)
+                rec = record_read(base)
+                if self.refused(self.base_refusal(base, rec, token, s)):
+                    return
+                tok = (rec or {}).get('ownerTokenId')
+                claim = token if (tok is None and s) else None
+                if claim is not None:                   # one Genesis, one base: decided under the lock, so two racing lose one
+                    held = record_of_genesis(claim)
+                    if held is not None and str(held) != base:
+                        self.send_json(json.dumps({'ok': False, 'reason': 'GenesisHasBase', 'base': int(base), 'genesis': claim,
+                                                   'held': held, 'why': 'Genesis #%d already owns base %s' % (claim, held)}).encode('utf8'))
+                        return
+                out = record_apply(rec, batch)
                 if out.get('ok'):
+                    # THE OWNER is the session's wallet - which the checks above have just shown holds the base's Genesis,
+                    # or is the record's own owner - or, with no session (local, ungated), the record's. Never the
+                    # batch's: apply() builds the record from named fields and this line is the only one that sets it.
+                    owner = self.owner_of(rec)
+                    if owner:                           # no session and no owner (local, ungated): the record as it always was
+                        out['record']['owner'] = owner
+                    tok = tok if tok is not None else claim
+                    if tok is not None:                 # the Genesis, by the same rule: the record's, or the one just checked
+                        out['record']['ownerTokenId'] = tok
                     record_write(base, out['record'])
         except Exception as e:                          # node missing, or record.js threw: the server's fault, said as such
             self.send_error(502, str(e))
@@ -376,15 +992,33 @@ class NoCache(http.server.SimpleHTTPRequestHandler):
             self.send_error(400, 'an attack names the base it attacks')
             return
         on = str(order.get('on'))
+        if self.refused(self.attacker_refusal(base, record_read(base))):     # the chain read, outside the lock
+            return
         try:
             with _REC_LOCK:
                 att, dfn = record_read(base), record_read(on)
+                if self.refused(self.attacker_refusal(base, att)):          # only the attacking base's own holder sends its Friends
+                    return
                 draw = {'word': '0x' + secrets.token_hex(32), 'fightId': len(self.fights_read()) + 1}
                 out = self.record_settle(att, dfn, {k: order.get(k) for k in ('sent', 'side', 'parent')}, draw)
                 if out.get('ok'):
+                    # ---- CLOCKWORK HOOK (3 of 3): the fight is journaled BEFORE its records are written, so the
+                    # defender's post-fight seal lands after it and the timer opens the orders it was fought under
+                    if clockwork:
+                        clockwork.fight(RECORDS, out['fight'])
+                    # ---- end CLOCKWORK HOOK (3 of 3)
+                    for side, rec in (('attacker', att), ('defender', dfn)):    # a fight moves no base to a new owner
+                        if (rec or {}).get('owner'):
+                            out[side]['owner'] = rec['owner']
+                        if (rec or {}).get('ownerTokenId') is not None:          # nor to another Genesis
+                            out[side]['ownerTokenId'] = rec['ownerTokenId']
                     record_write(base, out['attacker'])
                     record_write(on, out['defender'])
                     self.fights_append(dict(out['fight'], loggedAt=time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())))
+                    # SEALED ORDERS: the defender's record goes back to the attacker as anyone else would read it. The
+                    # orders it was fought with are in out['fight'] and out['setup'] - that is the reveal (ruling 59).
+                    if not sees_orders(self.session(), out['defender'].get('owner'), out['defender'].get('ownerTokenId')):
+                        out['defender'] = sealed_record(out['defender'])
         except Exception as e:
             self.send_error(502, str(e))
             return
@@ -429,65 +1063,384 @@ class NoCache(http.server.SimpleHTTPRequestHandler):
         with open(os.path.join(RECORDS, 'fights.jsonl'), 'a', encoding='utf8') as f:
             f.write(json.dumps(fight, separators=(',', ':')) + '\n')
 
-    # POST /api/whitelist { address, contact?, website? } -> { ok: true } or { ok: false, error }.
-    #   400 the address or contact is not one, 413 the body is over 2 KB, 429 too many from one address,
-    #   507 the list is at WL_MAX. A duplicate is { ok: true } and writes nothing (see WHITELIST above).
-    def whitelist_post(self):
-        def say(code, out):
-            self.send_json(json.dumps(out).encode('utf8'), code)
-        # Who is asking, for the rate limit only. Behind Apache every request comes from loopback, and mod_proxy
-        # APPENDS the real peer to X-Forwarded-For - so the last entry is Apache's, and anything before it is
-        # whatever the client chose to send. Only a loopback peer's header is believed.
+    # ------------------------------------------------------------ WHO OWNS A BASE (DESIGN decision 2; M5 row 3)
+    # A base belongs to the Genesis token named in its ownerTokenId, so it answers to WHOEVER HOLDS THAT TOKEN ON CHAIN
+    # NOW (a sale is a token transfer: the buyer has the base, the seller has lost it). A record also keeps `owner`, the
+    # wallet that last wrote it - set from the session's address and never from anything in the request - which is what
+    # the standings show; for a Genesis-owned base it follows the holder (owner_now). A record with no ownerTokenId but an
+    # owner (written before a base belonged to a Genesis) is the old rule: only that wallet, and it must now name a
+    # Genesis to write again. A record with neither (local, ungated) takes the first signed writer who names a Genesis.
+    # Every refusal is 200 { ok:false, reason } in the record routes' own way, except the chain-read limit (429):
+    #   NotOwner        the base answers to another wallet (or to a wallet, and this request has none)
+    #   NoGenesis       a base with no Genesis on it, written by a signed-in wallet that named none
+    #   NotHolder       the Genesis named is not held by this wallet on chain (or by anybody)
+    #   ChainUnreadable the chain did not answer: never a yes, and never mistaken for NotHolder
+    def owner_of(self, rec):
+        s = self.session()
+        return (s['address'] if s else None) or (rec or {}).get('owner')
+
+    def refused(self, r):
+        """Send a refusal (code, body) if there is one; True when sent."""
+        if r is None:
+            return False
+        self.send_json(json.dumps(r[1]).encode('utf8'), r[0])
+        return True
+
+    def genesis_read(self, token):
+        """Genesis #token's (state, holder, why), from what is kept when it is young enough, else from the chain -
+        and then this client's chain-read allowance is spent ('limited', None, None when it is used up)."""
+        ans = genesis_cached(token)
+        if ans is not None:
+            return ans
+        if self.rate_spent('chain', CHAIN_RATE):
+            return 'limited', None, None
+        ans = genesis_owner(token)
+        genesis_keep(token, ans)
+        return ans
+
+    def chain_refusal(self, base, token, ans):
+        """The refusal for a chain read that gave no answer, or None when it gave one."""
+        if ans[0] == 'limited':
+            return 429, {'ok': False, 'reason': 'Limited', 'base': int(base), 'genesis': token,
+                         'error': 'too many tries from here - wait a few minutes'}
+        if ans[0] == 'unreadable':
+            return 200, {'ok': False, 'reason': 'ChainUnreadable', 'base': int(base), 'genesis': token,
+                         'why': 'Robinhood Chain could not be read just now, so who holds Genesis #%s is not known - '
+                                'nothing was written; try again in a minute (%s)' % (token, ans[2])}
+        return None
+
+    def holder_refusal(self, rec):
+        """Who may write (commit, attack, forget) a record that exists: the refusal, or None. A Genesis-owned base
+        answers to its token's holder now; any other to its `owner`, if it has one."""
+        if not rec:
+            return None
+        s, base, tok = self.session(), rec.get('base'), rec.get('ownerTokenId')
+        if tok is not None:
+            if not s:
+                return 200, {'ok': False, 'reason': 'NotOwner', 'base': base, 'why': 'this base belongs to Genesis #%s: sign in with the wallet that holds it' % tok}
+            ans = self.genesis_read(tok)
+            r = self.chain_refusal(base, tok, ans)
+            if r:
+                return r
+            if ans[0] != 'held' or ans[1] != s['address']:
+                return 200, {'ok': False, 'reason': 'NotOwner', 'base': base, 'genesis': tok,
+                             'why': 'this base belongs to Genesis #%s, and this wallet does not hold it' % tok}
+            return None
+        owner = rec.get('owner')
+        if owner and (not s or s['address'] != owner):
+            return 200, {'ok': False, 'reason': 'NotOwner', 'base': base, 'why': 'this base belongs to another wallet'}
+        return None
+
+    def claim_refusal(self, base, token, s):
+        """A signed-in wallet taking or keeping a base that has no Genesis on it: it must name one it holds now."""
+        if not isinstance(token, int) or isinstance(token, bool) or token < 1:
+            return 200, {'ok': False, 'reason': 'NoGenesis', 'base': int(base),
+                         'why': 'a base belongs to a Genesis: name the one you play as'}
+        ans = self.genesis_read(token)
+        r = self.chain_refusal(base, token, ans)
+        if r:
+            return r
+        if ans[0] != 'held' or ans[1] != s['address']:
+            return 200, {'ok': False, 'reason': 'NotHolder', 'base': int(base), 'genesis': token,
+                         'why': ans[2] or 'this wallet does not hold Genesis #%d' % token}
+        return None
+
+    def base_refusal(self, base, rec, token, s):
+        """A commit's checks, in order: who the base answers to; then, for a base with no Genesis on it, the Genesis."""
+        r = self.holder_refusal(rec)
+        if r or (rec or {}).get('ownerTokenId') is not None:
+            return r
+        if s is None:                                   # no wallet (local, ungated): the record as it always was
+            return None
+        return self.claim_refusal(base, token, s)
+
+    def attacker_refusal(self, base, att):
+        """An attack is sent by the attacking base's holder; a signed-in wallet's base with no Genesis on it first
+        names one with a commit - an attack never takes or keeps a base without one."""
+        r = self.holder_refusal(att)
+        if r:
+            return r
+        if att and att.get('ownerTokenId') is None and self.session():
+            return 200, {'ok': False, 'reason': 'NoGenesis', 'base': int(base),
+                         'why': 'this base has no Genesis on it yet: write it once naming the Genesis you play as'}
+        return None
+
+    # GET /api/standings -> 200 { ok, at, players: [{ address, name, gathered, base, baseName }] }, highest `gathered` first:
+    # every record with an owner, gathered read off its ledger in the record's own units. name is the owner's chosen
+    # name (names.py), null when none. Records with no owner are left out - a standing is a wallet's, and an unowned base has none.
+    def standings(self):
+        rows = []
+        chosen = playernames.load(RECORDS) if playernames else {}   # M5 NAMES HOOK (4 of 5): each row's name, read once
+        based = playernames.load_bases(RECORDS) if playernames else {}   # and each base's own name
+        with _REC_LOCK:
+            try:
+                names = sorted(os.listdir(RECORDS))
+            except OSError:
+                names = []
+            for n in names:
+                if not (n.endswith('.json') and re.fullmatch(BASE_ID, n[:-5])):
+                    continue
+                rec = record_read(n[:-5])
+                if not isinstance(rec, dict) or not rec.get('owner'):
+                    continue
+                g = (rec.get('ledger') or {}).get('gathered')
+                rows.append({'address': rec.get('owner'), 'name': playernames.name_of(chosen, rec.get('owner')) if playernames else None, 'gathered': g if isinstance(g, (int, float)) else 0,
+                             'base': rec.get('base'),
+                             'baseName': playernames.base_name_of(based, rec.get('base'), rec.get('ownerTokenId')) if playernames else None})
+        rows.sort(key=lambda r: (-r['gathered'], str(r['base'])))
+        self.send_json(json.dumps({'ok': True, 'at': whitelist_iso(time.time()), 'players': rows}).encode('utf8'))
+
+    # ------------------------------------------------------------ the whitelist's three routes (see WHITELIST above)
+    def wl_say(self, code, out):
+        self.send_json(json.dumps(out).encode('utf8'), code)
+
+    def wl_peer(self):
+        """The asker's IP, for the rate limit only. Behind Apache every request comes from loopback, and mod_proxy
+        APPENDS the real peer to X-Forwarded-For - so the last entry is Apache's, and anything before it is whatever
+        the client chose to send. Only a loopback peer's header is believed."""
         ip = self.client_address[0]
         if ip in ('127.0.0.1', '::1') and self.headers.get('X-Forwarded-For'):
             ip = self.headers['X-Forwarded-For'].split(',')[-1].strip()
-        who = hashlib.sha256(_WL_SALT + ip.encode('utf8')).hexdigest()[:20]
-        now = time.time()
+        return hashlib.sha256(_WL_SALT + ip.encode('utf8')).hexdigest()[:20]
+
+    def wl_domain(self):
+        """The host the page was opened on, which is the domain the message must name. Apache (rf-test.conf) proxies
+        without ProxyPreserveHost, so Host is 127.0.0.1:<port> and the visitor's host is the last X-Forwarded-Host -
+        believed, like X-Forwarded-For, only from a loopback peer."""
+        h = self.trusted('X-Forwarded-Host') or self.headers.get('Host') or ''
+        return h.strip().lower()
+
+    def wl_limited(self, bucket, rate):
+        """True (and a 429 already sent) when this peer has used up `rate` in this bucket."""
+        if self.rate_spent(bucket, rate):
+            self.wl_say(429, {'ok': False, 'error': 'too many tries from here - wait a few minutes'})
+            return True
+        return False
+
+    def rate_spent(self, bucket, rate):
+        """wl_limited's count, with no answer sent: True when this peer has used up `rate` in this bucket (and then the
+        try is not counted), else the try is counted and False. Buckets: nonce, post (--auth-rate), chain (--chain-rate)."""
+        who, now = (bucket, self.wl_peer()), time.time()
         with _WL_LOCK:
-            hits = [t for t in _WL_HITS.get(who, []) if now - t < WL_RATE[1]]
-            if len(hits) >= WL_RATE[0]:
+            hits = [t for t in _WL_HITS.get(who, []) if now - t < rate[1]]
+            if len(hits) >= rate[0]:
                 _WL_HITS[who] = hits
-                say(429, {'ok': False, 'error': 'too many tries from here - wait a few minutes'})
-                return
+                return True
             hits.append(now)
             _WL_HITS[who] = hits
             if len(_WL_HITS) > 20000:                   # bounded: forget whoever has gone quiet
-                for k in [k for k, v in _WL_HITS.items() if not v or now - v[-1] >= WL_RATE[1]]:
+                span = max(WL_RATE[1], WL_NONCE_RATE[1], CHAIN_RATE[1])
+                for k in [k for k, v in _WL_HITS.items() if not v or now - v[-1] >= span]:
                     _WL_HITS.pop(k, None)
+        return False
+
+    def wl_body(self):
+        """The POST body as a JSON object, or None with the answer already sent. 2 KB is the cap: a message and a
+        signature are under 1 KB together."""
         try:
             n = int(self.headers.get('Content-Length') or 0)
         except ValueError:
             n = -1
         if n <= 0 or n > 2048:
-            say(413, {'ok': False, 'error': 'the request is empty or too large'})
+            self.wl_say(413, {'ok': False, 'error': 'the request is empty or too large'})
+            return None
+        try:
+            j = json.loads(self.rfile.read(n).decode('utf8'))
+        except (ValueError, UnicodeDecodeError):
+            j = None
+        if not isinstance(j, dict):
+            self.wl_say(400, {'ok': False, 'error': 'the request is not JSON'})
+            return None
+        if j.get('website'):                            # the form's trap field: only a robot fills it
+            self.wl_say(400, {'ok': False, 'error': 'refused'})
+            return None
+        return j
+
+    # GET /api/auth/nonce?address=0x..&purpose=signin|whitelist -> { ok, message, chain, expiresIn }. The address is
+    # the one the wallet named when it connected; it is written into the message and the nonce is held for it, and for
+    # this purpose, alone. The URI's scheme is the one the page was opened with: X-Forwarded-Proto from loopback (Apache
+    # in front), else http - Server 1 is plain http, and a wallet that compares the URI with the page may warn.
+    def auth_nonce(self, query):
+        if self.wl_limited('nonce', WL_NONCE_RATE):
             return
-        got, why = whitelist_check(self.rfile.read(n))
-        if not got:
-            say(400, {'ok': False, 'error': why})
+        q = urllib.parse.parse_qs(query)
+        addr = (q.get('address') or [''])[0].strip()
+        purpose = (q.get('purpose') or [''])[0].strip()
+        if purpose not in PURPOSES:
+            self.wl_say(400, {'ok': False, 'error': 'purpose is signin or whitelist'})
             return
-        addr, contact = got
+        if not EVM_ADDR.fullmatch(addr) or int(addr, 16) == 0:
+            self.wl_say(400, {'ok': False, 'error': 'connect a wallet first: that is not an address'})
+            return
+        domain = self.wl_domain()
+        now = int(time.time())
+        nonce = secrets.token_hex(16)
+        rec = {'address': addr.lower(), 'domain': domain, 'issuedAt': whitelist_iso(now), 'purpose': purpose,
+               'expirationTime': whitelist_iso(now + WL_TTL), 'expires': now + WL_TTL}
+        try:
+            scheme = 'https' if self.https() else 'http'
+            out = whitelist_node('build', {'domain': domain, 'address': addr, 'nonce': nonce, 'purpose': purpose,
+                                           'uri': scheme + '://' + domain + '/',
+                                           'issuedAt': rec['issuedAt'], 'expirationTime': rec['expirationTime']})
+        except Exception as e:                          # node missing, or the helper threw: the server's fault
+            self.log_message('whitelist: build failed: %s', e)
+            self.wl_say(503, {'ok': False, 'error': 'the whitelist is not answering - try again later'})
+            return
+        if not out.get('ok'):
+            self.wl_say(400, {'ok': False, 'error': 'this site cannot be signed for: ' + str(out.get('why'))})
+            return
+        with _WL_LOCK:
+            whitelist_prune(time.time())
+            if len(_WL_NONCES) >= WL_HELD_MAX:
+                self.wl_say(503, {'ok': False, 'error': 'too many people joining at once - try again in a minute'})
+                return
+            _WL_NONCES[nonce] = rec
+        self.wl_say(200, {'ok': True, 'message': out['message'], 'chain': out.get('chain'), 'expiresIn': WL_TTL})
+
+    # POST /api/auth/verify { message, signature } -> { ok, address, role } + the rf_session cookie; for a `whitelist`
+    #   message also { genesis, generations, token, expiresIn }. 400 the message or signature is refused (code says which
+    #   rule), 403 a whitelist message from an address holding neither collection, 503 the chain could not be read.
+    #   The nonce is burned by any verify whose signature is good, holder or not.
+    def auth_verify(self):
+        if self.wl_limited('post', WL_RATE):
+            return
+        j = self.wl_body()
+        if j is None:
+            return
+        domain = self.wl_domain()
+        try:
+            v = whitelist_node('verify', {'message': j.get('message'), 'signature': j.get('signature'),
+                                          'domain': domain, 'now': int(time.time() * 1000)})
+        except Exception as e:
+            self.log_message('whitelist: verify failed: %s', e)
+            self.wl_say(503, {'ok': False, 'error': 'the whitelist is not answering - try again later'})
+            return
+        if not v.get('ok'):
+            self.wl_say(400, {'ok': False, 'code': v.get('code'), 'error': v.get('why')})
+            return
+        now = time.time()
+        with _WL_LOCK:
+            rec = _WL_NONCES.get(v['nonce'])
+            why = None
+            if not rec:
+                why = 'that sign-in was already used, or never issued here - start again'
+            elif rec['address'] != v['address'] or rec['domain'] != domain or rec['issuedAt'] != v['issuedAt'] \
+                    or rec['expirationTime'] != v['expirationTime'] or rec['purpose'] != v.get('purpose'):
+                why = 'that sign-in was issued for something else - start again'
+            elif now >= rec['expires']:
+                why = 'that sign-in has expired - start again'
+            if why:
+                self.wl_say(400, {'ok': False, 'code': 'nonce', 'error': why})
+                return
+            _WL_NONCES.pop(v['nonce'], None)            # burned: this nonce never verifies again
+        if v.get('purpose') == 'signin':
+            self.auth_session(v['address'], {})
+            return
+        try:
+            h = whitelist_node('holdings', {'address': v['address']})
+        except Exception as e:
+            self.log_message('whitelist: holdings failed: %s', e)
+            h = {'ok': False, 'why': 'the chain read did not finish'}
+        if not h.get('ok'):
+            self.wl_say(503, {'ok': False, 'code': 'rpc', 'error': 'Robinhood Chain could not be read just now - sign in again in a minute'})
+            return
+        g, n = int(h.get('genesis') or 0), int(h.get('generations') or 0)
+        if g + n == 0:
+            self.wl_say(403, {'ok': False, 'code': 'none', 'address': v['address'], 'genesis': 0, 'generations': 0,
+                              'error': 'this wallet holds no Rare Friends Genesis and no Generations NFT on Robinhood Chain, '
+                                       'so it cannot join. Connect the wallet that holds one.'})
+            return
+        token = secrets.token_urlsafe(24)
+        with _WL_LOCK:
+            whitelist_prune(time.time())
+            if len(_WL_TOKENS) >= WL_HELD_MAX:
+                self.wl_say(503, {'ok': False, 'error': 'too many people joining at once - try again in a minute'})
+                return
+            _WL_TOKENS[token] = {'address': v['address'], 'genesis': g, 'generations': n, 'block': h.get('block'),
+                                 'message': j['message'], 'signature': j['signature'], 'expires': time.time() + WL_TOKEN_TTL}
+        self.auth_session(v['address'], {'genesis': g, 'generations': n, 'token': token, 'expiresIn': WL_TOKEN_TTL})
+
+    def auth_session(self, address, extra):
+        """The session for an address that has just proven itself: its role read now, the cookie set, the answer sent."""
+        tok, s = session_new(address)
+        if not tok:
+            self.wl_say(503, {'ok': False, 'error': 'too many people signed in at once - try again in a minute'})
+            return
+        cookie = '%s=%s; Path=/; HttpOnly; SameSite=Strict; Max-Age=%d%s' % (COOKIE, tok, SESSION_TTL, '; Secure' if self.https() else '')
+        out = dict({'ok': True, 'address': address, 'role': s['role']}, **extra)
+        self.send_json(json.dumps(out).encode('utf8'), 200, [('Set-Cookie', cookie)])
+
+    # POST /api/auth/logout -> { ok }: the session this request carries is forgotten, and the cookie cleared.
+    def auth_logout(self):
+        try:
+            jar = http.cookies.SimpleCookie(self.headers.get('Cookie') or '')
+            tok = jar[COOKIE].value if COOKIE in jar else ''
+        except http.cookies.CookieError:
+            tok = ''
+        with _AUTH_LOCK:
+            _SESSIONS.pop(tok, None)
+        self._sess = None
+        cookie = '%s=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0%s' % (COOKIE, '; Secure' if self.https() else '')
+        self.send_json(b'{"ok":true}', 200, [('Set-Cookie', cookie)])
+
+    # POST /api/whitelist/confirm { token, contact? } -> { ok }. 400 the token is unknown, used or expired, or the
+    # contact is not one; 507 the list is full; 503 the file could not be written.
+    def whitelist_confirm(self):
+        if self.wl_limited('post', WL_RATE):
+            return
+        j = self.wl_body()
+        if j is None:
+            return
+        contact, why = whitelist_contact(j.get('contact'))
+        if why:
+            self.wl_say(400, {'ok': False, 'code': 'contact', 'error': why})
+            return
+        tok = str(j.get('token') or '')
+        with _WL_LOCK:
+            t = _WL_TOKENS.pop(tok, None)               # single use, whatever happens next
+        if not t or time.time() >= t['expires']:
+            self.wl_say(400, {'ok': False, 'code': 'token', 'error': 'that confirmation has expired - sign in again'})
+            return
+        entry = {'address': t['address'], 'genesis': t['genesis'], 'generations': t['generations'], 'block': t['block'],
+                 'message': t['message'], 'signature': t['signature'], 'contact': contact,
+                 'at': whitelist_iso(time.time())}
         try:
             with _WL_LOCK:
                 rows = whitelist_read()
-                if any(isinstance(r, dict) and r.get('address') == addr for r in rows):
-                    say(200, {'ok': True})              # already on it: the same answer, nothing written
+                old = [r for r in rows if isinstance(r, dict) and r.get('address') == t['address']]
+                if not old and len(rows) >= WL_MAX:
+                    self.wl_say(507, {'ok': False, 'error': 'the list is full'})
                     return
-                if len(rows) >= WL_MAX:
-                    say(507, {'ok': False, 'error': 'the list is full'})
-                    return
-                rows.append({'address': addr, 'contact': contact,
-                             'at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())})
+                if old and not contact:
+                    entry['contact'] = old[-1].get('contact') or ''
+                rows = [r for r in rows if not (isinstance(r, dict) and r.get('address') == t['address'])] + [entry]
                 whitelist_write(rows)
         except OSError as e:
             self.log_message('whitelist: could not write %s: %s', whitelist_path(), e)
-            say(503, {'ok': False, 'error': 'the list could not be written - try again later'})
+            self.wl_say(503, {'ok': False, 'error': 'the list could not be written - try again later'})
             return
-        say(200, {'ok': True})
+        with _AUTH_LOCK:                                # on the list now: that wallet's sessions re-read their role
+            for s in _SESSIONS.values():
+                if s['address'] == t['address']:
+                    s['next'] = 0
+        self.wl_say(200, {'ok': True})                  # new or refreshed: the same answer
 
-    def send_json(self, body, code=200):
+    # POST /api/whitelist - the old form's route. A typed address proves nothing, so it is refused, with the reason.
+    def whitelist_post(self):
+        if self.wl_limited('post', WL_RATE):
+            return
+        self.wl_say(400, {'ok': False, 'code': 'typed', 'error': 'typed addresses are not accepted - connect your wallet and sign'})
+
+    # M17 DUELS HOOK (4 of 5): the lobby, handed this request and the record's own helpers - it holds no rule
+    def duels(self):
+        return duels.Duels(self, RECORDS, record_read, record_write, _REC_LOCK, AUTH_CONFIG)
+
+    def send_json(self, body, code=200, headers=()):
         self.send_response(code)
         self.send_header('Content-Type', 'application/json')
         self.send_header('Content-Length', str(len(body)))
+        for k, v in headers:
+            self.send_header(k, v)
         self.end_headers()
         self.wfile.write(body)
 
@@ -679,9 +1632,12 @@ class ApiOnly(NoCache):
     So both readers of the disk are cut here - GET and HEAD, because `SimpleHTTPRequestHandler.do_HEAD`
     serves a file's headers on its own and an override of `do_GET` alone would leave it answering."""
 
+    PRIVATE = ('/api/record', '/api/whitelist', '/api/auth', '/api/standings', '/api/duel')   # /api/duel: M17 DUELS HOOK (5 of 5)
+    PRIVATE = PRIVATE + ('/api/name',)                  # M5 NAMES HOOK (5 of 5): names are held on our server, never published
+
     def do_GET(self):                                  # noqa: N802
-        if self.path.startswith('/api/record'):
-            self.send_error(404, 'the record is not served in the published shape')
+        if self.path.startswith(self.PRIVATE):
+            self.send_error(404, 'the record, the whitelist and sign-in are not served in the published shape')
             return
         if self.path.startswith('/api/'):
             super().do_GET()
@@ -691,9 +1647,11 @@ class ApiOnly(NoCache):
     # M7's record routes are local development only: holding players' records on the VPS is a publish, and
     # a publish is the deployer's to start (M20-M23). `forget` especially must never be reachable there.
     # The whitelist likewise: holding wallet addresses on the VPS is a publish (M23), not this shape's to start.
+    # Sign-in and the standings likewise. A request line that is not a plain /api/ path (an absolute URL, which the
+    # router would read by its path while the prefix test above saw none) is refused before either is asked.
     def do_POST(self):                                 # noqa: N802
-        if self.path.startswith('/api/record') or self.path.startswith('/api/whitelist'):
-            self.send_error(404, 'the record and the whitelist are not served in the published shape')
+        if not self.path.startswith('/api/') or self.path.startswith(self.PRIVATE):
+            self.send_error(404, 'the record, the whitelist and sign-in are not served in the published shape')
             return
         super().do_POST()
 
@@ -770,8 +1728,24 @@ class Threaded(socketserver.ThreadingMixIn, socketserver.TCPServer):
     allow_reuse_address = True
 
 
+def parse_rate(a, flag):
+    """'--auth-rate=60/10m' -> (60, 600). N from 1 to 100000, the window 1 s to 24 h; anything else stops the start."""
+    v = a[len(flag):]
+    try:
+        n, w = v.split('/')
+        mult = {'s': 1, 'm': 60, 'h': 3600}.get(w[-1:], None)
+        win = int(w[:-1]) * mult if mult else int(w)
+        n = int(n)
+        if not (1 <= n <= 100000 and 1 <= win <= 86400):
+            raise ValueError
+    except ValueError:
+        sys.stderr.write('usage: %s<n>/<window>, e.g. %s60/600 or %s60/10m\n' % (flag, flag, flag))
+        sys.exit(2)
+    return (n, win)
+
+
 if __name__ == '__main__':
-    args = sys.argv[1:]
+    args = duels.take_args(sys.argv[1:]) if duels else sys.argv[1:]   # M17 DUELS HOOK (5 of 5): --duel-demo=on|off is the lobby's
     api_only = '--api' in args
     LOCAL = '--local' in args and not api_only           # never in the published shape
     # --fixture=<path>: another fixture for --local - a proof's scratch copy of doopies.local.json carrying
@@ -794,8 +1768,52 @@ if __name__ == '__main__':
     wls = [a for a in args if a.startswith('--whitelist=')]
     if wls:
         WHITELIST = os.path.abspath(wls[0][len('--whitelist='):])
-    ports = [a for a in args if a not in ('--api', '--local') and not a.startswith('--fixture=') and not a.startswith('--records=')
-             and not a.startswith('--whitelist=')]
+    # --wl-rpc=<url>: where the whitelist reads chain 4663 - a test's stand-in chain (estate/whitelist-proof.test.js).
+    # Command line only. It changes where the two balanceOf reads go, never a rule: the stand-in must still answer
+    # eth_chainId 4663 or whitelist-proof.js believes nothing it says. --wl-ttl=<s>: a nonce's life, 5 to 1800 s.
+    for a in args:
+        if a.startswith('--wl-rpc='):
+            WL_RPC = a[len('--wl-rpc='):]
+            print('whitelist: reading chain 4663 through %s, not the public RPC' % WL_RPC)
+        if a.startswith('--wl-ttl='):
+            WL_TTL = max(5, min(1800, int(a[len('--wl-ttl='):])))
+        # THE GATE and its sign-in (see AUTH). Command line only, like --local: never a header, a file or a page.
+        if a.startswith('--auth-config='):
+            AUTH_CONFIG = os.path.abspath(a[len('--auth-config='):])
+        if a.startswith('--auth-rpc='):
+            AUTH_RPC = a[len('--auth-rpc='):]
+        if a.startswith('--session-ttl='):
+            SESSION_TTL = max(2, min(4 * 3600, int(a[len('--session-ttl='):])))
+        if a.startswith('--role-ttl='):
+            ROLE_TTL = max(1, min(300, int(a[len('--role-ttl='):])))
+        # The sign-in's rate limits. Command line only. The defaults are the published values; a test server that
+        # shares an IP with its own test runs sets something looser here rather than in this file.
+        if a.startswith('--auth-rate='):
+            WL_RATE = parse_rate(a, '--auth-rate=')
+        if a.startswith('--auth-nonce-rate='):
+            WL_NONCE_RATE = parse_rate(a, '--auth-nonce-rate=')
+        if a.startswith('--chain-rate='):
+            CHAIN_RATE = parse_rate(a, '--chain-rate=')
+        if a.startswith('--genesis-ttl='):
+            GENESIS_TTL = max(0, min(3600, int(a[len('--genesis-ttl='):])))
+        # the seed of a NEW game file (see THE GAME above); a check's scratch server fixes its map with it
+        if a.startswith('--game-seed='):
+            GAME_SEED = int(a[len('--game-seed='):])
+    if WL_RATE != (8, 600) or WL_NONCE_RATE != (20, 600):
+        print('auth rate: %d signed POSTs and %d nonces per client per %d s / %d s' %
+              (WL_RATE[0], WL_NONCE_RATE[0], WL_RATE[1], WL_NONCE_RATE[1]))
+    GATE = '--gate' in args and not api_only
+    if '--gate' in args and api_only:
+        sys.stderr.write('usage: --gate is the full server\'s; the published --api shape holds no pages and no sessions\n')
+        sys.exit(2)
+    if GATE:
+        rr = auth_rareroles()
+        print('gate ON: pages and api/ by the wallet session; deployer = RareRoles %s via %s' %
+              (rr or '(none on record - nobody is deployer)', AUTH_RPC or 'chainlive.js\'s RPC list'))
+    ports = [a for a in args if a not in ('--api', '--local', '--gate') and not a.startswith('--fixture=') and not a.startswith('--records=')
+             and not a.startswith('--whitelist=') and not a.startswith('--wl-') and not a.startswith('--auth-')
+             and not a.startswith('--session-ttl=') and not a.startswith('--role-ttl=') and not a.startswith('--game-seed=')
+             and not a.startswith('--chain-rate=') and not a.startswith('--genesis-ttl=')]
     if api_only and not ports:
         # The port is the deployer's to choose, not this file's to default: a number typed here would be
         # the one every future reader copied.

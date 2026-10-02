@@ -51,8 +51,20 @@ const SIZES = [[1128, 920], [1280, 720], [1366, 768], [1440, 900], [1024, 640], 
   for (const [W, H] of SIZES) {
     const phone = W < 600;
     await send('Emulation.setDeviceMetricsOverride', { width: W, height: H, deviceScaleFactor: 1, mobile: phone });
-    await send('Page.navigate', { url: 'http://localhost:8765/base.html' }); await sleep(2200);
-    await ev('document.getElementById("challengeBtn").click()'); await sleep(1500);
+    await send('Page.navigate', { url: 'http://localhost:8765/base.html' }); await sleep(2200); await require('./pagewatch.js').waitForGame(send);
+    // CHALLENGE is opened the way a player opens it at this size, by real taps on where it is drawn: since the template
+    // (6b67ed4) it is an entry of the base's header nav, and on a phone that nav is folded behind PAGES - so a phone
+    // taps PAGES first. A JS .click() on the button would open it even where no player could reach it.
+    const tapAt = async (sel) => { const r = JSON.parse(await ev(`JSON.stringify((()=>{const e=document.querySelector(${JSON.stringify(sel)}); if(!e) return null; const b=e.getBoundingClientRect();
+      if(!b.width) return null; const x=b.left+b.width/2, y=b.top+b.height/2, h=document.elementFromPoint(x,y); return {x,y,top:!!h&&(h===e||e.contains(h))};})())`));
+      if (r && r.top) for (const type of ['mousePressed', 'mouseReleased']) await send('Input.dispatchMouseEvent', { type, x: r.x, y: r.y, button: 'left', clickCount: 1 });
+      return r; };
+    const viaPages = await ev('(()=>{const p=document.querySelector("header.top .pagesbtn"); return !!p && p.getBoundingClientRect().width > 0;})()');
+    if (viaPages) { await tapAt('header.top .pagesbtn'); await sleep(350); }
+    const cb = await tapAt('#challengeBtn'); await sleep(1500);
+    const opened = await ev('!!document.querySelector("#challenge iframe") && !document.getElementById("challenge").hidden');
+    if (!(cb && cb.top && opened)) bad++;
+    out.push(`${cb && cb.top && opened ? '  ok  ' : 'FAIL  '}${String(W + 'x' + H).padEnd(9)} CHALLENGE opened by a real tap${viaPages ? ' through PAGES' : ' in the header'}${cb && cb.top && opened ? '' : ' -> ' + JSON.stringify({ cb, opened })}`);
     const shot = async (name) => { const s = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(process.env.SHOTS || os.tmpdir(), `fit-${W}x${H}-${name}.png`), Buffer.from(s.data, 'base64')); };
     const screens = [
       ['prompt', async () => { await fr('document.querySelector("[data-view=defender]").click()'); await sleep(400); }, ['#bign', '#paccept', '#pdecline', '#prompt .nft']],

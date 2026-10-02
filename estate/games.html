@@ -1,0 +1,569 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Rare Fiends — games</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Silkscreen:wght@400;700&family=Sometype+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="page.css">
+<!-- GAMES. M18, the player's half: opening a game, joining one, and the pot (DESIGN.md: Starting a game; M18 items
+     1, 2, 6 and 7; ruling 32 on places; ruling 103 on practice money). Everything on it is RareGame on chain:
+       which contract     -> ChainLive.BRIDGE_CONFIG's `rareGame` (bridge-config.json on Robinhood Chain, where it is
+                             not deployed yet and the page says so; bridge-config.local.json under ?rpc=local), and
+                             eth_getCode at that address, so a name in a file with nothing behind it is not believed
+       the rules          -> RareGame's own getters: joinWindow, startDelay, defaultLength, minPlayers, defaultCutBps,
+                             MIN_CUT_BPS, MAX_CUT_BPS, defaultPlaces; RareRoles.demoMode for whether a fee is allowed
+       each game          -> game(id) for id = gameCount down to 1, and inGame(id, you)
+       the pot's split    -> the contract's own pure split(prize, n), asked by eth_call - never worked out here. The
+                             cut before the start is pot × cutBps / 10000, the line RareGame.start runs; after the
+                             start it is the cut the game stored
+       the placings       -> the Placed events of a settled game
+       the time           -> the chain's: the latest block's timestamp, so a countdown on a dev chain whose clock
+                             was moved on counts to the chain's moment and not the laptop's
+     The verbs are the contract's: create(entry) and join(id), each after approve(RareGame, entry) on the token when
+     there is a fee; start(id) and restart(id), which anyone may send once the chain's clock allows. Declaring the
+     placings is the deployer's or the gamemaster's (ruling 39) and is not on this page. Each send is first asked
+     as an eth_call from your address, so a refusal is said in words before the wallet opens.
+     Nothing here types a chain value: no fee, no cut, no clock, no address. -->
+<style>
+/* this page's own pieces; everything else is page.css */
+.chain { font-size: 15px; }
+.chain code { font-family: var(--mono); font-size: 13px; overflow-wrap: anywhere; }
+.chain .tag { margin-right: 6px; }
+.tag.practice { background: none; color: var(--signal); border: 1px solid var(--signal); }
+.tag.state { border: 1px solid var(--faint); color: var(--ink); }
+.tag.state.open { border-color: var(--signal); color: var(--signal); border-style: solid; }
+.tag.state.started { background: var(--signal); color: var(--paper); border-color: var(--signal); }
+.tag.state.settled, .tag.state.abandoned { color: var(--dim); }
+.tag.you { background: var(--ink); color: var(--paper); }
+
+/* OPEN A GAME: the amount and the button first, on one line, so a phone keeps both in view */
+.opener { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; border: 1px solid var(--faint); background: var(--paper); padding: 12px; margin: 0 0 12px; }
+.opener .row { display: flex; gap: 8px; align-items: stretch; flex-wrap: wrap; }
+.opener label { font-family: var(--display); font-size: 14px; letter-spacing: .1em; color: var(--dim); display: block; margin-bottom: 4px; }
+.amount { display: flex; align-items: stretch; border: 1px solid var(--ink); background: var(--ground); min-width: 0; flex: 1 1 200px; max-width: 360px; }
+.amount input { flex: 1; min-width: 0; font-family: var(--display); font-size: 22px; letter-spacing: .04em; color: var(--ink); background: none; border: 0;
+  padding: 7px 10px; outline: none; font-variant-numeric: tabular-nums; }
+.amount input:disabled { color: var(--dim); }
+.amount .unit { font-family: var(--display); font-size: 12px; letter-spacing: .08em; color: var(--dim); align-self: center; padding: 0 10px; white-space: nowrap;
+  max-width: 45%; overflow: hidden; text-overflow: ellipsis; }
+.opener .btn { min-height: 44px; flex: none; }
+.rules { font-size: 15px; color: var(--dim); margin: 0; max-width: none; }
+.rules b { color: var(--ink); font-weight: 500; }
+.say { font-size: 15px; margin: 0; min-height: 1.5em; color: var(--dim); overflow-wrap: anywhere; max-width: none; }
+.say.bad { color: #FF6B6B; }
+.say.good { color: var(--signal); }
+.me { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 15px; color: var(--dim); }
+.me b { color: var(--ink); font-weight: 500; }
+.me .btn { padding: 6px 10px; font-size: 13px; }
+.btn[data-wallet="connected"] { background: none; color: var(--signal); border: 1px solid var(--signal); cursor: default; }
+
+/* A GAME: who, the fee and the players, the two clocks, the pot and its places, then the one thing you can do */
+.games { display: grid; gap: 12px; margin: 0 0 12px; }
+.game { border: 1px solid var(--faint); background: var(--paper); padding: 12px; display: grid; gap: 10px; min-width: 0; }
+.game.mine { border-color: var(--signal); }
+.game .head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.game .head h3 { font-family: var(--display); font-weight: 400; font-size: 20px; letter-spacing: .06em; margin: 0; }
+.game .head .by { font-size: 14px; color: var(--dim); }
+.game .facts { margin: 0; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.game .fact .v { font-size: 22px; color: var(--signal); }
+.game .fact .v.off { color: var(--dim); font-size: 16px; line-height: 1.4; }
+.pot { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); gap: 10px; border-top: 1px solid var(--rule); padding-top: 10px; }
+.pot dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; font-size: 15px; align-content: start; }
+.pot dt { font-family: var(--display); font-size: 13px; letter-spacing: .1em; color: var(--dim); align-self: center; }
+.pot dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.pot dd.prize { color: var(--signal); }
+.places { width: 100%; border-collapse: collapse; font-size: 15px; font-variant-numeric: tabular-nums; }
+.places th { font-family: var(--display); font-weight: 400; font-size: 13px; letter-spacing: .1em; color: var(--dim); text-align: left; padding: 0 0 4px; }
+.places td { border-top: 1px solid var(--rule); padding: 4px 0; overflow-wrap: anywhere; }
+.places td:last-child, .places th:last-child { text-align: right; }
+.places td.who { font-size: 13px; color: var(--dim); padding: 4px 8px; }
+.places tr.you td { color: var(--signal); }
+.pot .src { grid-column: 1 / -1; font-size: 13px; color: var(--dim); margin: 0; max-width: none; }
+.act { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; border-top: 1px solid var(--rule); padding-top: 10px; }
+.act .btn { min-height: 44px; }
+.act .say { flex: 1 1 220px; }
+.roster { font-size: 13px; color: var(--dim); margin: 0; max-width: none; overflow-wrap: anywhere; }
+.empty { color: var(--dim); font-size: 16px; }
+
+@media (max-width: 860px) {
+  .game .facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pot { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 720px) {
+  .lede { font-size: 15px; margin-bottom: 10px; }
+  h1 { margin-bottom: 8px; }
+  .chain { font-size: 12px; padding: 8px 10px; }
+  .chain .addrs { display: none; }               /* the two addresses; the tag and the sentence are what a phone keeps */
+  .opener { padding: 10px; gap: 8px; }
+  .amount { flex: 1 1 140px; }
+  .amount input { font-size: 20px; padding: 6px 8px; }
+  .rules, .say, .me, .pot dl, .places { font-size: 13px; }
+  .game { padding: 10px; gap: 8px; }
+  .game .head h3 { font-size: 17px; }
+  .game .fact .v { font-size: 17px; }
+  .game .fact .s { font-size: 11px; }
+}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand"><i></i>RARE FIENDS<span>· GAMES</span></div>
+  <button class="pagesbtn" type="button" aria-expanded="false">PAGES</button>
+  <nav aria-label="pages">
+    <a href="player.html">MY PROFILE</a>
+    <a href="base.html">START GAME</a>
+    <a href="base.html?open=market">MARKET</a>
+    <a href="standings.html">STANDINGS</a>
+    <a href="games.html" data-page="games.html">GAMES</a>
+    <a href="base.html?open=build">BUILD</a>
+  </nav>
+</header>
+<main class="page">
+  <h1>GAMES</h1>
+  <p class="lede">Open a game at whatever fee you think it is worth, or join one that is open. Every number is read
+    from the chain when the page opens.</p>
+  <p class="note chain" id="chain">reading the chain…</p>
+
+  <section class="part" aria-labelledby="h-open">
+    <h2 id="h-open"><span class="n">01</span>OPEN A GAME</h2>
+    <div class="opener" id="opener">
+      <div>
+        <label for="fee">ENTRY FEE · 0 IS A FREE GAME</label>
+        <div class="row">
+          <div class="amount"><input id="fee" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" value="0" aria-describedby="openSay" disabled><span class="unit" id="feeUnit">—</span></div>
+          <button class="btn" id="openBtn" type="button" disabled>OPEN A GAME</button>
+        </div>
+      </div>
+      <p class="say" id="openSay"></p>
+      <p class="rules" id="rules"></p>
+      <div class="me"><button class="btn ghost" id="connect" type="button" data-wallet>CONNECT WALLET</button><span id="meLine"></span></div>
+    </div>
+  </section>
+
+  <section class="part" aria-labelledby="h-games">
+    <h2 id="h-games"><span class="n">02</span>OPEN AND RUNNING</h2>
+    <p class="q">Join inside the window. The pot shows what each place would be paid if the game started with the players it has now.</p>
+    <div class="games" id="live"><p class="empty">reading…</p></div>
+  </section>
+
+  <section class="part" aria-labelledby="h-done">
+    <h2 id="h-done"><span class="n">03</span>FINISHED</h2>
+    <p class="q">Placings and payouts, as the chain paid them.</p>
+    <div class="games" id="done"><p class="empty">reading…</p></div>
+  </section>
+</main>
+<footer class="credits">
+  <a class="mark" href="https://x.com/rarefiends" target="_blank" rel="noopener" aria-label="Rare Fiends on X"><img src="icon-192.png" alt="" width="20" height="20"></a>
+  <span class="by">POWERED BY <a href="https://x.com/intelstrata" target="_blank" rel="noopener">@INTELSTRATA</a>
+  AND <a href="https://rarefriends.com" target="_blank" rel="noopener"><img src="token.svg" alt="" width="18" height="18"> RAREFRIENDS</a></span>
+</footer>
+<script src="session.js"></script>
+<script src="chance.js"></script>
+<script src="chainlive.js"></script>
+<script src="wallet.js"></script>
+<script>
+(function () {
+  'use strict';
+  const $ = (id) => document.getElementById(id);
+  const rpc = ChainLive.rpc;
+  const utf8 = (s) => new TextEncoder().encode(s);
+  const sel = (sig) => Chance.hex(Chance.keccak256(utf8(sig))).slice(0, 10);
+  const topic = (sig) => Chance.hex(Chance.keccak256(utf8(sig)));
+  const w256 = (v) => BigInt(v).toString(16).padStart(64, '0');
+  const wAddr = (a) => String(a).toLowerCase().replace(/^0x/, '').padStart(64, '0');
+  const words = (hex) => (String(hex).replace(/^0x/, '').match(/.{64}/g) || []).map((x) => BigInt('0x' + x));
+  const asAddr = (n) => '0x' + n.toString(16).padStart(40, '0');
+  const short = (a) => a ? a.slice(0, 6) + '…' + a.slice(-4) : '';
+  const same = (a, b) => !!a && !!b && a.toLowerCase() === b.toLowerCase();
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const STATES = ['NONE', 'OPEN', 'RUNNING', 'SETTLED', 'ABANDONED'];
+
+  // ---------------------------------------------------------------- the contract's refusals, said in words
+  const ERRORS = {};
+  [['NoSuchGame(uint256)', () => 'There is no such game.'],
+   ['WrongState(uint256,uint8)', (w) => 'The game is ' + (STATES[Number(w[1])] || '?').toLowerCase() + ', so that cannot be done to it now.'],
+   ['JoiningClosed(uint256)', () => 'Joining has closed on this game.'],
+   ['JoiningOpen(uint256)', () => 'Joining is still open, so the join clock cannot be restarted yet.'],
+   ['TooEarly(uint256,uint64)', (w) => 'Too early: the chain allows it from ' + when(Number(w[1])) + '.'],
+   ['AlreadyIn(uint256,address)', () => 'This wallet is already in that game.'],
+   ['NotEnoughPlayers(uint256,uint256,uint8)', (w) => 'Not enough players: ' + w[1] + ' of the ' + w[2] + ' a game needs.'],
+   ['EnoughPlayers(uint256,uint256,uint8)', () => 'The game has its players, so the join clock does not restart.'],
+   ['NoRules()', () => 'The contract has no rules table to start a game against.'],
+   ['NotWhitelisted(address)', () => 'This wallet is not on the whitelist, so the contract will not let it play.'],
+   ['NotAllowedInDemoMode(address)', () => 'Demo mode is on and this wallet is not on the demo allowlist.'],
+   ['PaidInDemoMode()', () => 'Demo mode is on, so a game here may only be free. Set the fee to 0.'],
+   ['ERC20InsufficientBalance(address,uint256,uint256)', (w) => 'Not enough in the wallet: it holds ' + money(w[1]) + ' and the fee is ' + money(w[2]) + '.'],
+   ['ERC20InsufficientAllowance(address,uint256,uint256)', () => 'The contract has not been allowed to take the fee yet.'],
+  ].forEach(([sig, say]) => { ERRORS[sel(sig)] = say; });
+  function refusal(e) {
+    const d = (e && (e.data && (e.data.data || e.data) || e.error && e.error.data)) || '';
+    const hex = typeof d === 'string' ? d : '';
+    const say = ERRORS[hex.slice(0, 10)];
+    if (say) return say(words('0x' + hex.slice(10)));
+    if (e && e.code === 4001) return 'You declined it in the wallet.';
+    return 'The chain refused it' + (e && e.message ? ': ' + String(e.message).replace(/^eth_\w+: /, '').slice(0, 160) : '.');
+  }
+
+  // ---------------------------------------------------------------- reading
+  const call = (to, data, from) => rpc('eth_call', [Object.assign({ to, data }, from ? { from } : {}), 'latest']);
+  const uintOf = async (to, sig) => words(await call(to, sel(sig)))[0];
+  const addrOf = async (to, sig) => asAddr(await uintOf(to, sig));
+  function decodeString(hex) {
+    const h = String(hex).replace(/^0x/, ''); if (h.length < 128) return '';
+    const len = parseInt(h.slice(64, 128), 16);
+    return new TextDecoder().decode(Uint8Array.from(h.slice(128, 128 + len * 2).match(/../g) || [], (b) => parseInt(b, 16)));
+  }
+  // game(id) returns one struct with a dynamic member (players), so the reply is an offset, then the struct's head,
+  // then the array the head points at
+  function decodeGame(hex) {
+    const w = words(hex), b = Number(w[0] / 32n), f = (i) => w[b + i];
+    const at = b + Number(f(15) / 32n), n = Number(w[at] || 0n), players = [];
+    for (let i = 0; i < n; i++) players.push(asAddr(w[at + 1 + i]));
+    return { starter: asAddr(f(0)), state: Number(f(1)), demo: f(2) !== 0n, cutFrozen: f(3) !== 0n, places: Number(f(4)), minPlayers: Number(f(5)),
+      cutBps: Number(f(6)), joinClosesAt: Number(f(7)), startsAt: Number(f(8)), closesAt: Number(f(9)), length: Number(f(10)),
+      entry: f(11), pot: f(12), cut: f(13), rulesId: f(14), players };
+  }
+  async function split(prize, n) {
+    if (n < 1) return [];
+    const w = words(await call(S.game, sel('split(uint256,uint256)') + w256(prize) + w256(n)));
+    return w.slice(2, 2 + Number(w[1]));
+  }
+  async function placed(id) {
+    const T = topic('Placed(uint256,uint8,address,uint256)');
+    const latest = BigInt(await rpc('eth_blockNumber', [])), out = [];
+    const from0 = BigInt(S.cfg.deployBlock || 0);
+    for (let from = from0; from <= latest; from += 10000000n) {
+      const to = from + 9999999n < latest ? from + 9999999n : latest;
+      const logs = await rpc('eth_getLogs', [{ address: S.game, topics: [T, '0x' + w256(id)], fromBlock: '0x' + from.toString(16), toBlock: '0x' + to.toString(16) }]);
+      logs.forEach((l) => { const d = words(l.data); out.push({ place: Number(d[0]), player: '0x' + l.topics[2].slice(-40), paid: d[1] }); });
+    }
+    return out.sort((a, b) => a.place - b.place);
+  }
+
+  // ---------------------------------------------------------------- the figures, formatted
+  function money(units) {
+    if (S.decimals == null) return String(units);
+    const u = BigInt(units), base = 10n ** BigInt(S.decimals), whole = u / base, frac = u % base;
+    let f = frac.toString().padStart(S.decimals, '0').slice(0, 4).replace(/0+$/, '');
+    const approx = frac !== 0n && f.length === 4 && frac.toString().padStart(S.decimals, '0').slice(4).replace(/0+$/, '') !== '';
+    return (approx ? '≈' : '') + whole.toLocaleString('en-US') + (f ? '.' + f : '');
+  }
+  const unit = () => S.symbol || '';
+  const exact = (units) => S.decimals == null ? String(units) : (() => { const b = 10n ** BigInt(S.decimals); const f = (BigInt(units) % b).toString().padStart(S.decimals, '0').replace(/0+$/, ''); return (BigInt(units) / b).toString() + (f ? '.' + f : ''); })();
+  function parseFee(text) {
+    const t = String(text).trim().replace(/,/g, '');
+    if (!/^\d*(\.\d*)?$/.test(t) || t === '' || t === '.') return null;
+    const [w, f = ''] = t.split('.');
+    if (f.length > S.decimals) return null;
+    return BigInt(w || '0') * 10n ** BigInt(S.decimals) + BigInt((f + '0'.repeat(S.decimals)).slice(0, S.decimals) || '0');
+  }
+  function span(s) {
+    s = Math.max(0, Math.round(Number(s)));
+    const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60), x = s % 60;
+    if (s >= 172800) return d + ' d' + (h ? ' ' + h + ' h' : '');           // days from two of them; under that, hours (24 h, as the design says it)
+    if (s >= 3600) return Math.floor(s / 3600) + ' h' + (m ? ' ' + m + ' min' : '');
+    if (m) return m + ' min' + (x && m < 10 ? ' ' + x + ' s' : '');
+    return x + ' s';
+  }
+  const pct = (bps) => (bps / 100).toLocaleString('en-US', { maximumFractionDigits: 2 }) + '%';
+  function when(t) { return new Date(t * 1000).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); }
+  // THE CHAIN'S NOW. The latest block's timestamp, carried forward by the wall clock from the moment it was read -
+  // and never behind the wall clock, since a quiet chain's latest block can be minutes old
+  const now = () => Math.max(Date.now() / 1000 + S.skew, S.blockTs || 0);
+  const ordinal = (n) => n + (n % 10 === 1 && n % 100 !== 11 ? 'ST' : n % 10 === 2 && n % 100 !== 12 ? 'ND' : n % 10 === 3 && n % 100 !== 13 ? 'RD' : 'TH');
+
+  // ---------------------------------------------------------------- state
+  const S = { cfg: null, game: null, roles: null, token: null, symbol: '', decimals: null, rules: null, demo: null, chainId: null,
+    games: [], me: '', mine: null, blockTs: 0, skew: 0, ready: false, notDeployed: '', busy: false, error: '' };
+  window.gamesPage = S;
+
+  async function readRules() {
+    const g = S.game;
+    const [roles, token, feeTo, len, jw, sd, cut, lo, hi, places, minP, maxPlaces] = await Promise.all([
+      addrOf(g, 'roles()'), addrOf(g, 'rf()'), addrOf(g, 'feeTo()'), uintOf(g, 'defaultLength()'), uintOf(g, 'joinWindow()'), uintOf(g, 'startDelay()'),
+      uintOf(g, 'defaultCutBps()'), uintOf(g, 'MIN_CUT_BPS()'), uintOf(g, 'MAX_CUT_BPS()'), uintOf(g, 'defaultPlaces()'), uintOf(g, 'minPlayers()'), uintOf(g, 'MAX_PLACES()')]);
+    S.roles = roles; S.token = token;
+    const [sym, dec] = await Promise.all([call(token, sel('symbol()')), uintOf(token, 'decimals()')]);
+    S.symbol = decodeString(sym); S.decimals = Number(dec);
+    S.rules = { feeTo, length: Number(len), joinWindow: Number(jw), startDelay: Number(sd), cutBps: Number(cut), minCut: Number(lo), maxCut: Number(hi),
+      places: Number(places), minPlayers: Number(minP), maxPlaces: Number(maxPlaces) };
+  }
+
+  async function readChain() {
+    const [blk, demo, count] = await Promise.all([rpc('eth_getBlockByNumber', ['latest', false]), uintOf(S.roles, 'demoMode()'), uintOf(S.game, 'gameCount()')]);
+    S.blockTs = parseInt(blk.timestamp, 16); S.skew = S.blockTs - Date.now() / 1000; if (S.skew < 0) S.skew = 0;
+    S.demo = demo !== 0n;
+    const n = Number(count), ids = [];
+    for (let id = n; id >= 1 && ids.length < 40; id--) ids.push(id);          // the newest forty
+    const me = S.me;
+    S.games = await Promise.all(ids.map(async (id) => {
+      const g = decodeGame(await call(S.game, sel('game(uint256)') + w256(id)));
+      g.id = id;
+      g.joined = !!me && g.players.some((p) => same(p, me));
+      // the cut: before the start it is what RareGame.start will take, pot × cutBps / 10000; after, what it took
+      g.cutNow = g.state >= 2 ? g.cut : g.pot * BigInt(g.cutBps) / 10000n;
+      g.prize = g.pot - g.cutNow;
+      g.paidPlaces = Math.min(g.places, g.players.length);
+      g.split = g.state === 4 ? [] : await split(g.prize, g.paidPlaces);
+      g.placings = g.state === 3 ? await placed(id) : [];
+      return g;
+    }));
+    if (me) {
+      const [bal, allow, allowed, may] = await Promise.all([
+        call(S.token, sel('balanceOf(address)') + wAddr(me)), call(S.token, sel('allowance(address,address)') + wAddr(me) + wAddr(S.game)),
+        call(S.roles, sel('isAllowed(address)') + wAddr(me)), call(S.roles, sel('mayPlay(address)') + wAddr(me))]);
+      S.mine = { balance: words(bal)[0], allowance: words(allow)[0], allowed: words(allowed)[0] !== 0n, mayPlay: words(may)[0] !== 0n };
+    } else S.mine = null;
+  }
+
+  // ---------------------------------------------------------------- drawing
+  function drawChain() {
+    const c = $('chain');
+    if (S.notDeployed) { c.innerHTML = S.notDeployed; return; }
+    const where = ChainLive.LOCAL
+      ? '<span class="tag practice">PRACTICE MONEY</span>the dev chain (' + esc(ChainLive.RPC[0]) + '): every stake here is the test chain\'s own ' +
+        esc(unit()) + ', worth nothing (ruling 103). Connect a test wallet only.'
+      : '<span class="tag game">ROBINHOOD CHAIN</span>stakes are real ' + esc(unit()) + '.';
+    c.innerHTML = where + '<span class="addrs"> RareGame <code>' + esc(S.game) + '</code> · token <code>' + esc(S.token) + '</code></span>' +
+      (S.demo ? ' · <b>demo mode is on</b>: a game may only be free' : '');
+  }
+
+  function drawOpener() {
+    const R = S.rules, fee = $('fee'), btn = $('openBtn');
+    $('feeUnit').textContent = unit() || '—';
+    if (!R) { fee.disabled = btn.disabled = true; $('rules').textContent = ''; return; }
+    $('rules').innerHTML = 'Joining stays open <b>' + span(R.joinWindow) + '</b>, then <b>' + span(R.startDelay) + '</b> before it starts, and it runs <b>' +
+      span(R.length) + '</b>. It needs <b>' + R.minPlayers + '</b> players or the join clock starts again. <b>' + pct(R.cutBps) + '</b> of the pot is the cut, taken at the start (it may be set between ' +
+      pct(R.minCut) + ' and ' + pct(R.maxCut) + '); the rest pays <b>' + R.places + '</b> places, 50 / 30 / the rest shared equally. You are the first player and pay the fee too.';
+    if (S.demo) { fee.value = '0'; fee.disabled = true; }
+    else fee.disabled = S.busy;
+    btn.disabled = S.busy;
+  }
+
+  function drawMe() {
+    const l = $('meLine');
+    if (!S.me) { l.textContent = S.ready ? 'Connect a wallet to open or join a game.' : ''; return; }
+    const m = S.mine;
+    if (!m) { l.textContent = ''; return; }
+    l.innerHTML = 'holds <b>' + esc(money(m.balance)) + '</b> ' + esc(unit()) +
+      (m.allowed ? (S.demo && !m.mayPlay ? ' · <b>not on the demo allowlist</b>' : ' · may play') : ' · <b>not on the whitelist</b>: the contract will refuse it');
+  }
+
+  function factCard(k, v, s, attrs) { return '<div class="fact"><div class="k">' + k + '</div><div class="v' + (attrs && attrs.off ? ' off' : '') + '"' + (attrs && attrs.until ? ' data-until="' + attrs.until + '"' : '') + '>' + v + '</div><div class="s">' + s + '</div></div>'; }
+
+  function gameCard(g) {
+    const t = now(), st = STATES[g.state], fee = g.entry === 0n ? 'FREE' : esc(money(g.entry));
+    const youTag = g.joined ? '<span class="tag you">YOU\'RE IN</span>' : '';
+    let h = '<article class="game' + (g.joined ? ' mine' : '') + '" data-game="' + g.id + '">' +
+      '<div class="head"><h3>GAME #' + g.id + '</h3><span class="tag state ' + st.toLowerCase() + '">' + st + '</span>' +
+      (g.demo ? '<span class="tag open">DEMO</span>' : '') + youTag +
+      '<span class="by">opened by ' + (same(g.starter, S.me) ? 'you' : esc(short(g.starter))) + '</span></div>';
+    const joinLeft = g.joinClosesAt - t, startLeft = g.startsAt - t, endLeft = g.closesAt - t;
+    h += '<div class="facts">' +
+      factCard('FEE', fee, g.entry === 0n ? 'nothing to pay' : esc(unit()) + ' to join') +
+      factCard('PLAYERS', g.players.length + '', 'needs ' + g.minPlayers + ' · ' + g.places + ' places paid') +
+      (g.state === 1
+        ? factCard('JOINING CLOSES', joinLeft > 0 ? 'IN ' + span(joinLeft) : 'CLOSED', when(g.joinClosesAt), { until: g.joinClosesAt, off: joinLeft <= 0 }) +
+          factCard('STARTS', startLeft > 0 ? 'IN ' + span(startLeft) : 'DUE', when(g.startsAt) + ' · runs ' + span(g.length), { until: g.startsAt })
+        : g.state === 2
+          ? factCard('STARTED', when(g.startsAt), 'joining closed ' + when(g.joinClosesAt), { off: true }) +
+            factCard('ENDS', endLeft > 0 ? 'IN ' + span(endLeft) : 'ENDED', when(g.closesAt) + ' · placings are declared after', { until: g.closesAt })
+          : factCard('STARTED', g.state === 4 ? '—' : when(g.startsAt), g.state === 4 ? 'never started' : 'ran ' + span(g.length), { off: true }) +
+            factCard('ENDED', g.state === 4 ? 'ABANDONED' : when(g.closesAt), g.state === 4 ? 'every stake returned' : 'placings declared', { off: true })) +
+      '</div>';
+    if (g.state === 4) {
+      h += '<p class="roster">Closed short of ' + g.minPlayers + ' players and abandoned: each of the ' + g.players.length + ' got back ' + (g.entry === 0n ? 'nothing, as it was free' : esc(money(g.entry)) + ' ' + esc(unit())) + '.</p>';
+    } else {
+      // THE POT. The split is the contract's own split(prize, n), asked on chain; the cut is the start's arithmetic
+      const rows = g.state === 3
+        ? g.placings.map((p) => '<tr' + (same(p.player, S.me) ? ' class="you"' : '') + '><td>' + ordinal(p.place) + '</td><td class="who">' + (same(p.player, S.me) ? 'you' : esc(short(p.player))) + '</td><td title="' + esc(exact(p.paid)) + '">' + esc(money(p.paid)) + '</td></tr>').join('')
+        : g.split.map((v, i) => '<tr><td>' + ordinal(i + 1) + '</td><td class="who"></td><td title="' + esc(exact(v)) + '">' + esc(money(v)) + '</td></tr>').join('');
+      const placeHead = g.state === 3 ? 'PAID' : g.state === 2 ? 'EACH PLACE WILL BE PAID' : 'IF IT STARTED NOW';
+      const unpaid = g.state < 3 && g.places > g.paidPlaces ? '<p class="src">' + g.places + ' places, ' + g.players.length + ' player' + (g.players.length === 1 ? '' : 's') + ': only as many places as there are players are paid.</p>' : '';
+      h += '<div class="pot"><dl>' +
+        '<dt>POT</dt><dd title="' + esc(exact(g.pot)) + '">' + esc(money(g.pot)) + ' ' + esc(unit()) + '</dd>' +
+        '<dt>CUT ' + pct(g.cutBps) + '</dt><dd title="' + esc(exact(g.cutNow)) + '">' + esc(money(g.cutNow)) + (g.state >= 2 ? ' · taken' : ' · at the start') + '</dd>' +
+        '<dt>PRIZE</dt><dd class="prize" title="' + esc(exact(g.prize)) + '">' + esc(money(g.prize)) + ' ' + esc(unit()) + '</dd>' +
+        '</dl><table class="places"><thead><tr><th>' + placeHead + '</th><th></th><th>' + esc(unit()) + '</th></tr></thead><tbody>' +
+        (rows || '<tr><td colspan="3">' + (g.state === 3 ? 'no placings found' : 'nobody to pay yet') + '</td></tr>') + '</tbody></table>' +
+        unpaid + '<p class="src">' + (g.state === 3 ? 'Paid by the chain when the placings were declared, read off its Placed events. ' : 'Split by RareGame.split on chain: ') +
+        '50% to first, 30% to second, the rest shared equally after second; two places split 60 / 40. ' +
+        (g.entry === 0n ? 'A free game has no pot, so nothing is cut.' : 'The cut was fixed at the first payment.') + '</p></div>';
+    }
+    if (g.players.length && g.state !== 3) h += '<p class="roster">In: ' + g.players.map((p) => same(p, S.me) ? '<b>you</b>' : esc(short(p))).join(', ') + '</p>';
+    // THE ONE THING YOU CAN DO, decided by the chain's clock and the game's state; the contract has the last word
+    const act = actionFor(g, t);
+    if (act) h += '<div class="act">' + (act.btn ? '<button class="btn" type="button" data-act="' + act.btn + '" data-id="' + g.id + '"' + (S.busy ? ' disabled' : '') + '>' + act.label + '</button>' : '') +
+      '<p class="say" id="say' + g.id + '">' + (act.say || '') + '</p></div>';
+    return h + '</article>';
+  }
+
+  function actionFor(g, t) {
+    if (g.state === 1) {
+      if (t < g.joinClosesAt) {
+        if (g.joined) return { say: 'You are in. ' + (g.players.length < g.minPlayers ? 'It needs ' + (g.minPlayers - g.players.length) + ' more to start.' : 'It starts ' + when(g.startsAt) + '.') };
+        return { btn: 'join', label: !S.me ? 'CONNECT TO JOIN' : g.entry === 0n ? 'JOIN · FREE' : 'JOIN · PAY ' + esc(money(g.entry)), say: g.entry === 0n ? '' : 'The wallet asks twice: once to allow the fee, once to join.' };
+      }
+      if (g.players.length < g.minPlayers) return { btn: 'restart', label: 'RESTART THE JOIN CLOCK', say: 'Joining closed short of ' + g.minPlayers + ' players. Anyone may start the clock again; everyone in stays in.' };
+      if (t < g.startsAt) return { say: 'Joining has closed. It starts ' + when(g.startsAt) + '.' };
+      return { btn: 'start', label: 'START THE GAME', say: 'Its start is due. Anyone may send it; the cut leaves the pot then.' };
+    }
+    if (g.state === 2) return { say: t < g.closesAt ? 'Running.' : 'The game has run its length; the placings are the deployer\'s or the gamemaster\'s to declare.' };
+    return null;
+  }
+
+  function drawGames() {
+    const live = S.games.filter((g) => g.state === 1 || g.state === 2), done = S.games.filter((g) => g.state === 3 || g.state === 4);
+    $('live').innerHTML = S.notDeployed ? '<p class="empty">Nothing to show: there is no games contract on this chain.</p>'
+      : live.length ? live.map(gameCard).join('') : '<p class="empty">No game is open. Open one above.</p>';
+    $('done').innerHTML = S.notDeployed ? '<p class="empty">—</p>' : done.length ? done.map(gameCard).join('') : '<p class="empty">No game has finished yet.</p>';
+  }
+
+  function draw() { drawChain(); drawOpener(); drawMe(); drawGames(); }
+
+  // the countdowns move every second without redrawing a card (a button under a thumb must not be replaced)
+  setInterval(() => {
+    if (!S.ready) return;
+    const t = now();
+    let flipped = false;
+    document.querySelectorAll('[data-until]').forEach((el) => {
+      const left = Number(el.dataset.until) - t;
+      if (left <= 0 && !/CLOSED|DUE|ENDED/.test(el.textContent)) flipped = true;
+      if (left > 0) el.textContent = 'IN ' + span(left);
+    });
+    if (flipped && !S.busy) refresh();
+  }, 1000);
+
+  // ---------------------------------------------------------------- sending
+  function say(id, text, kind) { const el = id ? $('say' + id) : $('openSay'); if (el) { el.textContent = text; el.className = 'say' + (kind ? ' ' + kind : ''); } }
+
+  async function receipt(hash) {
+    for (let i = 0; i < 180; i++) {
+      const r = await rpc('eth_getTransactionReceipt', [hash]).catch(() => null);
+      if (r) return r;
+      await new Promise((ok) => setTimeout(ok, 700));
+    }
+    throw new Error('the transaction ' + short(hash) + ' never reached the chain this page reads');
+  }
+
+  // The dev chain answers chain id 4663, like Robinhood Chain itself, so a wallet pointed at the real chain would
+  // sign there for a contract that does not exist. Ask THE WALLET's chain for RareGame's code before anything is signed.
+  async function walletOnOurChain() {
+    let id; try { id = parseInt(await RFWallet.ask('eth_chainId'), 16); } catch (_) { id = null; }
+    if (id !== S.chainId) {
+      const moved = await RFWallet.toChain({ id: S.chainId, name: 'Robinhood Chain' }, 8000);
+      if (!moved.ok) return 'Your wallet is on chain ' + (id == null ? '?' : id) + '; this page reads chain ' + S.chainId + '. Switch the wallet and try again.';
+    }
+    let code = '0x'; try { code = await RFWallet.ask('eth_getCode', [S.game, 'latest']); } catch (_) {}
+    if (!code || code === '0x') return 'Your wallet\'s network has no games contract at ' + short(S.game) + ' - it is not the chain this page reads' +
+      (ChainLive.LOCAL ? ' (the dev chain needs its own network in the wallet, and a test wallet)' : '') + '.';
+    return '';
+  }
+
+  async function sendAndWait(to, data, sayId, what) {
+    // asked first as a call from this address, so a refusal is said before the wallet opens
+    try { await call(to, data, S.me); } catch (e) { throw Object.assign(new Error(refusal(e)), { said: true }); }
+    say(sayId, 'Confirm ' + what + ' in your wallet…');
+    let hash;
+    try { hash = await RFWallet.send({ to, data }); } catch (e) { throw Object.assign(new Error(refusal(e)), { said: true }); }
+    say(sayId, what.charAt(0).toUpperCase() + what.slice(1) + ' sent (' + short(hash) + '); waiting for the chain…');
+    const r = await receipt(hash);
+    if (r.status !== '0x1') throw Object.assign(new Error(what + ' was mined and refused (' + short(hash) + ').'), { said: true });
+    return r;
+  }
+
+  async function ensureAllowance(entry, sayId) {
+    if (entry === 0n) return;
+    const allow = words(await call(S.token, sel('allowance(address,address)') + wAddr(S.me) + wAddr(S.game)))[0];
+    if (allow >= entry) return;
+    await sendAndWait(S.token, sel('approve(address,uint256)') + wAddr(S.game) + w256(entry), sayId, 'allowing the fee of ' + money(entry) + ' ' + unit());
+  }
+
+  async function act(kind, id) {
+    if (S.busy) return;
+    S.busy = true; draw();
+    const sayId = kind === 'open' ? null : id;
+    try {
+      if (!S.me) { say(sayId, 'Connecting…'); await RFWallet.connect(); S.me = RFWallet.address; await refresh(true); if (kind === 'join' && S.games.find((g) => g.id === id && g.joined)) return; }
+      const wrong = await walletOnOurChain();
+      if (wrong) throw Object.assign(new Error(wrong), { said: true });
+      if (kind === 'open') {
+        const entry = parseFee($('fee').value);
+        if (entry === null) throw Object.assign(new Error('The fee is a number of ' + unit() + ', with at most ' + S.decimals + ' decimals.'), { said: true });
+        if (S.demo && entry !== 0n) throw Object.assign(new Error(ERRORS[sel('PaidInDemoMode()')]()), { said: true });
+        if (entry > 0n && S.mine && S.mine.balance < entry) throw Object.assign(new Error('Not enough in the wallet: it holds ' + money(S.mine.balance) + ' ' + unit() + '.'), { said: true });
+        await ensureAllowance(entry, sayId);
+        const r = await sendAndWait(S.game, sel('create(uint128)') + w256(entry), sayId, 'opening the game');
+        const made = r.logs.find((l) => l.topics[0] === topic('GameCreated(uint256,address,uint128,bool,uint16,uint8,bytes32,uint64,uint64,uint64)'));
+        say(null, 'Game #' + (made ? BigInt(made.topics[1]) : '?') + ' is open, and you are its first player.', 'good');
+      } else if (kind === 'join') {
+        const g = S.games.find((x) => x.id === id);
+        await ensureAllowance(g.entry, sayId);
+        await sendAndWait(S.game, sel('join(uint256)') + w256(id), sayId, 'joining game #' + id);
+      } else if (kind === 'start') {
+        await sendAndWait(S.game, sel('start(uint256)') + w256(id), sayId, 'starting game #' + id);
+      } else if (kind === 'restart') {
+        await sendAndWait(S.game, sel('restart(uint256)') + w256(id), sayId, 'restarting the join clock');
+      }
+      S.busy = false; await refresh(true);
+      if (kind !== 'open') say(id, kind === 'join' ? 'You are in.' : kind === 'start' ? 'Started.' : 'The join clock is running again.', 'good');
+    } catch (e) {
+      S.busy = false; draw();
+      say(sayId, e.said ? e.message : refusal(e), 'bad');
+    } finally { if (S.busy) { S.busy = false; draw(); } }
+  }
+
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-act]');
+    if (b) act(b.dataset.act, Number(b.dataset.id));
+  });
+  $('openBtn').addEventListener('click', () => act('open'));
+
+  // ---------------------------------------------------------------- opening
+  let reading = null;
+  async function refresh(force) {
+    if (reading && !force) return reading;
+    reading = (async () => {
+      try { await readChain(); S.error = ''; } catch (e) { S.error = String(e.message || e); }
+      S.ready = true;
+      if (!S.busy) draw();
+      if (S.error) { const c = $('chain'); c.innerHTML += '<br><b>The chain could not be read just now</b> (' + esc(S.error.slice(0, 140)) + ').'; }
+    })();
+    try { await reading; } finally { reading = null; }
+  }
+
+  async function boot() {
+    let cfg = null;
+    try { cfg = await (await fetch(ChainLive.BRIDGE_CONFIG, { cache: 'no-store' })).json(); } catch (_) { cfg = null; }
+    S.cfg = cfg || {};
+    try { S.chainId = parseInt(await rpc('eth_chainId', []), 16); } catch (_) { S.chainId = null; }
+    const at = cfg && typeof cfg.rareGame === 'string' && /^0x[0-9a-fA-F]{40}$/.test(cfg.rareGame) ? cfg.rareGame : null;
+    let code = '0x';
+    if (at) { try { code = await rpc('eth_getCode', [at, 'latest']); } catch (_) { code = null; } }
+    if (!at || !code || code === '0x') {
+      S.notDeployed = '<span class="tag open">NOT DEPLOYED</span>' + (!at
+        ? 'The games contract (RareGame) is not deployed on ' + (ChainLive.LOCAL ? 'this dev chain' : 'Robinhood Chain') + ' yet, so no game can be opened or joined here. Nothing on this page is pretend: it shows a game when the chain has one.'
+        : code === null ? 'The chain could not be read just now, so whether a game is open is unknown.'
+          : 'The configuration names a games contract at <code>' + esc(at) + '</code>, but the chain has no code there.');
+      S.ready = true; draw(); return;
+    }
+    S.game = at;
+    try { await readRules(); } catch (e) { S.notDeployed = '<span class="tag open">UNREADABLE</span>The games contract at <code>' + esc(at) + '</code> did not answer as RareGame does (' + esc(String(e.message).slice(0, 120)) + ').'; S.ready = true; draw(); return; }
+    S.me = RFWallet.address || await RFWallet.current();
+    await refresh(true);
+    RFWallet.onChange((a) => { if (!same(a, S.me)) { S.me = a; refresh(true); } });
+    setInterval(() => { if (!S.busy && document.visibilityState === 'visible') refresh(); }, 15000);
+  }
+
+  RFSession.nav();
+  // signed in through the server (Server 1): the session's address is who this is; on a developer's machine, the wallet
+  RFSession.me().then((m) => { if (!m.local && m.role === 'none' && !m.unread) location.replace('/'); });
+  S.refresh = refresh; S.money = money;
+  boot();
+})();
+</script>
+</body>
+</html>

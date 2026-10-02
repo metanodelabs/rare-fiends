@@ -6,91 +6,169 @@
 <title>Rare Fiends — standings</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Silkscreen:wght@400;700&family=Archivo:wght@400;500;600&family=Sometype+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Silkscreen:wght@400;700&family=Sometype+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="page.css"><!-- the page template, read off economy.html and mapgen.html -->
 <style>
-:root {
-  --ink: #eee; --paper: #0a0c0a; --ink-60: #9a9a9a; --ink-30: #585858; --signal: #CCFF00;
-  --display: Silkscreen, monospace; --body: Archivo, system-ui, sans-serif; --mono: "Sometype Mono", monospace;
-  --rule: 1px solid var(--ink); color-scheme: dark;
-}
-* { box-sizing: border-box; }
-[hidden] { display: none !important; }
-html, body { margin: 0; background: var(--paper); color: var(--ink); }
-body { font-family: var(--body); font-size: 21px; }
-.wrap { max-width: 960px; margin: 0 auto; padding: 0 0 40px; }
-
-.top { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: var(--rule); flex-wrap: wrap; }
-.top b { font-family: var(--display); font-size: 20px; letter-spacing: .06em; }
-.top .pot { margin-left: auto; font-family: var(--mono); font-size: 21px; color: var(--signal); }
-.top a { font-family: var(--display); font-size: 16px; letter-spacing: .06em; color: var(--ink-60);
-  text-decoration: none; border: var(--rule); border-color: rgba(255,255,255,.35); padding: 6px 9px; }
-.top a:hover { color: var(--ink); border-color: var(--ink); }
-
-.bar { display: flex; gap: 8px; align-items: center; padding: 10px 14px; border-bottom: var(--rule); flex-wrap: wrap; }
-.tabs { display: flex; border: var(--rule); }
-.tabs button { font-family: var(--display); font-size: 17px; letter-spacing: .06em; color: var(--ink-60);
-  background: none; border: 0; border-right: var(--rule); padding: 8px 12px; cursor: pointer; }
+/* this page's own pieces; everything else is page.css. Archivo and the page's own grey ink went with the
+   template: the page now reads in the house's two fonts and its ink, like economy.html and the map. */
+.pot { font-family: var(--display); font-size: 16px; letter-spacing: .08em; color: var(--signal); margin: 0 0 12px; }
+.bar { display: flex; gap: 8px; align-items: center; margin: 0 0 10px; flex-wrap: wrap; }
+.tabs { display: flex; border: 1px solid var(--faint); }
+.tabs button { font-family: var(--display); font-size: 15px; letter-spacing: .08em; color: var(--dim);
+  background: none; border: 0; border-right: 1px solid var(--faint); padding: 8px 12px; cursor: pointer; }
 .tabs button:last-child { border-right: 0; }
-.tabs button[aria-pressed="true"] { background: var(--signal); color: #000; }
-.find { flex: 1; min-width: 150px; display: flex; border: var(--rule); }
-.find input { flex: 1; min-width: 0; font-family: var(--mono); font-size: 21px; color: var(--ink);
+.tabs button[aria-pressed="true"] { background: var(--signal); color: var(--paper); }
+.find { flex: 1; min-width: 150px; display: flex; border: 1px solid var(--faint); }
+.find input { flex: 1; min-width: 0; font-family: var(--mono); font-size: 18px; color: var(--ink);
   background: transparent; border: 0; padding: 8px 10px; }
-.find input::placeholder { color: var(--ink-30); }
+.find input::placeholder { color: var(--faint); }
 .find input:focus { outline: none; background: rgba(255,255,255,.05); }
 
-table { width: 100%; border-collapse: collapse; }
-th { font-family: var(--display); font-size: 15px; letter-spacing: .08em; color: var(--ink-60);
-  text-align: left; padding: 10px 14px 8px; border-bottom: var(--rule); white-space: nowrap; cursor: pointer; }
+.tw { border: 1px solid var(--faint); margin: 0 0 12px; }
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+th { font-family: var(--display); font-weight: 400; font-size: 14px; letter-spacing: .1em; color: var(--dim); background: rgba(255,255,255,.03);
+  text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--faint); white-space: nowrap; cursor: pointer; }
 th.num, td.num { text-align: right; }
 th[data-on="1"] { color: var(--signal); }
-td { padding: 11px 14px; border-bottom: 1px dashed rgba(255,255,255,.18); font-size: 20px; }
+td { padding: 9px 12px; border-bottom: 1px solid rgba(255,255,255,.12); font-size: 18px; }
+tr:last-child td { border-bottom: 0; }
 tr.row:hover td { background: rgba(255,255,255,.04); }
-.rank { font-family: var(--mono); font-size: 22px; color: var(--ink-60); width: 44px; }
+.rank { font-family: var(--display); font-size: 18px; color: var(--dim); width: 44px; }
 .rank.top { color: var(--signal); }
-.tok { font-family: var(--mono); font-size: 21px; }
-.sub { display: block; font-size: 19px; color: var(--ink-60); margin-top: 2px; }
-.val { font-family: var(--mono); font-size: 22px; }
+.tok { font-size: 18px; }
+.sub { display: block; font-size: 15px; color: var(--dim); margin-top: 2px; }
+.sub.bname { color: var(--ink); font-family: var(--display); font-size: 12px; letter-spacing: .08em; }
+.addr { display: block; overflow-wrap: anywhere; }     /* a whole address, always shown: it wraps rather than scroll a phone */
+.val { font-size: 19px; }
 .val.sig { color: var(--signal); }
-.pill { font-family: var(--display); font-size: 14px; letter-spacing: .06em; border: 1px solid rgba(255,255,255,.4);
-  padding: 3px 6px; white-space: nowrap; }
+.pill { font-family: var(--display); font-size: 12px; letter-spacing: .08em; border: 1px solid var(--faint); padding: 3px 6px; white-space: nowrap; }
 .pill.on { border-color: var(--signal); color: var(--signal); }
-.pill.off { color: var(--ink-30); border-color: rgba(255,255,255,.2); }
-.note { padding: 12px 14px; font-size: 20px; color: var(--ink-30); line-height: 1.6; }
-@media (max-width: 560px) {
-  td, th { padding-left: 10px; padding-right: 10px; }
+.pill.off { color: var(--dim); border-style: dashed; }
+@media (max-width: 720px) {
+  td, th { padding-left: 8px; padding-right: 8px; }
+  td { font-size: 15px; } .tok, .val { font-size: 15px; } .sub { font-size: 12px; } .rank { width: 32px; font-size: 15px; }
   .hide-s { display: none; }
+  .sub { overflow-wrap: anywhere; }
 }
 </style>
 </head>
 <body>
-<div class="wrap">
-  <div class="top">
-    <b>STANDINGS</b>
-    <a href="base.html">← BASE</a>
-    <span class="pot" id="pot">POT</span>
-  </div>
+<header class="top">
+  <div class="brand"><i></i>RARE FIENDS<span>· STANDINGS</span></div>
+  <button class="pagesbtn" type="button" aria-expanded="false">PAGES</button>
+  <nav aria-label="pages">
+    <a href="player.html">MY PROFILE</a>
+    <a href="base.html">START GAME</a>
+    <a href="base.html?open=market">MARKET</a>
+    <a href="standings.html">STANDINGS</a>
+    <a href="base.html?open=build">BUILD</a>
+  </nav>
+</header>
+<main class="page">
+  <h1>STANDINGS</h1>
+  <p class="lede">Who is ahead when the era closes: players by crystals banked, Friends by what they earned.</p>
+  <p class="pot" id="pot">POT</p>
 
-  <div class="bar">
-    <div class="tabs" id="tabs">
-      <button type="button" data-t="players" aria-pressed="true">PLAYERS</button>
-      <button type="button" data-t="friends">FRIENDS</button>
+  <section class="part" aria-label="the table">
+    <div class="bar">
+      <div class="tabs" id="tabs">
+        <button type="button" data-t="players" aria-pressed="true">PLAYERS</button>
+        <button type="button" data-t="friends">FRIENDS</button>
+      </div>
+      <label class="find"><input id="find" type="search" placeholder="find a token #" aria-label="find a token"></label>
     </div>
-    <label class="find"><input id="find" type="search" placeholder="find a token #" aria-label="find a token"></label>
-  </div>
-
-  <table>
-    <thead id="head"></thead>
-    <tbody id="rows"></tbody>
-  </table>
-
-  <p class="note" id="note"></p>
-</div>
-
+    <div class="tw">
+      <table>
+        <thead id="head"></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <p class="note" id="note"></p>
+  </section>
+</main>
+<footer class="credits">
+  <a class="mark" href="https://x.com/rarefiends" target="_blank" rel="noopener" aria-label="Rare Fiends on X"><img src="icon-192.png" alt="" width="20" height="20"></a>
+  <span class="by">POWERED BY <a href="https://x.com/intelstrata" target="_blank" rel="noopener">@INTELSTRATA</a>
+  AND <a href="https://rarefriends.com" target="_blank" rel="noopener"><img src="token.svg" alt="" width="18" height="18"> RAREFRIENDS</a></span>
+</footer>
+<script src="session.js"></script>
+<script>RFSession.nav();</script>
+<script src="values.js"></script><!-- the crystal unit: a record counts crystals in hundredths -->
 <script>
 (async function () {
   'use strict';
-  const D = await (await fetch('standings-data.json?v=' + Date.now())).json();
   const $ = (id) => document.getElementById(id);
+  const esc = (x) => String(x).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+  const nothing = (why) => {
+    $('pot').textContent = 'NO ERA HAS RUN';
+    $('find').closest('.bar').hidden = true; $('head').closest('.tw').hidden = true;
+    $('note').textContent = why;
+  };
+  // WHERE THE TABLE COMES FROM. Off a developer's machine it is the server's /api/standings: every base record
+  // with an owner, `gathered` in the record's own units, highest first. standings-data.json is a planning file
+  // the deploy scripts refuse to publish (it carries owner strings), so it is never asked for there - asking
+  // got a 403 on every open. On localhost the sample stays, for working on the page's other columns.
+  const LOCAL = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
+  if (!LOCAL) {
+    let J = null;
+    try {
+      const r = await fetch('/api/standings', { cache: 'no-store', credentials: 'same-origin' });
+      if (r.ok) J = await r.json();
+    } catch (_) { J = null; }
+    if (!J || !J.ok || !Array.isArray(J.players)) return nothing('The standings could not be read just now. Sign in with a wallet that holds a Genesis, then open this page again.');
+    if (!J.players.length) return nothing('Nothing to rank yet. No player has a saved base, so there is nobody to put in order.');
+    return live(J);
+  }
+  function live(J) {
+    const UNIT = window.VALUES.crystalUnit;
+    const fmt = (n) => (n / UNIT).toFixed(2);            // hundredths to shown, as player.html and the base show them
+    const P = J.players.filter(p => p && typeof p.address === 'string')
+      .map(p => ({ address: p.address, name: (typeof p.name === 'string' && p.name) ? p.name : null,
+        gathered: typeof p.gathered === 'number' ? p.gathered : 0,
+        baseName: (typeof p.baseName === 'string' && p.baseName) ? p.baseName : null }))
+      .sort((a, b) => b.gathered - a.gathered);
+    let q = '';
+    const at = new Date(J.at);
+    // No pot: no era has closed, and the server reports none.
+    $('pot').textContent = 'NO ERA HAS RUN · ' + P.length + (P.length === 1 ? ' PLAYER' : ' PLAYERS');
+    $('tabs').hidden = true;                               // the server ranks players only; Friends have no standings to read yet
+    $('find').placeholder = 'find a name, base or address'; $('find').setAttribute('aria-label', 'find a player');
+    $('head').innerHTML = '<tr><th style="cursor:default">#</th><th style="cursor:default">PLAYER</th>' +
+      '<th class="num" style="cursor:default" data-on="1">GATHERED</th><th class="hide-s" style="cursor:default">TEAM UP</th></tr>';
+    function render() {
+      const body = $('rows'); body.innerHTML = '';
+      const needle = q.toLowerCase();
+      P.forEach((p, i) => {
+        if (needle && !(p.address.toLowerCase().includes(needle) || (p.name || '').toLowerCase().includes(needle) || (p.baseName || '').toLowerCase().includes(needle))) return;
+        const place = i + 1;                               // filtering does not change a player's place
+        const tr = document.createElement('tr'); tr.className = 'row';
+        // WHO A PLAYER IS: the name they choose, and the address always beside it - never one without the other.
+        const who = p.name
+          ? '<span class="tok">' + esc(p.name) + '</span><span class="sub addr">' + esc(p.address) + '</span>'
+          : '<span class="tok addr">' + esc(p.address) + '</span><span class="sub">no name chosen</span>';
+        // the home base's own name, set on MY PROFILE by whoever holds its Genesis
+        const home = p.baseName ? '<span class="sub bname">BASE · ' + esc(p.baseName) + '</span>' : '';
+        tr.innerHTML = '<td class="rank' + (place <= 3 ? ' top' : '') + '">' + place + '</td>' +
+          '<td>' + who + home + '</td>' +
+          '<td class="num"><span class="val sig">' + fmt(p.gathered) + '</span><span class="sub">crystals</span></td>' +
+          '<td class="hide-s"><span class="pill off">NOT RECORDED</span></td>';
+        body.appendChild(tr);
+      });
+      $('note').textContent = 'Ranked by crystals gathered so far, read from each player\'s saved base' +
+        (isNaN(at) ? '' : ' at ' + at.toLocaleString()) + '. When an era closes, standing is crystals banked; no era has closed, so this is the running count. ' +
+        'A name shows beside the address once a player chooses one; the address is always shown. ' +
+        'No partnership is recorded anywhere yet, so the TEAM UP column has nothing to show.';
+    }
+    $('find').addEventListener('input', (e) => { q = e.target.value.trim(); render(); });
+    render();
+  }
+
+  // LOCALHOST: the sample table, for development.
+  let D;
+  try { const r = await fetch('standings-data.json?v=' + Date.now()); if (!r.ok) throw new Error(String(r.status)); D = await r.json(); }
+  catch (_) {
+    return nothing('Nothing to rank yet. Standings are crystals banked when an era closes, and no era has closed.');
+  }
   let tab = 'players', sort = 'banked', dir = -1, q = '';
   // No generation title: it was invented and nothing on chain said it. The Friend row already prints
   // the generation, and `standings-data.json` carries no family, so nothing takes its place.

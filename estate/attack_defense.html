@@ -179,7 +179,9 @@ canvas.base { width: 100%; display: block; background: #000; border: 1px solid v
     const es = read();
     if (es) {
       const got = es.ECON;
-      GAME = JSON.parse(JSON.stringify({ hp: got.hp, weapons: got.weapons, wallHp: got.wallHp, combat: got.combat }));
+      // every table Combat.rulesFrom reads, Doopies' included (ruling 81 doopieHp, ruling 85 doopieArms): a key
+      // left off here is a page stuck at READING THE GAME, since rulesFrom throws without them
+      GAME = JSON.parse(JSON.stringify({ hp: got.hp, weapons: got.weapons, wallHp: got.wallHp, combat: got.combat, doopieHp: got.doopieHp, doopieArms: got.doopieArms }));
       E = JSON.parse(JSON.stringify(GAME));
       BASE = JSON.parse(JSON.stringify(es.defense())); HOME = JSON.parse(JSON.stringify(BASE));
       $('pEstate').remove(); rebuild(); build(); return;

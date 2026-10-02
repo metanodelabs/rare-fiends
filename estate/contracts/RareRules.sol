@@ -3,6 +3,7 @@ pragma solidity ^0.8.36;
 
 import { IRareRoles } from "./RareRoles.sol";
 import { RareRefund } from "./RareRefund.sol";
+import { IRareFight, RareFight } from "./RareFight.sol";
 
 /// @notice The building cost ladders, on chain, frozen per game - M15 item 11's chain half, the storage
 /// BINDING §46.3 says a demolition reads from, and the first stored piece of the rules table (§10.1).
@@ -77,6 +78,11 @@ contract RareRules {
         uint32[] release;        // per level, in P: the most a STORE lets out when its generator is offline (the capacitor's)
         uint8[] leak;            // per level, percent of the store lost a day (the capacitor's: DECIDED 10 / 5 / 3 / 0)
         uint32[] capacity;       // per level: a silo's crystals (hundredths), a wall's crew, a depot's harvesters, a store's P.h
+        uint32[] rebuild;        // RULING 77 (schema.json buildingType.rebuild, hundredths): what putting back a LOST keep
+                                 // costs - ONE AMOUNT PER MATERIAL, not per level, indexed in record.js MATERIALS order
+                                 // (0 = wood, 1 = crystals; a third material is a third entry). Empty on every row but
+                                 // one whose placement isKeep - setKind refuses it elsewhere. Stored, never charged here:
+                                 // the rebuild move is M13 item 14 and has no chain verb yet (BINDING §81)
         uint32[] reach;          // per level, in tiles; 0 for a kind that reaches nowhere
         int16[] footprint;       // relative tile offsets, x,y pairs; a one-tile building is [0, 0]
         uint8 hands;             // M8 item 3 (schema.json buildingType.hands, uint8, ONE per kind - not per level): the
@@ -92,9 +98,23 @@ contract RareRules {
     mapping(bytes32 => mapping(uint16 => Kind)) private _kind;
     mapping(bytes32 => bool) public frozen;
 
+    /// @notice THE FIGHT, at an address the game LOOKS UP (M20 item 2; DESIGN *No diamond*: the fight is one of
+    /// the two rules that get "their own deployed address behind a re-pointable registry"). Born here as a fresh
+    /// `RareFight` so the constructor and the deploy order do not change - the shape `RareDuel` gives its dice -
+    /// and never zero, so there is no window in which the game has no fight to look up. `setFight` points it
+    /// elsewhere: root only (`SET_RULES`), refused while a game runs, refused for zero and for an address with no
+    /// code. Every roll a `RareFight` makes is salted with the game's address, not its own, so a re-point at a
+    /// new deployment of the same rules changes no fight. NOT recorded per game: DESIGN's (e) - a game recording
+    /// the fight's address the way it records its rules id - is PROPOSED, not decided. Until it is, the fight a
+    /// game was fought under is the one `FightSet` names at the game's blocks, and the freeze keeps it the one
+    /// for a started game's whole life.
+    IRareFight public fight;
+
     event LadderSet(bytes32 indexed rulesId, uint16 indexed kindId, uint256[] crystal, uint256[] wood, address by);
     event KindSet(bytes32 indexed rulesId, uint16 indexed kindId, bytes32 codeName, uint256 levels, address by);
     event RulesFrozen(bytes32 indexed rulesId, address by);
+    /// @notice the fight every game looks up now points here. Emitted at birth too, so the log starts at deployment
+    event FightSet(address fight, address indexed by);
 
     error RulesAreFrozen(bytes32 rulesId);
     error RulesAlreadyFrozen(bytes32 rulesId);
@@ -111,6 +131,8 @@ contract RareRules {
     /// @notice the ladder and the row under one id disagree on how many levels the kind has
     error LevelsDisagree(uint256 ladderRungs, uint256 rowLevels);
     error NoSuchKind(bytes32 rulesId, uint16 kindId);
+    /// @notice the fight cannot be pointed at an address with no code: a game would look up nothing
+    error NotAContract(address who);
 
     mapping(bytes32 => uint256) public kindsSet;   // how many kinds have a ladder under this id
     mapping(bytes32 => uint256) public rowsSet;    // how many kinds have a registry row under this id
@@ -119,6 +141,23 @@ contract RareRules {
         if (roles_ == address(0)) revert ZeroAddress();
         roles = IRareRoles(roles_);
         if (!roles.rootOnly(SET_RULES)) revert SetRulesNotRootOnly();
+        fight = new RareFight();
+        emit FightSet(address(fight), msg.sender);
+    }
+
+    /// @notice re-point the fight (M20 item 2). ROOT ONLY: `SET_RULES`, which `RareRoles.registerRootPower` made
+    /// root-only before this contract could exist, so no granted role - the gamemaster included - can choose the
+    /// code every fight is settled by. **Refused while a game runs** (ruling 74's rule, from switches to this
+    /// pointer): a re-point under a started game would change the rules its players are fighting under. Asked
+    /// after the power, so a stranger learns nothing about the game - the order every frozen setter here uses.
+    /// Refused for zero and for an address with no code, so the fight can never be pointed at nothing.
+    function setFight(address fight_) external {
+        roles.requirePower(msg.sender, SET_RULES);
+        roles.requireNoGameRunning();
+        if (fight_ == address(0)) revert ZeroAddress();
+        if (fight_.code.length == 0) revert NotAContract(fight_);
+        fight = IRareFight(fight_);
+        emit FightSet(fight_, msg.sender);
     }
 
     /// @notice write one kind's ladder under a rules id. Root only; refused once the id is frozen.
@@ -173,6 +212,8 @@ contract RareRules {
         if (k.release.length != n) revert KindShape("release");
         if (k.leak.length != n) revert KindShape("leak");
         if (k.capacity.length != n) revert KindShape("capacity");
+        // the schema's "only a row whose placement isKeep carries it": a rebuild bill on any other kind is a typo
+        if (k.rebuild.length != 0 && !k.placement.isKeep) revert KindShape("rebuild");
         if (k.reach.length != n) revert KindShape("reach");
         if (k.placement.scienceGen.length != n) revert KindShape("scienceGen");
         if (k.footprint.length == 0 || k.footprint.length % 2 != 0) revert KindShape("footprint");
@@ -189,6 +230,7 @@ contract RareRules {
         s.release = k.release;
         s.leak = k.leak;
         s.capacity = k.capacity;
+        s.rebuild = k.rebuild;
         s.reach = k.reach;
         s.footprint = k.footprint;
         s.hands = k.hands;

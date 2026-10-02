@@ -19,6 +19,7 @@ shape, or a tag is re-cut, several milestones break and **no check would notice*
 | The eighteen props and their footprints | M11, M19 |
 | `isWorldWalkable()`, `createWorldNavigator()`, `createWorldMovement()` | M12's map, M14's hover |
 | `renderProp('tree')` → `estate/sprites/tree.svg` | the map's trees |
+| `GameItem` in `src/items.ts` - item art as `art: { rows: string[] }`, `'#'` ink, drawn 1-bit by `ItemBitmap` (`src/reward-reveal.tsx`, `src/experience-ui.tsx`). **The toolkit has no charm, amulet or badge art** - looked for at v0.1.2, 2026-10-01 | `estate/sprites/charms.js`, whose `item(id)` returns this shape (M14 item 17) |
 | The isometric constants — a `0.8660254038`, b `0.28`, scale 1.5 | every drawn thing |
 | The chance roll, and `ChanceGame.sol` | `chance.js`, `RareChance.sol`, the parity check |
 | **`tokenBoundAccount(tokenId)` — every Friend's own wallet** | **the entire marketplace, M15 and M20** |

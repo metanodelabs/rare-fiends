@@ -16,7 +16,7 @@ async function open(url, port){
     send=(me,pa={})=>new Promise((ok,no)=>{const n=++id;m.set(n,o=>o.error?no(new Error(o.error.message)):ok(o.result));ws.send(JSON.stringify({id:n,method:me,params:pa}));});
     sock=ws;
   }catch(_){send=null;}}
-  await sleep(2000);
+  await sleep(2000); await require('./pagewatch.js').waitForGame(send);
   const ev=async e=>{const r=await send('Runtime.evaluate',{expression:e,returnByValue:true});
     if(r.exceptionDetails) return 'THREW: '+r.exceptionDetails.exception.description.split('\n')[0]; return r.result.value;};
   // The island slides left to clear an open panel, and viewX eases there about 0.12 of the way a
@@ -69,8 +69,14 @@ async function open(url, port){
   ok('fresh: nothing 404d and nothing was logged as an error', p.watch.clean(), p.watch.why());
   await p.close();
   // ---- 2. the cell: science gates, reach claims
-  p=await open((process.env.CELL_ORIGIN||'http://localhost:8765')+'/base.html?seams=1',9422);
+  // ?record=0 (saving off): ruling 76's materials table charges a cell's levels in wood AND crystals, and the purse is
+  // topped up below from the cell's own row - a fixture in the page's purse, which the record would refuse.
+  p=await open((process.env.CELL_ORIGIN||'http://localhost:8765')+'/base.html?seams=1&record=0',9422);
   const C='base.buildings.find(b=>b.type==="cell")';
+  // the bill for raising the cell TO `level`, off values.js's row (cost and wood are per level, index = level - 1)
+  const bill=async(level)=>JSON.parse(await p.ev(`JSON.stringify({crystals:base.ECON.kinds.cell.cost[${level}-1]||0, wood:base.ECON.kinds.cell.wood[${level}-1]||0})`));
+  const fund=async(level)=>{ const b=await bill(level); await p.ev(`(()=>{const P=base.purse(); P.crystals=Math.max(P.crystals||0,${b.crystals}); P.wood=Math.max(P.wood||0,${b.wood});})()`); return b; };
+  const bill2=await fund(2);
   // Tap the cell where a player would, but not on top of a Friend. tap() offers any Friend within
   // 22px of the point BEFORE it offers the cell, and the three RENTED Friends are dropped on
   // random free tiles by freeSpot() - so about one run in four one of them stood on the tile
@@ -88,9 +94,9 @@ async function open(url, port){
   };
   const t0=await p.ev('base.tiles.length');
   await p.ev(`base.openPanel(${C})`); await sleep(200);
-  // The operator gate is struck (DESIGN; CELL_NEEDS is {}): an unstaffed cell levels on crystals alone.
+  // The operator gate is struck (DESIGN; CELL_NEEDS is {}): an unstaffed cell levels on its materials alone.
   const pgo=async()=>p.ev('JSON.stringify([document.getElementById("pgo").textContent,document.getElementById("pgo").disabled])');
-  ok('an unstaffed cell can level up on crystals alone', await pgo()==='["RAISE CELL II",false]', await pgo());
+  ok('an unstaffed cell can level up on its materials alone ('+bill2.wood/100+' wood + '+bill2.crystals/100+' crystals, off the row)', (bill2.wood+bill2.crystals)>0 && await pgo()==='["RAISE CELL II",false]', await pgo());
   // A cell takes no operator (DESIGN: "Post Friends on walls and up towers - a cell no longer takes
   // one"; "Nobody is posted"). Tapping a cell with a Friend selected posts nobody, and the tap falls
   // through to the ground: the selected Friend walks to the quadrant tapped. THAT WALK IS WHAT PROVES
@@ -125,7 +131,7 @@ async function open(url, port){
   const r6=await tapAsOperator(6);
   ok('a real tap on the cell with a Gen 6 selected posts nobody - the Gen 6 walks to the cell instead', refused(r6), JSON.stringify(r6));
   await p.ev(`base.openPanel(${C})`); await sleep(200);
-  ok('the cell still levels on crystals alone after the tap', await pgo()==='["RAISE CELL II",false]', await pgo());
+  ok('the cell still levels on its materials alone after the tap', await pgo()==='["RAISE CELL II",false]', await pgo());
   const r3=await tapAsOperator(3);
   ok('a Gen 3 tapped onto the cell is refused the same way', refused(r3), JSON.stringify(r3));
   await p.ev(`base.openPanel(${C})`); await sleep(200);
@@ -135,13 +141,15 @@ async function open(url, port){
   const t1=await p.ev('base.tiles.length');
   ok('CELL II claims new ground', t1>t0, t0+' -> '+t1);
   ok('it can go past the keep\'s tier', await p.ev(`${C}.tier`)===2, await p.ev(`${C}.tier`));
-  // CELL III needs only crystals: short of them it says so, and topping the purse up to the exact
-  // cost - with nobody posted - is all it takes to raise it.
-  await p.ev(`base.openPanel(${C})`); await sleep(150);
-  const cost3=await p.ev(`+[...document.querySelectorAll('#pbody .kv')].pop().querySelector('.v.sig').textContent.replace(/\\D/g,'')`);
-  const short=await p.ev('base.purse().crystals')<cost3;
-  if(short){ await p.ev(`base.purse().crystals=${cost3}`); await p.ev(`base.openPanel(${C})`); await sleep(150); }
-  ok('CELL III needs only crystals', cost3>0 && await pgo()==='["RAISE CELL III",false]', 'cost '+cost3+', '+await pgo());
+  // CELL III needs only its materials: emptied, it says NOT ENOUGH; filled to EXACTLY the level-3 bill off the row -
+  // with nobody posted - it is all it takes to raise it. (This read the bill off the panel's text as one number, which
+  // concatenated "75.00 wood + 75.00 crystals" into 75007500 once a level cost two materials.)
+  const b3=await bill(3);
+  await p.ev('(()=>{const P=base.purse(); P.crystals=0; P.wood=0;})()'); await p.ev(`base.openPanel(${C})`); await sleep(150);
+  const emptyGo=await pgo();
+  await p.ev(`(()=>{const P=base.purse(); P.crystals=${b3.crystals}; P.wood=${b3.wood};})()`); await p.ev(`base.openPanel(${C})`); await sleep(150);
+  ok('CELL III needs only its materials: refused with an empty purse, raised with exactly '+b3.wood/100+' wood + '+b3.crystals/100+' crystals',
+    (b3.wood+b3.crystals)>0 && JSON.parse(emptyGo)[1]===true && /NOT ENOUGH/.test(JSON.parse(emptyGo)[0]) && await pgo()==='["RAISE CELL III",false]', 'empty '+emptyGo+', filled '+await pgo());
   ok('the wild seam is still outside', await p.ev('base.nodes.filter(n=>n.wild).every(n=>!base.tiles.some(t=>Math.abs(t.x-n.x)<.5&&Math.abs(t.y-n.y)<.5))')===true,'claimed early');
   // and at a higher tier a tap still posts nobody
   await p.ev(`(()=>{ const b=${C}; b.tier=3; })()`);   // skip the crystal grind for the test

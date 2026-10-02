@@ -3,110 +3,151 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rare Fiends — your page</title>
+<title>Rare Fiends — my profile</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Silkscreen:wght@400;700&family=Sometype+Mono:wght@400;500&display=swap" rel="stylesheet">
-<!-- M5 item 3: a page showing everything a player holds. READ ONLY - nothing on this page writes anything.
-       crystals, wood, buildings -> M6's record (record.js): Record.browserStore('rarefriends').load(base), the
-                                    base row (the purse, in hundredths) and the ledger's buildings. The record is
-                                    the BROWSER's store, a stand-in for the server's (record.js says so), and it is
-                                    keyed by BASE, not by address: nothing in it says which wallet a base belongs
-                                    to yet. So these three cards show the base played in this browser, whoever is
-                                    connected, and the card says exactly that rather than pretending otherwise.
-                                    A draft (an open base tab's moves not yet written) is replayed over the record
-                                    with Record.apply - which returns a new record and stores nothing.
+<link rel="stylesheet" href="page.css"><!-- the page template, read off economy.html and mapgen.html -->
+<!-- MY PROFILE. Where a player lands after signing in (the deployer's ruling, 2026-10-01: "when you login, you
+     should go directly to your profile page"). M5 item 3: a page showing everything a player holds.
+     READ ONLY but for the name (below) - nothing on this page writes to any record.
+       Genesis (FIRST)           -> ChainLive.genesisOwned(address): balanceOf on the Genesis collection, the ids off
+                                    the address's own Transfer logs held to that balance and to ownerOf, each one's
+                                    picture its own tokenURI image. Not in M5 item 3's list (crystals, wood,
+                                    buildings, Friends, items) and so never built until the deployer asked,
+                                    2026-10-01: the base's owner is the Genesis token (DESIGN, Selling what you have
+                                    built; decision 2), so it leads. The redeem vault and the fee vault are never a
+                                    person: their Genesis are the vault's, and the card says so instead of a count.
+       crystals, wood, buildings -> M6's record (record.js), the base row (the purse, in hundredths) and the ledger's
+                                    buildings. OFF A DEVELOPER'S MACHINE it is THE SERVER's record: /api/standings
+                                    names every base with its owner (set by serve.py from the signed-in session),
+                                    and /api/record/<base> is the one this address owns. An address that owns none
+                                    says NO BASE YET. ON LOCALHOST (no sign-in, every check) it is still the
+                                    browser's store, base 0, whoever is connected, and the card says so; a draft
+                                    (an open base tab's moves not yet written) is replayed over it with
+                                    Record.apply - which returns a new record and stores nothing.
        Friends                   -> M11's FriendChain.owned(address), sprites/friend-chain.js, at one block.
        items                     -> nothing. The record has no items in it and nothing else holds them. "—".
      The address is ?wallet=0x... when typed (it PINS the page, as on the base - the wallet is not followed),
      else the one wallet.js holds.
-     Deliberately absent: a name (M5 item 2 contradicts schema.json's `player` entity - not built). The crystals
-     ever gathered are the record's own `gathered` (M5 item 4 is not built: record.js already counts it). -->
+     THE NAME (M5 item 2; DESIGN, Who a player is): the signed-in wallet's chosen name, read and set through
+     RFSession.name / setName (GET and POST /api/name, estate/names.py) - the one thing on this page that writes,
+     and it writes only the signed-in wallet's own name. It is shown ABOVE the whole address, never instead of it.
+     A page pinned by ?wallet= shows that address's name and offers no form; a developer's machine has no session,
+     so no name, and the card says so.
+     THE BASE'S NAME (the deployer, 2026-10-01: "they can set their home base name in that profile"): under YOUR BASE,
+     for the base this page reads (the server's record owned by the signed-in wallet), when a Genesis owns it. Set
+     through RFSession.setBaseName (POST /api/name/base, names.py), which our server allows only to the wallet holding
+     that Genesis NOW - so the name follows the base when the Genesis changes hands. Shown in the game's header, on
+     the mini map and in STANDINGS.
+     Deliberately absent: a standing:
+     no era has run, so there is no rank to show, and STANDINGS is one button away. The crystals ever gathered are
+     the record's own `gathered`. -->
 <style>
-:root {
-  --ink: #FFFFFF; --paper: #000000; --signal: #CCFF00;
-  --dim: rgba(255,255,255,.62); --faint: rgba(255,255,255,.28);
-  --display: Silkscreen, monospace; --mono: "Sometype Mono", ui-monospace, monospace;
-}
-* { box-sizing: border-box; }
-[hidden] { display: none !important; }
-html, body { margin: 0; background: #090B09; color: var(--ink); overflow-x: hidden; }
-body { font-family: var(--mono); font-size: 18px; line-height: 1.45; min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column; }
-a { color: var(--signal); }
-header { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid rgba(204,255,0,.4); background: #000; flex-wrap: wrap; }
-.brand { display: flex; align-items: center; gap: 9px; font-family: var(--display); font-size: 19px; letter-spacing: .12em; }
-.brand i { width: 8px; height: 8px; background: var(--signal); border-radius: 50%; }
-.brand span { color: var(--dim); }
-header nav { margin-left: auto; display: flex; gap: 6px; }
-header nav a { font-family: var(--display); font-size: 14px; letter-spacing: .1em; color: #fff; text-decoration: none; border: 1px solid var(--faint); padding: 5px 7px; }
-header nav a:hover { border-color: var(--signal); color: var(--signal); }
-main { width: 100%; max-width: 900px; margin: 0 auto; padding: 16px; display: grid; gap: 14px; }
-
-.who { border: 1px solid var(--faint); background: #000; padding: 12px; display: grid; gap: 8px; }
-.who .k, .card .k { font-family: var(--display); font-size: 13px; letter-spacing: .12em; color: var(--signal); }
-.who .addr { font-family: var(--mono); font-size: 17px; overflow-wrap: anywhere; min-height: 1.45em; }
-.who .addr.none { color: var(--dim); }
-.who .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-.btn { font-family: var(--display); font-size: 15px; letter-spacing: .08em; background: var(--signal); color: #000;
-  border: 0; padding: 9px 12px; cursor: pointer; }
+/* this page's own pieces; everything else is page.css */
+.part .who { display: grid; gap: 8px; }   /* .part: the header's .who (session.js) is not this one */
+.part .who .addr { font-size: 17px; overflow-wrap: anywhere; min-height: 1.45em; }
+.part .who .addr.none { color: var(--dim); }
+.part .who .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .btn[data-wallet="connected"] { background: none; color: var(--signal); border: 1px solid var(--signal); cursor: default; }
-.btn[disabled] { opacity: .6; cursor: default; }
 .why { font-size: 15px; color: var(--dim); }
-.pin { font-family: var(--display); font-size: 12px; letter-spacing: .1em; color: #000; background: var(--signal); padding: 2px 5px; }
-
-.hold { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
-.card { border: 1px solid var(--faint); background: #000; padding: 10px; display: grid; gap: 4px; align-content: start; min-width: 0; }
-.card .v { font-family: var(--display); font-size: 26px; color: var(--dim); overflow-wrap: anywhere; }
-.card .v.read { color: var(--signal); }
-.card .src { font-size: 13px; line-height: 1.35; color: var(--dim); overflow-wrap: anywhere; }
-.card .src b { font-weight: 500; color: var(--ink); }
+/* the chosen name, above the address it never replaces (M5 item 2) */
+.part .who .nm { font-family: var(--display); font-size: 24px; letter-spacing: .06em; overflow-wrap: anywhere; min-height: 1.2em; }
+.part .who .nm.none { color: var(--dim); font-size: 16px; }
+.naming { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.naming input { flex: 1 1 200px; min-width: 0; max-width: 340px; font-family: var(--mono); font-size: 18px; color: var(--ink); background: transparent;
+  border: 1px solid var(--faint); padding: 8px 10px; }
+.naming input:focus { outline: none; border-color: var(--signal); }
+.naming .msg { flex-basis: 100%; font-size: 15px; color: var(--dim); min-height: 1.3em; }
+.naming .msg.bad { color: var(--signal); }
+.pin, .role { font-family: var(--display); font-size: 12px; letter-spacing: .1em; color: var(--paper); background: var(--signal); padding: 2px 5px; }
+.role.player { background: none; color: var(--signal); border: 1px solid var(--signal); }
 /* M11 item 9: each Friend's card picture - one frame of its own frames() art, as the base's tray shows it */
-.card .faces { display: flex; flex-wrap: wrap; gap: 4px; margin: 2px 0 4px; }
-.card .faces img { width: 32px; height: 32px; image-rendering: pixelated; border: 1px solid var(--faint); background: #000; }
-.foot { font-size: 15px; color: var(--dim); margin: 0; }
-.recnote { font-size: 14px; color: var(--dim); margin: 0; overflow-wrap: anywhere; }
+.fact .faces { display: flex; flex-wrap: wrap; gap: 4px; margin: 2px 0 4px; }
+.fact .faces img { width: 32px; height: 32px; image-rendering: pixelated; border: 1px solid var(--faint); background: var(--paper); }
+/* the two kinds of token a wallet holds, Genesis first and wide (the deployer's ranking, 2026-10-01: the base's owner
+   is the Genesis token), then the base's four counts beneath them */
+.hold { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.hold .fact.token { grid-column: span 2; }
+.fact .faces img.gen { width: 40px; height: 40px; }
 .recnote b { font-family: var(--display); font-weight: 400; font-size: 13px; letter-spacing: .1em; color: var(--signal); }
-
+.play { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+@media (max-width: 860px) { .hold { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 720px) {
-  body { font-size: 16px; }
-  header { padding: 8px 12px; flex-wrap: nowrap; }
-  .brand { font-size: 15px; letter-spacing: .08em; gap: 7px; white-space: nowrap; }
-  main { padding: 12px; gap: 10px; }
-  .who { padding: 10px; gap: 6px; }
-  .who .addr { font-size: 14px; }
+  .part .who .addr { font-size: 14px; }
+  .part .who .nm { font-size: 19px; }
+  .naming input { font-size: 16px; }
   .why { display: none; }               /* the sentence; the address and the button are what a phone keeps */
-  .foot { font-size: 13px; }
-  .recnote { font-size: 12px; line-height: 1.35; }
-  .hold { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .hold .card:last-child { grid-column: 1 / -1; }
-  .card { padding: 8px; }
-  .card .v { font-size: 20px; }
-  .card .src { font-size: 12px; }
 }
 </style>
 </head>
 <body>
-<header>
-  <div class="brand"><i></i>RARE FIENDS <span>· YOUR PAGE</span></div>
-  <nav><a href="base.html">BASE</a></nav>
+<header class="top">
+  <div class="brand"><i></i>RARE FIENDS<span>· MY PROFILE</span></div>
+  <button class="pagesbtn" type="button" aria-expanded="false">PAGES</button>
+  <nav aria-label="pages">
+    <a href="player.html">MY PROFILE</a>
+    <a href="base.html">START GAME</a>
+    <a href="base.html?open=market">MARKET</a>
+    <a href="standings.html">STANDINGS</a>
+    <a href="base.html?open=build">BUILD</a>
+  </nav>
 </header>
-<main>
-  <section class="who" aria-label="who you are">
-    <div class="k">ADDRESS</div>
-    <div class="addr none" id="addr">no wallet connected</div>
-    <div class="row">
-      <button class="btn" id="connect" type="button" data-wallet>CONNECT WALLET</button>
-      <span class="pin" id="pinned" hidden>FROM ?wallet=</span>
-      <span class="why" id="why">A player is an address. Nothing else identifies you here.</span>
+<main class="page">
+  <h1>MY PROFILE</h1>
+  <p class="lede">Your wallet, and everything it holds in the game. Each number says where it was read from; a card
+    with nothing to read says so and shows no number.</p>
+
+  <section class="part" aria-labelledby="h-who">
+    <h2 id="h-who"><span class="n">01</span>WHO YOU ARE</h2>
+    <p class="q">A player is an address. The name you choose is shown beside it, always - never instead of it.</p>
+    <div class="who">
+      <div class="nm none" id="nm" aria-live="polite">no name chosen</div>
+      <div class="addr none" id="addr">no wallet connected</div>
+      <form class="naming" id="naming" hidden>
+        <input id="nameIn" type="text" maxlength="20" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="choose a name" aria-label="your name">
+        <button class="btn" id="nameSet" type="submit">SET NAME</button>
+        <span class="msg" id="nameMsg" role="status">3 to 20 letters or digits; spaces, _ - and . between them.</span>
+      </form>
+      <div class="row">
+        <button class="btn" id="connect" type="button" data-wallet>CONNECT WALLET</button>
+        <span class="pin" id="pinned" hidden>FROM ?wallet=</span>
+        <span class="role" id="role" hidden></span>
+        <span class="why" id="why"></span>
+      </div>
     </div>
   </section>
 
-  <p class="recnote" id="recnote">reading the saved record…</p>
-  <section class="hold" id="hold" aria-label="what you hold"></section>
+  <section class="part" aria-labelledby="h-hold">
+    <h2 id="h-hold"><span class="n">02</span>WHAT YOU HOLD</h2>
+    <p class="note recnote" id="recnote">reading the saved record…</p>
+    <div class="facts hold" id="hold" aria-label="what you hold"></div>
+    <p class="q" id="foot">Read only: nothing on this page writes to any record.</p>
+  </section>
 
-  <p class="foot" id="foot">Read only: nothing on this page writes to any record. A card with nothing to read says so
-    and shows no number.</p>
+  <section class="part" aria-labelledby="h-play">
+    <h2 id="h-play"><span class="n">03</span>YOUR BASE</h2>
+    <div class="who" id="baseWho" hidden>
+      <div class="nm none" id="bnm" aria-live="polite">no base name chosen</div>
+      <div class="addr" id="bwhich"></div>
+      <form class="naming" id="baseNaming" hidden>
+        <input id="baseIn" type="text" maxlength="20" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="name your base" aria-label="your base's name">
+        <button class="btn" id="baseSet" type="submit">NAME BASE</button>
+        <span class="msg" id="baseMsg" role="status">The name goes with the base: whoever holds its Genesis may rename it.</span>
+      </form>
+    </div>
+    <div class="play">
+      <a class="btn" id="startGame" href="base.html">START GAME</a>
+      <span class="why">Into your base. BUILD, STANDINGS and MARKET are along its foot.</span>
+    </div>
+  </section>
 </main>
+<footer class="credits">
+  <a class="mark" href="https://x.com/rarefiends" target="_blank" rel="noopener" aria-label="Rare Fiends on X"><img src="icon-192.png" alt="" width="20" height="20"></a>
+  <span class="by">POWERED BY <a href="https://x.com/intelstrata" target="_blank" rel="noopener">@INTELSTRATA</a>
+  AND <a href="https://rarefriends.com" target="_blank" rel="noopener"><img src="token.svg" alt="" width="18" height="18"> RAREFRIENDS</a></span>
+</footer>
+<script src="session.js"></script>
 <script src="chance.js"></script>
 <script src="chainlive.js"></script><!-- the RPC list, and ?rpc=local remembered for the tab -->
 <script src="values.js"></script><!-- the crystal unit and the building names -->
@@ -126,57 +167,95 @@ main { width: 100%; max-width: 900px; margin: 0 auto; padding: 16px; display: gr
   const TYPED = Q.get('wallet');
   const PINNED = TYPED != null ? (RFWallet.isAddr(TYPED) ? TYPED : 'bad') : null;
 
-  // THE BASE'S RECORD. The base the player runs is id 0 on a hand-built base (index.html's HOME = BASES[0]),
-  // and the store's namespace is the base's own ('rarefriends'). Read only: load and loadDraft, never commit.
+  // THE BASE'S RECORD, from one of two places. Read only: load and loadDraft, never commit.
+  //   ON A DEVELOPER'S MACHINE (RFSession.local): the browser's store, base 0 - the base the player runs on a
+  //   hand-built estate (index.html's HOME = BASES[0]), in the base's own namespace ('rarefriends'), whoever is
+  //   connected, with an open tab's unwritten moves replayed over it.
+  //   OFF IT (signed in, as on Server 1): THE SERVER's record. /api/standings lists every base that has an owner -
+  //   the wallet serve.py set from the signed-in session on its first write - and /api/record/<base> is read for
+  //   the one this address owns. Browser storage is not consulted: it is this browser's, not this wallet's.
+  // -> { where, rec, base, pending, refused, others, none, why }; rec is null when there is nothing to show, and
+  //    `none` says why: 'browser' (nothing saved here), 'nobase' (the address owns no base), 'noaddr', 'unread'.
   const BASE_ID = 0;
   const STORE = Record.browserStore('rarefriends');
-  function readRecord() {
+  const LOCAL = RFSession.local;
+  function readBrowser() {
+    const out = { where: 'browser', base: BASE_ID, rec: null, pending: 0, refused: null, others: [], none: 'browser' };
     const rec = STORE.load(BASE_ID);
-    if (!rec) return null;
+    if (!rec) return out;
+    Object.assign(out, { rec, none: null });
     const d = STORE.loadDraft(BASE_ID);
-    let pending = 0;
     if (d && d.moves && d.moves.length) {
       // an open base tab's moves since its last write - replayed the way the base will replay them, on a copy
       const r = Record.apply(rec, { id: Record.hashOf({ parent: d.parent, moves: d.moves, at: d.at, seen: d.seen }), base: BASE_ID,
         parent: d.parent, moves: d.moves, at: d.at, seen: d.seen, after: d.after, scene: rec.scene });
-      if (r.ok) return { rec: r.record, pending: d.moves.length, refused: null };
-      return { rec, pending: 0, refused: r.reason };
+      if (r.ok) Object.assign(out, { rec: r.record, pending: d.moves.length }); else out.refused = r.reason;
     }
-    return { rec, pending, refused: null };
+    return out;
   }
+  async function readServer(addr) {
+    const out = { where: 'server', base: null, rec: null, pending: 0, refused: null, others: [], none: null };
+    if (!addr) return Object.assign(out, { none: 'noaddr' });
+    const ask = async (u) => { const r = await fetch(u, { cache: 'no-store', credentials: 'same-origin' });
+      if (!r.ok) throw new Error(u + ' answered ' + r.status); return r.json(); };
+    try {
+      const st = await ask('/api/standings');
+      const mine = (st.players || []).filter((p) => String(p.address || '').toLowerCase() === addr.toLowerCase()).map((p) => p.base);
+      if (!mine.length) return Object.assign(out, { none: 'nobase' });
+      const got = await ask('/api/record/' + encodeURIComponent(mine[0]));
+      if (!got.ok || !got.record) return Object.assign(out, { none: 'nobase' });
+      return Object.assign(out, { base: mine[0], rec: got.record, others: mine.slice(1) });
+    } catch (e) {
+      return Object.assign(out, { none: 'unread', why: String(e && e.message || e).slice(0, 160) });
+    }
+  }
+  const readRecord = (addr) => (LOCAL ? Promise.resolve(readBrowser()) : readServer(addr));
   // ONE LINE above the cards says where crystals, wood and buildings come from, and whose base it is
   function recordNote(got) {
-    if (!got) return '<b>NO SAVED RECORD</b> in this browser · open the base and play; it is written when you leave it';
-    const r = got.rec;
-    return '<b>SAVED RECORD</b> · base ' + BASE_ID + ', the one this browser plays · write ' + r.writes +
-      (got.pending ? ' + ' + got.pending + ' move' + (got.pending === 1 ? '' : 's') + ' an open base tab has not written yet' : '') +
-      (got.refused ? ' · an open tab\'s unwritten moves are not counted: the record refuses them (' + got.refused + ')' : '') +
-      ' · the record does not yet say which address owns a base, so this is the same whoever is connected';
+    if (got.where === 'browser') {
+      if (!got.rec) return '<b>NO SAVED RECORD</b> in this browser · open the base and play; it is written when you leave it';
+      return '<b>SAVED RECORD</b> · base ' + BASE_ID + ', the one this browser plays · write ' + got.rec.writes +
+        (got.pending ? ' + ' + got.pending + ' move' + (got.pending === 1 ? '' : 's') + ' an open base tab has not written yet' : '') +
+        (got.refused ? ' · an open tab\'s unwritten moves are not counted: the record refuses them (' + got.refused + ')' : '') +
+        ' · on a developer\'s machine this browser\'s store stands in for the server\'s, so it is the same whoever is connected';
+    }
+    if (got.none === 'nobase') return '<b>NO BASE YET</b> · this wallet owns no base on this server';
+    if (got.none === 'noaddr') return '<b>NO WALLET</b> · connect one to read the base it owns';
+    if (got.none === 'unread') return '<b>THE SERVER\'S RECORD COULD NOT BE READ</b> · ' + esc(got.why);
+    return '<b>SERVER RECORD</b> · base ' + esc(got.base) + ', owned by this wallet · write ' + got.rec.writes +
+      (got.others.length ? ' · it owns ' + got.others.length + ' more: base ' + got.others.map(esc).join(', base ') : '');
   }
-  const FROM = 'from the saved record';
   // the record's clock is the game's: a building is standing once its build time has run on THAT clock
   const clockOf = (r) => (r.scene && typeof r.scene.clock === 'number') ? r.scene.clock : r.at;
 
   // WHERE EACH NUMBER COMES FROM. read(addr, got) -> { v, src } or throws; `needsAddr` cards wait for an address.
-  const NO_RECORD = { v: '—', src: 'no saved record in this browser' };
+  const fromOf = (got) => got.where === 'server' ? 'from the server\'s record of base ' + esc(got.base) : 'from the saved record';
+  const noRecord = (got) => ({ v: '—', src: got.none === 'nobase' ? 'no base yet · this wallet owns no base on this server'
+    : got.none === 'noaddr' ? 'connect a wallet to read it' : got.none === 'unread' ? 'the server\'s record could not be read'
+    : 'no saved record in this browser' });
+  // WHICH GENESIS OWNS WHICH BASE. The schema says a base's owner is a Genesis token (base.ownerTokenId); the record
+  // as it stands keeps only the owning wallet (serve.py), so the tie is shown when a record carries it and said to
+  // be missing when it does not - never guessed from "this wallet holds a Genesis and owns a base".
+  function tieOf(got, ids) {
+    const r = got.rec, t = r && (r.ownerTokenId != null ? r.ownerTokenId : r.ledger && r.ledger.base && r.ledger.base.ownerTokenId);
+    if (t != null) return '<b>base ' + esc(got.base) + ' is owned by Genesis #' + esc(t) + '</b>' + (ids.includes(Number(t)) ? '' : ', which this address does not hold');
+    if (r) return 'which Genesis owns base ' + esc(got.base) + ' is not recorded: the base\'s record keeps the wallet, not the token';
+    return '';
+  }
   const SOURCES = [
-    { key: 'crystals', label: 'CRYSTALS', read: (a, got) => !got ? NO_RECORD : { v: fmt(got.rec.ledger.base.crystals),
-      src: '<b>' + fmt(got.rec.ledger.gathered) + ' ever gathered</b> · ' + FROM } },
-    { key: 'wood', label: 'WOOD', read: (a, got) => !got ? NO_RECORD : { v: fmt(got.rec.ledger.base.wood), src: FROM } },
-    { key: 'buildings', label: 'BUILDINGS', read: (a, got) => {
-      if (!got) return NO_RECORD;
-      const L = got.rec.ledger, clock = clockOf(got.rec), names = new Map(); let rising = 0;
-      L.buildings.forEach((b) => {
-        const s = Record.standingLevel(b, clock), row = V.kinds[b.kind];
-        if (!Record.finished(b, clock)) rising += 1;
-        if (s < 1) return;                               // a first level still going up stands at nothing yet
-        const n = (row && row.tiers && row.tiers[s - 1]) || esc(String(b.kind).toUpperCase());
-        names.set(n, (names.get(n) || 0) + 1);
-      });
-      const list = [...names].map(([n, c]) => (c > 1 ? c + ' ' : '') + n).join(' · ');
-      return { v: String(L.buildings.length), src: '<b>' + (list || 'nothing standing') + '</b>' + (rising ? ' · ' + rising + ' going up' : '') + ' · ' + FROM };
+    // FIRST: the base's owner is the Genesis token (decision 2; the deployer, 2026-10-01: as important as the Friends)
+    { key: 'genesis', label: 'GENESIS', needsAddr: true, wide: true, read: async (a, got) => {
+      const r = await ChainLive.genesisOwned(a);
+      if (r.vault) return { v: '—', src: '<b>this is the ' + (r.vault === 'redeem' ? 'redeem' : 'fee') + ' vault</b> · a Genesis it holds is the vault\'s, never a person\'s, so none is counted' };
+      const ids = r.tokens.map((t) => t.id), tie = tieOf(got, ids);
+      const faces = r.tokens.filter((t) => t.image).map((t) => '<img class="gen" alt="Genesis #' + t.id + '" title="' + esc(t.name || 'Genesis #' + t.id) +
+        '" src="' + t.image + '" data-genesis="' + t.id + '">').join('');
+      return { v: String(r.balance), src: (faces ? '<span class="faces">' + faces + '</span>' : '') +
+        (ids.length ? '<b>' + ids.map((i) => '#' + i).join(' ') + '</b> · ' : '') +
+        'Genesis this address holds, read from chain ' + Chance.CHAIN_ID + ' at block ' + r.block + ' · the redeem vault\'s are never counted as anyone\'s' +
+        (tie ? ' · ' + tie : '') };
     } },
-    { key: 'friends', label: 'FRIENDS', needsAddr: true, read: async (a) => {
+    { key: 'friends', label: 'FRIENDS', needsAddr: true, wide: true, read: async (a) => {
       const D = await (await fetch('base-data.json', { cache: 'no-store' })).json();
       const fc = FriendChain.connect(D.toolkit, ChainLive.RPC), r = await fc.owned(a);
       // each Friend's picture: its own frames() art read now (fc.sprites, familyOf / seedOf / frames), and of that
@@ -193,22 +272,40 @@ main { width: 100%; max-width: 900px; margin: 0 auto; padding: 16px; display: gr
         ' (FriendChain.owned)' + (r.hiddenCount ? ' · ' + r.hiddenCount + ' at generation 0 left out' : '') +
         (r.friends.length ? ' · <b>' + r.friends.map((f) => '#' + f.id).join(' ') + '</b>' : '') };
     } },
+    { key: 'crystals', label: 'CRYSTALS', read: (a, got) => !got.rec ? noRecord(got) : { v: fmt(got.rec.ledger.base.crystals),
+      src: '<b>' + fmt(got.rec.ledger.gathered) + ' ever gathered</b> · ' + fromOf(got) } },
+    { key: 'wood', label: 'WOOD', read: (a, got) => !got.rec ? noRecord(got) : { v: fmt(got.rec.ledger.base.wood), src: fromOf(got) } },
+    { key: 'buildings', label: 'BUILDINGS', read: (a, got) => {
+      if (!got.rec) return noRecord(got);
+      const L = got.rec.ledger, clock = clockOf(got.rec), names = new Map(); let rising = 0;
+      L.buildings.forEach((b) => {
+        const s = Record.standingLevel(b, clock), row = V.kinds[b.kind];
+        if (!Record.finished(b, clock)) rising += 1;
+        if (s < 1) return;                               // a first level still going up stands at nothing yet
+        const n = (row && row.tiers && row.tiers[s - 1]) || esc(String(b.kind).toUpperCase());
+        names.set(n, (names.get(n) || 0) + 1);
+      });
+      const list = [...names].map(([n, c]) => (c > 1 ? c + ' ' : '') + n).join(' · ');
+      return { v: String(L.buildings.length), src: '<b>' + (list || 'nothing standing') + '</b>' + (rising ? ' · ' + rising + ' going up' : '') + ' · ' + fromOf(got) };
+    } },
     { key: 'items', label: 'ITEMS', read: () => ({ v: '—', src: 'nothing holds items yet · the base\'s record has no items in it, and no other record does' }) },
   ];
   const hold = $('hold');
   hold.innerHTML = SOURCES.map((s) =>
-    '<div class="card" data-hold="' + s.key + '"><div class="k">' + s.label + '</div>' +
-    '<div class="v">—</div><div class="src">reading…</div></div>').join('');
+    '<div class="fact' + (s.wide ? ' token' : '') + '" data-hold="' + s.key + '"><div class="k">' + s.label + '</div>' +
+    '<div class="v">—</div><div class="s">reading…</div></div>').join('');
 
   let seq = 0;
   const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
   // recordOnly: a write from an open base tab re-reads the record's cards, never the chain
   async function fill(addr, recordOnly) {
-    const mine = recordOnly ? seq : ++seq, got = readRecord();
+    const mine = recordOnly ? seq : ++seq, got = await readRecord(addr);
+    if (mine !== seq) return;
     window.playerPage.record = got;
+    showBase(addr, got);
     $('recnote').innerHTML = recordNote(got);
     await Promise.all(SOURCES.filter((s) => !(recordOnly && s.needsAddr)).map(async (s) => {
-      const card = hold.querySelector('[data-hold="' + s.key + '"]'), v = card.querySelector('.v'), src = card.querySelector('.src');
+      const card = hold.querySelector('[data-hold="' + s.key + '"]'), v = card.querySelector('.v'), src = card.querySelector('.s');
       const paint = (val, html, read) => { if (mine !== seq) return; v.textContent = val; v.classList.toggle('read', !!read); src.innerHTML = html; card.dataset.state = read ? 'read' : 'none'; };
       if (s.needsAddr && !addr) { paint('—', PINNED === 'bad' ? '?wallet= is not an address, so nothing is read' : 'connect a wallet to read it', false); return; }
       if (s.needsAddr) paint('—', 'reading the chain…', false);
@@ -217,23 +314,102 @@ main { width: 100%; max-width: 900px; margin: 0 auto; padding: 16px; display: gr
     }));
   }
 
+  // THE NAME: whose name is shown is whose address is shown. The form is the signed-in wallet's alone.
+  let SIGNED = null;                                     // the session's address, when the server says one is signed in
+  async function showName(addr) {
+    const nm = $('nm'), f = $('naming');
+    f.hidden = !(SIGNED && addr && SIGNED.toLowerCase() === addr.toLowerCase());
+    let n = null, why = '';
+    if (!addr) why = 'no name: no address';
+    else if (LOCAL) why = 'no name: a name is kept on our server, for a wallet signed in there';
+    else {
+      try {
+        const own = SIGNED && SIGNED.toLowerCase() === addr.toLowerCase();
+        if (own) n = await RFSession.name(true);
+        else { const r = await fetch('/api/name?address=' + encodeURIComponent(addr), { cache: 'no-store', credentials: 'same-origin' });
+          const j = r.ok ? await r.json() : null; n = j && j.ok ? j.name : null; if (!r.ok) why = 'the name could not be read (' + r.status + ')'; }
+      } catch (e) { why = 'the name could not be read'; }
+    }
+    nm.textContent = n || why || 'no name chosen';
+    nm.classList.toggle('none', !n);
+    nm.dataset.name = n || '';
+    if (n && !f.hidden && document.activeElement !== $('nameIn')) $('nameIn').value = n;
+    $('nameSet').textContent = n ? 'CHANGE NAME' : 'SET NAME';
+  }
+  $('naming').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const b = $('nameSet'), msg = $('nameMsg'), want = $('nameIn').value.trim();
+    b.disabled = true; msg.classList.remove('bad'); msg.textContent = 'saving…';
+    try {
+      const got = await RFSession.setName(want);
+      msg.textContent = 'Saved. Everyone sees "' + got + '" with your address beside it.';
+      await showName(SIGNED);
+    } catch (err) {
+      msg.classList.add('bad'); msg.textContent = 'Not saved: ' + (err && err.message || err);
+    } finally { b.disabled = false; }
+  });
+
+  // THE BASE'S NAME: the base this page read off our server, named by whoever holds the Genesis that owns it. The form
+  // is offered to the signed-in wallet for the base the server says is its own; the server checks the Genesis again.
+  let BASE_OF = null;                                    // { base, genesis } the form names
+  async function showBase(addr, got) {
+    const box = $('baseWho'), f = $('baseNaming'), nm = $('bnm');
+    const rec = got && got.where === 'server' ? got.rec : null, tok = rec ? rec.ownerTokenId : null;
+    box.hidden = !rec;
+    if (!rec) { BASE_OF = null; return; }
+    BASE_OF = { base: got.base, genesis: tok };
+    $('bwhich').textContent = 'base ' + got.base + (tok != null ? ' · owned by Genesis #' + tok : ' · no Genesis on it, so it has no name to set');
+    f.hidden = !(tok != null && SIGNED && addr && SIGNED.toLowerCase() === addr.toLowerCase());
+    const n = (await RFSession.baseNames())[String(got.base)] || null;
+    if (!BASE_OF || BASE_OF.base !== got.base) return;
+    nm.textContent = n || 'no base name chosen'; nm.classList.toggle('none', !n); nm.dataset.name = n || '';
+    if (n && !f.hidden && document.activeElement !== $('baseIn')) $('baseIn').value = n;
+    $('baseSet').textContent = n ? 'RENAME BASE' : 'NAME BASE';
+  }
+  $('baseNaming').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const b = $('baseSet'), msg = $('baseMsg'), want = $('baseIn').value.trim();
+    if (!BASE_OF) return;
+    b.disabled = true; msg.classList.remove('bad'); msg.textContent = 'saving…';
+    try {
+      const got = await RFSession.setBaseName(BASE_OF.base, want);
+      msg.textContent = 'Saved. Base ' + BASE_OF.base + ' is "' + got + '" in the game\'s header, on the map and in STANDINGS.';
+      await showBase(SIGNED, window.playerPage.record);
+    } catch (err) {
+      msg.classList.add('bad'); msg.textContent = 'Not saved: ' + (err && err.message || err);
+    } finally { b.disabled = false; }
+  });
+
   function show(addr) {
+    showName(addr);
     const a = $('addr');
     a.textContent = addr || (PINNED === 'bad' ? '?wallet= is not an address: ' + TYPED : RFWallet.available() ? 'no wallet connected' : 'there is no wallet in this browser');
     a.classList.toggle('none', !addr);
     fill(addr);
   }
-  window.playerPage = { SOURCES, show, readRecord, pinned: PINNED, record: null };   // for the checks
+  window.playerPage = { SOURCES, show, showName, readRecord, pinned: PINNED, record: null };   // for the checks
+  // THE HEADER, and START GAME below carrying the same demo pace the header's does (session.js)
+  RFSession.nav();
+  $('startGame').setAttribute('href', document.querySelector('header.top nav a[href^="base.html"]').getAttribute('href'));
   if (PINNED) {
     $('pinned').hidden = false; $('connect').hidden = true;
     $('why').textContent = 'Pinned by the address bar. Take ?wallet= off to use your own wallet.';
     show(PINNED === 'bad' ? '' : PINNED);
   } else {
-    RFWallet.onChange(show);
-    show(RFWallet.address);
+    // WHO THE SERVER SAYS THIS IS. Signed in, the page is the signed-in address's and does not follow the wallet
+    // to another account. Not signed in (the server would not normally serve this page then), back to the
+    // landing page, where DEMO signs in. On a developer's own machine nothing is asked and the wallet is followed.
+    RFSession.me().then((m) => {
+      if (!m.local) { const r = $('role'); r.hidden = false; r.className = 'role ' + m.role;
+        r.textContent = m.role === 'deployer' ? 'SIGNED IN · DEPLOYER' : m.role === 'player' ? 'SIGNED IN · PLAYER' : 'NOT SIGNED IN'; }
+      if (!m.local && m.role === 'none' && !m.unread) { location.replace('/'); return; }
+      if (m.address) { SIGNED = m.address; $('connect').hidden = true; show(m.address); return; }
+      RFWallet.onChange(show);
+      show(RFWallet.address);
+    });
   }
   // the base, open in another tab, writes its record when it is hidden or closed: read it again when it does
-  addEventListener('storage', (e) => { if (e.key && e.key.indexOf('rarefriends.') === 0) fill(PINNED ? (PINNED === 'bad' ? '' : PINNED) : RFWallet.address, true); });
+  addEventListener('storage', (e) => { if (LOCAL && e.key && e.key.indexOf('rarefriends.') === 0) fill(PINNED ? (PINNED === 'bad' ? '' : PINNED) : RFWallet.address, true); });
 })();
 </script>
 </body>

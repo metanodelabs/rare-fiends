@@ -46,7 +46,9 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
   // 635, not 335: the capacitor is the ninth row of the registry since M8 item 11 and its level 1 is the
   // economist's PROPOSED 300 (values.js marks it so). The literal stays a literal on purpose - a page and a
   // game that agree on a wrong total would pass a computed one.
-  ok('level-1 totals match the code (' + l1Wood + ' wood, ' + l1Crys + ' crystals)', /One of each\s+150\s+635/.test(text) && l1Wood === 150 && l1Crys === 635, l1Wood + ' / ' + l1Crys);
+  // 485 wood and 300.00 crystals since ruling 76's materials table (277376e): level 1 is paid in wood alone, except the
+  // capacitor's 300 crystals. Still a literal on purpose (see above), and the page's row must show the same pair.
+  ok('level-1 totals match the code and the decided table (' + l1Wood + ' wood, ' + l1Crys + ' crystals)', /One of each\s+485\s+300(\.00)?\s/.test(text) && l1Wood === 485 && l1Crys === 300, l1Wood + ' / ' + l1Crys + ' · page: ' + ((text.match(/One of each[^\n]*/) || [''])[0]).slice(0, 60));
   const all = Object.values(E.kinds).reduce((a, k) => a + k.cost.reduce((x, y) => x + y, 0), 0);
   ok('every level of everything = ' + all.toLocaleString('en-US'), has(all.toLocaleString('en-US')), 'missing');
   ok('each generation\'s hit points are listed', [1,2,3,4,5,6].every(g => has(String(E.hp[g]))), JSON.stringify(E.hp));
@@ -173,8 +175,12 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
   ok('the strength table is values.js\'s strength column, row by row, plus the harvester (' + strRows + ' rows)', strOff.length === 0 && Number(strRows) === Object.keys(E.kinds).length + 1, JSON.stringify(strOff));
   const store = await ev("document.getElementById('store').textContent.replace(/\\s+/g,' ')");
   const kw = E.kinds.keep && E.kinds.keep.capacity;
-  ok('the storage note runs ruling 62: ' + (kw ? 'a keep alone holds values.js keep.capacity, a keep beside depot I holds the depot\'s, nothing holds 0 - no DISAGREES' : 'this game has no keep.capacity, and the note says DISAGREES rather than "neither standing"'),
-    !/a base with neither standing:/.test(store) && (kw ? /a keep alone, with no depot and no silo, holds 240\.00 \/ 240\.00 \/ 240\.00/.test(store) && /nothing standing at all .*: 0\.00/.test(store) && !/DISAGREES/.test(store)
+  // RULING 78: with nothing standing at all the store is the keep's REBUILD crystals (values.js keep.rebuild), not 0 -
+  // so a base that lost everything can gather its way back to a keep. Read off the row, never typed.
+  const rebuildC = E.kinds.keep && E.kinds.keep.rebuild ? E.kinds.keep.rebuild.crystals : null;
+  const nothingHolds = (st) => rebuildC != null && new RegExp('nothing standing at all[^:]*: ' + (rebuildC / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).replace(/[.,]/g, '\\$&')).test(st);
+  ok('the storage note runs ruling 62: ' + (kw ? 'a keep alone holds values.js keep.capacity, a keep beside depot I holds the depot\'s, nothing standing holds keep.rebuild\'s crystals (ruling 78, ' + (rebuildC / 100).toFixed(2) + ') - no DISAGREES' : 'this game has no keep.capacity, and the note says DISAGREES rather than "neither standing"'),
+    !/a base with neither standing:/.test(store) && (kw ? /a keep alone, with no depot and no silo, holds 240\.00 \/ 240\.00 \/ 240\.00/.test(store) && nothingHolds(store) && !/DISAGREES/.test(store)
       : /DISAGREES - values\.js carries no keep\.capacity/.test(store)), store.slice(0, 700));
   const pace = await ev("document.getElementById('pace').textContent");
   ok('the pace banner reads the pace the game reports (' + (E.demoPace ? (E.demoPace.on ? 'demo' : 'decided') : 'none') + ')',

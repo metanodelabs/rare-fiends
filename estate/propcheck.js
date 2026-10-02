@@ -176,7 +176,10 @@ const drifted = Object.keys(TOOLKIT_FILES).filter((f) => fs.existsSync(path.join
 ok('and every one of them is still the toolkit\'s bytes, the bundle included (' + Object.keys(TOOLKIT_FILES).length + ' files)', drifted.length === 0, drifted.join(', ') + ' changed - rebuild with sprites/friendsdk-vendor.mjs --write --props, never by hand');
 
 // ---------- and each one is still used, so it is not a copy nobody draws ----------
-const ourFiles = fs.readdirSync(HERE).filter((f) => /\.(html|js)$/.test(f) && !/check\.js$/.test(f) && f !== 'checkall.js' && f !== 'pagewatch.js');
+// Our source is what the game and its pages run. The checks are not, and nor are the *.test.js proofs (auth-proof,
+// duelproof, whitelist-proof, whitelist-recheck): they spawn servers with Node's `stdio: [..., 'pipe']`, which is the
+// bare word `pipe` and no drawing - counting them made the toolkit's pipe look like one of ours.
+const ourFiles = fs.readdirSync(HERE).filter((f) => /\.(html|js)$/.test(f) && !/check\.js$/.test(f) && !/\.test\.js$/.test(f) && f !== 'checkall.js' && f !== 'pagewatch.js');
 const src = Object.fromEntries(ourFiles.map((f) => [f, fs.readFileSync(path.join(HERE, f), 'utf8')]));
 const usedBy = (asset) => ourFiles.filter((f) => src[f].includes(asset));
 const unused = Object.keys(TOOLKIT_FILES).filter((a) => usedBy(a).length === 0);
@@ -205,7 +208,7 @@ for (const p of names) {
 const ownFile = (p) => TOOLKIT_FILES['sprites/' + p + '.svg'] && TOOLKIT_FILES['sprites/' + p + '.svg'] === sha(path.join(HERE, 'sprites', p + '.svg'));
 const onlyTheToolkits = (p) => ownFile(p) && found[p].every((e) => /loads the toolkit's sprites\//.test(e) || e === 'an asset file');
 const unaccounted = Object.keys(found).filter((p) => !ACCOUNTED[p] && !onlyTheToolkits(p));
-for (const p of Object.keys(found)) console.log('        ' + p.padEnd(9) + (ACCOUNTED[p] ? 'accounted: ' : 'UNACCOUNTED: ') + found[p].join(' | '));
+for (const p of Object.keys(found)) console.log('        ' + p.padEnd(9) + (ACCOUNTED[p] ? 'accounted: ' : onlyTheToolkits(p) ? 'the toolkit\'s own file, and only loaded: ' : 'UNACCOUNTED: ') + found[p].join(' | '));
 ok('no drawing of ours duplicates a prop the toolkit ships: of the eighteen, ' + Object.keys(found).length
   + ' turn up in our source (' + Object.keys(found).join(', ') + ') and every one is accounted for',
   unaccounted.length === 0,

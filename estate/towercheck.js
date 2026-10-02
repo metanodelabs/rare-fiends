@@ -88,7 +88,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   let bad = 0; const ok = (n, c, v) => { console.log((c ? '  ok  ' : 'FAIL  ') + n + (c ? '' : '   -> ' + v)); if (!c) bad++; };
 
   try {
-    await sleep(2000);
+    await sleep(2000); await require('./pagewatch.js').waitForGame(send);
     const T = (i) => `base.buildings.filter(b=>b.type==="tower")[${i}]`;
     const nTowers = () => ev('base.buildings.filter(b=>b.type==="tower").length');
     const note = () => ev('document.getElementById("note").innerText');

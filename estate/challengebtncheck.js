@@ -27,7 +27,7 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
   const shot = async (f) => { const s = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(process.env.SHOTS || os.tmpdir(), f), Buffer.from(s.data, 'base64')); };
   const watch = await require('./pagewatch.js').attach(sock, send);
   let bad=0; const ok=(n,c,v)=>{console.log((c?'  ok  ':'FAIL  ')+n+(c?'':'   -> '+v)); if(!c) bad++;};
-  await sleep(2000);
+  await sleep(2000); await require('./pagewatch.js').waitForGame(send);
   const inner = (js) => ev(`(()=>{const w=document.querySelector('#challenge iframe'); return w && w.contentWindow ? (function(){ return eval(${JSON.stringify(js)}); }).call(w.contentWindow) : 'no frame';})()`);
   const fr = (js) => ev(`(()=>{const w=document.querySelector('#challenge iframe'); if(!w||!w.contentWindow) return 'no frame'; return w.contentWindow.eval(${JSON.stringify(js)});})()`);
   ok('a CHALLENGE button is on the estate', await ev('!!document.getElementById("challengeBtn") && getComputedStyle(document.getElementById("challengeBtn")).display !== "none"'), 'missing');

@@ -39,7 +39,11 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
   for (let i = 0; i < 120 && (await hero('!!(window.base && base.simT > 0)')) !== true; i++) await sleep(250);
   ok('the header says CONNECT', /^CONNECT$/.test(await label('wallet')), await txt('wallet'));
   ok('the hero is the estate, starting from bare land', await hero('base.buildings.length') <= 1, await hero('base.buildings.length'));
-  ok('the estate\'s own buttons and HUD are hidden behind the overlay', await hero('getComputedStyle(document.querySelector(".hud")).display') === 'none' && await hero('getComputedStyle(document.getElementById("challengeBtn")).display') === 'none', 'visible');
+  // Since the page template the base's buttons live in its header, and the reel hides the header, the HUD and the foot
+  // (index.html body.hero). A button inside a hidden header keeps its own computed display, so what is asked is whether
+  // anything is RENDERED: no client rects at all.
+  const heroHidden = await hero('JSON.stringify(["header.top", ".hud", "#challengeBtn", "#startBtn", "footer.credits"].map((q) => { const e = document.querySelector(q); return [q, !!e && e.getClientRects().length === 0]; }))');
+  ok('the estate\'s own header, buttons and HUD are hidden behind the overlay', /^\[/.test(heroHidden) && JSON.parse(heroHidden).every(([, h]) => h), heroHidden);
   // The reel runs on the HERO's game clock (index.html heroTick: a building every HERO_GAP = 3600 ms of simT, each
   // raised over V.buildMs x 2.5), so every wait below is on that clock, not the wall's (woodcheck's lesson). Under
   // -j 4 the game clock runs slower than the wall, and 4 s of wall was "only the keep": [["keep",true]].
@@ -111,7 +115,12 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
   // ---------- the way in from the estate ----------
   await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 720, deviceScaleFactor: 1, mobile: false });
   await send('Page.navigate', { url: 'http://localhost:8765/base.html' }); await sleep(2200);
-  ok('the estate has START GAME under CHALLENGE', await ev('(()=>{const s=document.getElementById("startBtn"), c=document.getElementById("challengeBtn"); return !!s && s.getBoundingClientRect().top > c.getBoundingClientRect().bottom - 1 && /START GAME/.test(s.textContent);})()'), 'missing or misplaced');
+  // the template header (6b67ed4): START GAME is the second entry of the header's nav, after MY PROFILE - not a button
+  // stacked under CHALLENGE in the frame - and it must be what is drawn at its own centre
+  const sg = await ev('JSON.stringify((()=>{const s=document.getElementById("startBtn"); if(!s) return null; const nav=[...document.querySelectorAll("header.top nav :is(a,button)")], r=s.getBoundingClientRect(), h=document.elementFromPoint(r.left+r.width/2, r.top+r.height/2);'
+    + ' return {inNav: nav.includes(s), i: nav.indexOf(s), first: nav[0] && nav[0].id, text: s.textContent.trim(), onTop: !!h && (h===s || s.contains(h))};})())');
+  const SG = JSON.parse(sg || 'null');
+  ok('the estate has START GAME in its header, after MY PROFILE, and it is on top where it is drawn', !!SG && SG.inNav && SG.i === 1 && SG.first === 'playerBtn' && /^START GAME$/.test(SG.text) && SG.onTop, sg);
   await ev('document.getElementById("startBtn").click()'); await sleep(1500);
   ok('and it opens the start screen', /start\.html/.test(await ev('location.href')), await ev('location.href'));
   ok('nothing 404d and nothing was logged as an error, over the start screen and the estate', watch.clean(), watch.why());

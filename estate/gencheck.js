@@ -290,14 +290,20 @@ note('if either of those two lines ever goes red it is a DESIGN CHANGE, not a de
 note('would have become a thing that reads the chain, and parts 2 and 3 below are written for a');
 note('library that does not. Re-read this file before you make it green again.');
 
-// the guard that keeps a generation inside 1..6, and the array that has to be big enough for it
+// the guard that keeps a fight slot inside 0..10, and the array that has to be big enough for it. Since M17 items 14
+// and 15 (rulings 81 and 85) a slot is 1 to 6 a Friend's generation, 0 a 1/1 Doopie and 7 to 10 an ordinary Doopie's
+// Evolution 1 to 4 - it was 1..6 while a Doopie had no weapon. A trap's victim keeps its own 1..6 check (ruling 87).
 const gen = combat && combat.body.match(/function\s+_gen\s*\([^)]*\)[^{]*\{([^}]*)\}/);
-ok('the library still refuses a generation outside 1..6 (`_gen` reverts on 0 and on > 6)',
-  !!gen && /g\s*==\s*0/.test(gen[1]) && /g\s*>\s*6/.test(gen[1]) && /revert\s+InvalidGeneration/.test(gen[1]),
+ok('the library still refuses a fight slot outside 0..10 (`_gen` reverts on > 10)',
+  !!gen && /g\s*>\s*10/.test(gen[1]) && /revert\s+InvalidGeneration/.test(gen[1]),
   gen ? gen[1].replace(/\s+/g, ' ').trim() : 'no _gen function found');
 const hpArr = combat && combat.body.match(/struct\s+Rules\s*\{[\s\S]*?\buint32\[(\d+)\]\s+hp\s*;/);
-ok('and `Rules.hp` has a slot for every one of them plus the unused 0 - `uint32[7] hp`',
-  !!hpArr && +hpArr[1] === 7, hpArr ? 'uint32[' + hpArr[1] + '] hp' : 'Rules has no uint32[N] hp field');
+ok('and `Rules.hp` has an entry for every one of those eleven slots - `uint32[11] hp`',
+  !!hpArr && +hpArr[1] === 11, hpArr ? 'uint32[' + hpArr[1] + '] hp' : 'Rules has no uint32[N] hp field');
+const victim = combat && combat.body.match(/function\s+trapBps\s*\([^)]*\)[^{]*\{([\s\S]*?)\n    \}/);
+ok('and a trap\'s victim is held to a Friend, 1..6, by its own check (`trapBps` reverts InvalidVictim on 0 and on > 6)',
+  !!victim && /victimGen\s*==\s*0/.test(victim[1]) && /victimGen\s*>\s*6/.test(victim[1]) && /revert\s+InvalidVictim/.test(victim[1]),
+  victim ? victim[1].replace(/\s+/g, ' ').trim().slice(0, 200) : 'no trapBps function found');
 
 // =================================================================================================
 // PART 2 - no deployable contract COMMITS on a generation it was handed
@@ -426,9 +432,9 @@ if (lifted) {
     ok('the page and the parity check agree on every generation\'s HP: '
       + gens.map((g) => g + '=' + pageHp[g]).join(' '),
       norm(pageHp) === norm(parityHp), 'page ' + norm(pageHp) + ' vs paritycheck ' + norm(parityHp));
-    // ruling 55 filled slot 0 with a 1/1 Doopie at 1140 (trap only - no weapon, never a full fight), so the table is
-    // slots 0 to 6: slot 0 plus the 1..6 the library's `_gen` guard allows, exactly the seven of `uint32[7]`
-    ok('the table is exactly slots 0 to 6 - slot 0 the 1/1 Doopie at 1140 (ruling 55), then the 1..6 the library\'s `_gen` guard allows, filling `uint32[7]`',
+    // ruling 55 filled slot 0 with a 1/1 Doopie at 1140, so HP_OF is slots 0 to 6: slot 0 plus the six generations. The
+    // ordinary Doopies' slots 7 to 10 of `uint32[11]` come from their own table, DOOPIE_HP (rulings 81 and 86), not this one
+    ok('HP_OF is exactly slots 0 to 6 - slot 0 the 1/1 Doopie at 1140 (ruling 55), then generations 1 to 6; slots 7 to 10 of `uint32[11]` are DOOPIE_HP\'s, not this table\'s',
       norm(Object.fromEntries(gens.map((g) => [g, 0]))) === norm({ 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 }) && pageHp[0] === 1140,
       'slots on the page: ' + gens.map((g) => g + '=' + pageHp[g]).join(', '));
     ok('and it falls the whole way, so the 1/1 is the strongest and, of the generations, generation 1 the dearest AND the strongest ('

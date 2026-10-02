@@ -360,4 +360,41 @@ function claimPort(port) {
     + 'Kill it, or run `node estate/checkall.js` which clears its own ports first.');
 }
 
-module.exports = { attach, IGNORE, shutdown, stillUp, guard, shutdownSync, claimPort, portHolders };
+// WAIT FOR THE GAME, NOT FOR A STOPWATCH. Checks used to sleep 1.5-2.5 s after opening the base and then read
+// `window.base`. Since merge round 3 the page loads more (the template header, session.js, the mini map, names) and
+// it parses only after its stylesheets: under -j 4, or with the font CDN slow, 2 s was not enough and a whole check
+// went red on "base is not defined". This waits until the game is UP - window.base exists and its clock has moved -
+// with a wall cap that only says the page never came up. `send` is the check's own CDP send(method, params).
+async function waitForGame(send, capMs = 45000) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < capMs) {
+    try { const r = await send('Runtime.evaluate', { expression: '!!(window.base && base.simT > 0)', returnByValue: true });
+      if (r && r.result && r.result.value === true) return { ok: true, ms: Date.now() - t0 }; } catch (_) { /* navigating */ }
+    await new Promise((ok) => setTimeout(ok, 150));
+  }
+  console.log('      the base page never came up: window.base after ' + capMs + ' ms of wall clock is still missing');
+  return { ok: false, ms: Date.now() - t0 };
+}
+
+// A FREE PORT, ASKED FOR AND NOT GUESSED. The proofs used to take `base + random` and start serve.py or Chrome on it
+// without looking: duelproof (8920-9320), nameproof (8930-9330), attacknameproof (8940-9340) and playcheck (8931-8990)
+// overlap, and under checkall -j 4 two of them run at once. A serve.py that cannot bind exits, the readiness poll is
+// answered by the OTHER proof's server on that port, and a mutant "stays green" against code it never ran - a check
+// passing or failing for a reason that is not its own. This picks a port nothing answers on and that binds, and never
+// hands the same one out twice in one process.
+const _handed = new Set();
+function _answers(port) { return new Promise((res) => { const sk = require('net').connect({ port, host: '127.0.0.1' });
+  sk.once('connect', () => { sk.destroy(); res(true); }); sk.once('error', () => res(false)); sk.setTimeout(400, () => { sk.destroy(); res(false); }); }); }
+function _binds(port) { return new Promise((res) => { const sv = require('net').createServer(); sv.once('error', () => res(false));
+  sv.listen(port, () => sv.close(() => res(true))); }); }
+async function freePort(lo, span) {
+  const start = Math.floor(Math.random() * span);
+  for (let i = 0; i < span; i++) {
+    const port = lo + ((start + i) % span);
+    if (_handed.has(port)) continue;
+    if (!(await _answers(port)) && (await _binds(port))) { _handed.add(port); return port; }
+  }
+  throw new Error('no free port in ' + lo + '..' + (lo + span - 1));
+}
+
+module.exports = { attach, IGNORE, shutdown, stillUp, guard, shutdownSync, claimPort, portHolders, waitForGame, freePort };

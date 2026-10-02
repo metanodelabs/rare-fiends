@@ -46,8 +46,12 @@ const HERE = __dirname, ROOT = path.resolve(HERE, '..');
 const CHECKS = [
   ['check',             'the estate renders at six rotations without a JS error or a blank canvas',
                         'anything interactive: nothing is clicked, no state changes'],
-  ['panelcheck',        'the build menu opens, upgrades and closes under real taps',
-                        'whether what it builds is correct, or costs anything'],
+  ['panelcheck',        'the build menu opens, upgrades and closes; the keep\'s raise is refused for want of wood; the keep\'s '
+                        + 'lock holds the tower while HALL is still going up and frees it once it stands (on the game\'s '
+                        + 'clock); the tower\'s raise charges exactly its level-2 rung in crystals and wood, read off the row',
+                        'it runs with saving off (?record=0) and the demo pace, so the record\'s own refusal and the decided '
+                        + 'build times are not exercised; the panel is driven by .click() and base.openPanel, not by taps '
+                        + 'on the map; whether the rows themselves are the right numbers'],
   ['cellcheck',         'keep-first; the cell REFUSES an operator - a real tap with a Gen 6, a Gen 3 and (at CELL III) '
                         + 'a Gen 1 selected posts nobody anywhere and walks exactly that Friend to the cell (the walk '
                         + 'proves the tap landed); no Operator row on the panel; land claims',
@@ -208,8 +212,13 @@ const CHECKS = [
                         + 'fails to load is exactly the failure it would otherwise report as a pass',
                         'numbers that do not exist yet: build times, strengths, energy; and, of what it now '
                         + 'watches, a warning rather than an error, and a 200 carrying the wrong thing'],
-  ['navcheck',          'every page has its button on the base, stacked and not overlapping',
-                        'pages the plan adds later, which must each add their own'],
+  ['navcheck',          'every page has its entry in the base\'s template header (data-page), shown, not overlapping, on top '
+                        + 'at its centre (elementFromPoint); the frame starts below the header; on a 375x667 phone the nav '
+                        + 'folds behind PAGES, a real tap opens every entry, each on top inside the window, and a tap '
+                        + 'elsewhere folds it; a real click on ECONOMY opens it',
+                        'a PLAYER\'s header (signed in, not on localhost: no data-dev entries, SIGN OUT, the short address) - '
+                        + 'it runs in dev mode on localhost only; the header on any page but the base; every entry\'s '
+                        + 'destination but ECONOMY; and pages the plan adds later, which must each add their own'],
   ['deployercheck',     'the deployer page, gate first: it shows a stranger nothing - no field, no value, no '
                         + 'record, and the game is not even being read - and the only thing that opens it is a '
                         + 'wallet SIGNATURE whose signer the page RECOVERS (secp256k1 over chance.js\'s '
@@ -264,6 +273,28 @@ const CHECKS = [
                         + '(?length=0.01), not the stock length'],
   ['mapcheck',          '100 bases, seed reproducibility, the mini map, turning under 60ms',
                         'a map that starts EMPTY, which is what the design decided'],
+  ['mapsizecheck',      'M12 item 2, the map ABOVE a hundred players, no browser: mapgen.js\'s size rule at 8 counts x 3 seeds - '
+                        + '100 -> 181, 120 -> 199, 150 -> 222 held as DESIGN.md\'s literals, plus 101, 200, the clamp at 250 '
+                        + 'and the 48 floor - every base a plot (N plots, ids 1..N, each 36-tile footprint on the map under '
+                        + 'its own id, clear of the core) and about 170 land tiles a player; and it breaks the rule four ways '
+                        + 'in memory on every run (growth stopped at 100, floor for ceil, no land share, placement stopped '
+                        + 'at 100) and fails unless each is caught',
+                        'THE GAME PLAYING on a map above 100 - only the generator is run, no page loads one; that a plot '
+                        + 'is BUILDABLE once creeks and steps have run (plotOk is judged before them, and creeks run '
+                        + 'through plots on purpose); the spacing between plots; time to generate; any seed outside 1, 7 '
+                        + 'and 31; and the 150..190 land-per-player band is judgement, not a decided figure'],
+  ['holdasbuiltcheck',  'RECORDS TODAY\'S BEHAVIOUR, NOT A RULE - the HOLD finding: a defender on HOLD never beats an '
+                        + 'attacker with a longer reach. combat.js on values.js\'s tables, no browser: all 28 out-reached '
+                        + 'pairings, open ground and up a tower, 24 fixed words each - the attack wins every fight, the '
+                        + 'defender never fires, the attacker is never hurt; a walled line-up of four; a Gen 4 (225) on HOLD '
+                        + 'losing to a Gen 5 sling (150) every time. Controls that must come out the other way (ENGAGE wins; '
+                        + 'a shorter reach is fired at; a start inside reach is fired at), and two mutants built in memory '
+                        + 'that must be caught',
+                        'WHETHER THE BEHAVIOUR IS WANTED - nobody has ruled, and a green run means unchanged, not right; '
+                        + 'FALL BACK, which also never fires here and is not asserted; DEFEND; RareCombat.sol (paritycheck '
+                        + 'holds the Solidity to this file, so it follows only through that); a capture fight (spare); a '
+                        + 'Genesis; mixed attacker line-ups where one attacker is out-reached and another is not; and an '
+                        + 'entry other than 6 spots out from the north on the proving ground'],
   ['stepcheck',         'stepped access 0-1-2-3, and nothing out of reach on 12 maps',
                         'anything about the cell or its reach - its distances are terrain levels, not the cell ladder; '
                         + 'it walks one route on the demo base and reads 12 generated islands plus one planted plateau, '
@@ -400,6 +431,35 @@ const CHECKS = [
                         + 'prop placed on a Friend, removeProp, a phone, the tile fallback\'s own walking, or cliffs; not '
                         + 'that the path is the shortest; the two straight steps into and out of a footprint; and '
                         + 'friendsdk-vendor.mjs --check, which needs the network (the bundle\'s bytes are propcheck\'s)'],
+  ['playcheck',         "THE PLAYER'S GAME end to end, on its own serve.py --gate (no :8765) with a stand-in chain 4663 and the "
+                        + 'site staged as deploy-test.sh stages Server 1 (base.html with DEV() forced shut): START GAME from MY '
+                        + "PROFILE, the Genesis and spawn choosers, the generator's 181x181 map of 100 plots with its water, "
+                        + 'forests, seams and ruins, an EMPTY base on values.js\'s purse, the wallet\'s own Friends read off the '
+                        + 'chain on the spawn spot, only the keep buildable and placed by a real tap and written to the server '
+                        + 'under wallet and Genesis, wheel/drags/shift-drag to all four edges, a reload restored from the server; '
+                        + 'a second player on a 375x667 phone refused NotOwner and NotHolder by the server, refused A\'s plot in '
+                        + 'the chooser, the RACE for a free plot lost and told why, its own plot, pinch and drag to every edge; '
+                        + 'studio.html 403 to a visitor; pagewatch at both sizes',
+                        'the real chain and Server 1 itself (a stand-in for both); more than two players; a fight, a build past the '
+                        + 'keep, a chop or anything after arriving; the deployer\'s wallet; Apache in front (deploy-test.sh\'s '
+                        + 'probes); frame rate beyond one printed figure; and the stage is a copy of deploy-test.sh\'s logic, '
+                        + 'so the two can drift - it refuses to run if index.html loses the DEV() line deploy-test.sh forces'],
+  ['auth-proof.test',   'the wallet sign-in and the gate (serve.py --gate) against a fresh anvil as chain 4663 with RareRoles '
+                        + 'deployed: nonces, signatures, roles read off the chain, sessions, rate limits, the scheme behind a '
+                        + 'proxy, and each guard taken out turning its own line red',
+                        'Server 1 and Apache themselves; a real wallet; the published release (unless --release is given)'],
+  ['duelproof.test',    'M17\'s challenges between two signed-in players on serve.py --gate: the API, two Chrome sessions one '
+                        + 'each, and mutations - each guard taken out turning its assertion red',
+                        'more than two players; the on-chain RareDuel (paritycheck holds that); a real wallet'],
+  ['attacknameproof.test', 'ATTACKS IN EVENTS BY NAME AND WITH NO PLACE, AND A HOME BASE NAME: on serve.py --gate with a stand-in '
+                        + 'chain, A names A\'s base and B cannot (NotOwner, nor by a forged body), bad names refused with '
+                        + 'their reason, unique and never another player\'s name, the name on the heads and in the standings, '
+                        + 'a Genesis sold hands the naming over; in Chrome two players each on their own page, a real attack, '
+                        + 'and both EVENTS read "Ada attacked Bee" and the outcome with no base, plot, side or coordinate; '
+                        + 'the profile\'s base name in the header and STANDINGS at 390x844 and 1920x1080; and each guard '
+                        + 'taken out of a copy turning its own assertion red',
+                        'the real chain and Server 1; more than two players; a name on a page other than those it names; '
+                        + 'the game\'s Genesis is stood in for on a developer\'s machine (?wallet=&genesis=), not read off chain'],
 ];
 const PARITY = ['paritycheck', 'the Solidity and the JavaScript settle the same roll, fight and duel - on the '
                 + "game's OWN four tables, HP, the wall, every weapon and the combat timings, all read out of "

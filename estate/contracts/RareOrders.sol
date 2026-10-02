@@ -3,9 +3,9 @@ pragma solidity ^0.8.36;
 
 import { IRareRoles } from "./RareRoles.sol";
 
-/// @notice The sealed standing orders - M20 item 10, the MECHANISM only. DESIGN decided the approach ("commit a
-/// hash of the orders and reveal them later; the chain holds the hash, not the order") and left one thing open
-/// on purpose: WHO OPENS THE BOX, AND WHEN. This contract builds the commit and the reveal and decides neither.
+/// @notice The sealed standing orders - M20 item 10. DESIGN decided the approach ("commit a hash of the orders and
+/// reveal them later; the chain holds the hash, not the order"), and ruling 59 decided WHO OPENS THE BOX, AND WHEN:
+/// at the fight, which this contract builds as the server opening them as it settles the fight (see below).
 ///
 /// The shape is `estate/schema.json`'s `ordersCommitment`: ONE WORD PER BASE (`base.ordersCommit`, with
 /// `base.ordersCommitAt`), written before any fight against it (BINDING §11.3), opened PER FIGHT
@@ -21,14 +21,19 @@ import { IRareRoles } from "./RareRoles.sol";
 /// leak: in v1 the server resolves the fight and has to know them; what the commitment hides them from is
 /// OTHER PLAYERS, which is what decision 5 asks ("standing orders are hidden").
 ///
-/// **Who opens the box - NOT DECIDED HERE, and the mechanism is shaped so that it need not be.** `reveal` is OPEN
-/// to all comers (§26.3: "reveal the standing orders: OPEN - must be"; §11.6's reason: the right to settle must not
-/// belong to a party with an interest). Opening needs the PREIMAGE - the orders and the salt - so whoever holds the
-/// salt is the opener: the player alone, the server on the player's behalf, or both. That is a question of who is
-/// handed the salt, which is policy and not bytecode, and it stays with the deployer (DESIGN question 11, M20 item
-/// 10, BINDING §13 item 6). **What a fight that is never opened does is not here either**: there is no fight
-/// contract to give it an end in (fights resolve on the server, ruling 7), and §11.7 says only what that end must
-/// satisfy. The record this contract leaves is enough for the server to apply whatever rule is chosen.
+/// **Who opens the box - DECIDED, ruling 59 (2026-10-01): orders are revealed AT THE FIGHT.** The mechanism, by the
+/// chain engineer's reading of BINDING §67 and DESIGN M20 item 10: ONLY THE SERVER OPENS THEM, in the step that
+/// settles the fight. So `reveal` is behind `RECORD_FIGHT` - the key that publishes the fight's hash is the key that
+/// opens the orders it was fought under, and nobody else. This closes the gap §67 left open: a base's preimage is
+/// public in calldata from its first opening on, and while `reveal` was open to all comers anyone holding it could
+/// PRE-OPEN a future fight id under that base; if the defender then sealed a new word, the fight's real opening was
+/// refused `AlreadyOpened` and the slot held the stale word. With one opener, who opens only as a fight settles,
+/// there is no early opening to make. It reverses §26.3's "reveal: OPEN - must be", whose reason (the right to
+/// settle must not belong to a party with an interest) is answered in v1 by the ruling that fights resolve on our
+/// server and we are the authority: the server already decides the fight, so it is not a new interest.
+/// **What a fight that is never opened does is not here**: there is no fight contract to give it an end in (fights
+/// resolve on the server, ruling 7), and §11.7 says only what that end must satisfy. The record this contract leaves
+/// is enough for the server to apply whatever rule is chosen.
 ///
 /// **What the record proves.** `committedAt`/`committedBlock` on the commitment and on every opening let a
 /// reader check "the orders were fixed before the fight" against `RareFightLog.fight(gameId, fightId).blockNumber`
@@ -42,6 +47,9 @@ contract RareOrders {
     /// @notice write a base's commitment. GRANTABLE: the session write's key, never root. Repeated here rather than
     /// read from the registry so the guard is one external call, like `RareFightLog.RECORD_FIGHT`.
     bytes32 public constant RECORD_ORDERS = keccak256("rarefriends.power.recordOrders");
+    /// @notice open a fight's orders (ruling 59: at the fight, by the server as it settles it). The SAME constant as
+    /// `RareFightLog.RECORD_FIGHT` and `RareRoles.RECORD_FIGHT`: the fight's writer is the orders' opener.
+    bytes32 public constant RECORD_FIGHT = keccak256("rarefriends.power.recordFight");
     /// @notice HOLD / ENGAGE / DEFEND / FALLBACK are 0..3 (schema enum `order`, combat.js ORDERS, RareCombat)
     uint8 public constant MAX_ORDER = 3;
 
@@ -107,15 +115,15 @@ contract RareOrders {
         emit OrdersCommitted(gameId, baseId, hash, msg.sender);
     }
 
-    /// @notice open the box for one fight. OPEN TO ANYONE WHO HOLDS THE PREIMAGE - who that is, is not decided
-    /// here. Checked against the base's standing commitment; every order bounded; once per (base, fight), so another
-    /// base's preimage can never take this base's slot for a fight (see `_opened`). The commitment is
-    /// NOT consumed: the next fight against the same base opens the same word until the defender seals a new one,
-    /// which is their business and the server's.
+    /// @notice open the box for one fight. ONLY THE KEY THAT SETTLES FIGHTS (`RECORD_FIGHT`, ruling 59), in the step
+    /// that settles it. Checked against the base's standing commitment; every order bounded; once per (base, fight).
+    /// The commitment is NOT consumed: the next fight against the same base opens the same word until the defender
+    /// seals a new one, which is their business and the server's.
     /// @dev The orders are `bytes`, one byte a Friend, and not `uint8[]`: gencheck reads any `uint8[]` handed to a
     /// state-changing function as a generation (that is how the line-ups arrive), and an order is not one. Not an
     /// enum either: the ABI decoder would refuse a 4 with no name, and §10.5.4 wants `OrderOutOfRange` by name.
     function reveal(uint256 gameId, uint256 baseId, uint256 fightId, bytes calldata orders, bytes32 salt) external {
+        roles.requirePower(msg.sender, RECORD_FIGHT);
         Commitment storage c = _commit[gameId][baseId];
         if (c.hash == bytes32(0)) revert OrdersNotCommitted(gameId, baseId);
         if (_opened[gameId][baseId][fightId].hash != bytes32(0)) revert AlreadyOpened(gameId, baseId, fightId);

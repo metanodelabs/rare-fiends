@@ -28,7 +28,7 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
   const G = require('./mapgen.js');
   const watch = await require('./pagewatch.js').attach(sock, send);
   let bad=0; const ok=(n,c,v)=>{console.log((c?'  ok  ':'FAIL  ')+n+(c?'':'   -> '+v)); if(!c) bad++;};
-  await sleep(2000);
+  await sleep(2000); await require('./pagewatch.js').waitForGame(send);
   // 1. the estate's own hill obeys the rule: every raised tile has a way up in steps of one
   const grid = await ev('JSON.stringify(base.tiles.map(t => [t.x, t.y, base.levelAt(t.x, t.y)]))').then(JSON.parse);
   const xs = grid.map(g => g[0]), ys = grid.map(g => g[1]), x0 = Math.min(...xs), y0 = Math.min(...ys);

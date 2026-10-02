@@ -23,8 +23,9 @@ function readConst(name) {           // same reader as paritycheck: brackets cou
   }
   throw new Error('could not find where ' + name + ' ends');
 }
-const PAGE = new Function(['MELEE', 'HP_OF', 'WALL_HP', 'WEAPONS', 'COMBAT'].map((n) => 'const ' + n + ' = ' + readConst(n) + ';').join('\n')
-  + '\nreturn { hp: HP_OF, wallHp: WALL_HP, weapons: WEAPONS, combat: COMBAT };')();
+// DOOPIE_HP and DOOPIE_ARMS (M17 items 14 and 15): Doopie slots 0 and 7 to 10 are part of the rules a fight is hashed over
+const PAGE = new Function(['MELEE', 'HP_OF', 'WALL_HP', 'WEAPONS', 'COMBAT', 'DOOPIE_HP', 'DOOPIE_ARMS'].map((n) => 'const ' + n + ' = ' + readConst(n) + ';').join('\n')
+  + '\nreturn { hp: HP_OF, wallHp: WALL_HP, weapons: WEAPONS, combat: COMBAT, doopieHp: DOOPIE_HP, doopieArms: DOOPIE_ARMS };')();
 const R = Combat.rulesFrom(PAGE);
 const clone = (o) => JSON.parse(JSON.stringify(o));
 

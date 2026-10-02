@@ -6157,8 +6157,330 @@ at once - at `propose` and at `accept` - since either alone still refuses the sw
 
 ### 77.6 The proof
 
-`fixcheck`: **370 ok, 0 failing.** New rules: `sale-ends-it` (part 9, through the real `RareMarket`),
+`fixcheck`: **370 ok, 0 failing** *(at this section's commit. It did not stay true: merging the Server 1 head 0756eb3 brought 4 failing - three refund lines left stale by the materials table, 277376e, and `RareRules.Kind` with no slot for `rebuild`. Back to 0 failing in merge round 3: the three lines fixed in `b806ded`, the slot added in §81, `7fc9a8d` - 388 ok, 0 failing, counted 2026-10-01.)* New rules: `sale-ends-it` (part 9, through the real `RareMarket`),
 `pays-the-partner`, `no-payee-swap`, `accrue-not-pay`, `continue-pays-nothing`, `per-period-sum` (400 + 300 to one
 side, 700 to the other, nothing left held), `pause-end-pays`, `settle-once`, `paid-to-recorded-holder` (part 13), and
 `prize-share-settles` (part 25). `test/partnermutants.js`: **40 mutants over 36 labelled rules, every one red**,
 including one per new rule.
+
+## 78. M20 item 21 - what of the fake $RF is delivered, read and run rather than recalled (2026-10-01)
+
+Added by the **chain engineer**. The row asks for *a duplicate token contract that plays the part of `$RF`, so the
+numbers can be checked to add up on localhost*. Ruling 75 (as read) adds that a demo game stakes it and that it runs
+locally and on our server, never on chain 4663. Ruling 103 puts the games that stake it on our own test chains only.
+
+### 78.1 Delivered, each piece read in the file AND run here
+
+| Piece | Where | Run here, 2026-10-01 |
+| --- | --- | --- |
+| The token: the real `$RF`'s interface (ERC20, ERC20Burnable, `INITIAL_SUPPLY()`), its shape passed in, the whole supply at a faucet, `faucetMint` to the faucet only, `IS_FAKE_RF()` | `test/FakeRF.sol` `FakeRF` | `fixcheck` part 22, green |
+| Pyth's stand-in for the duel | `test/FakeRF.sol` `LocalEntropy` | used by `moneycheck`'s duel |
+| Lock 1: refuses any chain id but 4663 or 31337, and any chain with code at ArbSys (0x64) - so real 4663 and a fork of it | `LocalOnly` | `fixcheck` part 22 plants `0xfe` at 0x64 and both contracts refuse (`NotALocalChain`) |
+| Lock 2: `deploy.mjs --fake-rf` refuses a non-loopback `EVM_RPC` before any request, and a node that is not an unforked anvil before sending | `deploy.mjs`, `deploylib.requireUnforkedAnvil` | the run below went through it |
+| A real deploy refuses a token that answers `IS_FAKE_RF()` | `deploy.mjs` | **still unexercised** - it needs a non-loopback RPC, which means a real chain |
+| The world in one command: plain anvil as 4663, FakeRF + LocalEntropy + MockGenesis, the five, RareRules frozen, RareGame wired, grants, whitelist, then fund | `deploy/local-chain.sh fake` | **`PORT=8611 deploy/local-chain.sh fake`: green.** 10,000 fake `$RF` each to the deployer address and anvil 1-9. `totalSupply` stays at 1,024,000,000, unchanged by the fund |
+| The money adds up | `moneycheck.mjs` | **34 of 34** on that world before the change below, and 35 of 35 after it |
+
+The run used port 8611, not 8599, because an anvil from another session was already listening on 8599. That anvil
+was not touched.
+
+### 78.2 Missing, and now built: the fake world was born with demo mode ON
+
+`RareRoles` starts with demo mode on, and `local-chain.sh` left it on unless `LOCAL_DEMO_OFF=1`. Its comment said
+*"the deployer has not ruled on this"*. In demo mode, `RareGame.create` (`requireFreeInDemoMode`) and
+`RareDuel.challenge` (`PaidDuelsClosedInDemoMode`) refuse any stake. So **the world held practice money that nothing
+could stake.** The only thing that ever staked it was `moneycheck`, which quietly turned demo mode off in its own
+setup. Its green therefore said nothing about the world as built. Ruling 103 now says the games that stake the
+practice money happen on our own test chains, which means this world and Server 1's.
+
+- **`deploy/local-chain.sh`'s `demo_switch` turns demo mode OFF by default in fake mode.** It signs with the
+  deployer key after the deploy and before any game exists, so ruling 74's freeze cannot refuse it.
+  `LOCAL_DEMO_OFF=0` keeps it on. **The fork's default is unchanged** (left alone), because no ruling covers the
+  fork.
+- **`moneycheck` asserts that the world ARRIVES with demo mode off.** It asks before its own setup runs, so the
+  setup cannot hide the answer.
+- **Broken once:** a fresh world built with `LOCAL_DEMO_OFF=0` turns that one line red (`demoMode() is true`). A
+  fresh world built with the default passes 35 of 35.
+
+**This is a reading of ruling 103, not a new decision.** It reads *"demo games that stake the practice money happen
+only on our own test chains"* as requiring the contracts' own demo mode to be off there, because with demo mode on,
+the contracts as built refuse every stake. What the page calls a *demo game* on those chains belongs to M18 item 13
+and is not touched here.
+
+### 78.3 Server 1's dev chain - NOT read
+
+The brief asked for the dev chain to be read. **It was not.** `devchain-setup.sh --status` needs `RF_TEST_HOST`,
+and the host is (rightly) not written in the repository. The one attempt was refused by the server
+(`Permission denied (publickey)`). No credential was looked for.
+
+What the repository says, and only that: `devchain-setup.sh` builds the world with
+`FAKE_RF=1 CHAIN_EXTERNAL=1 ... local-chain.sh deploy`, then runs `fund`, which funds six wallets generated on the
+server. M24 item 8's row reports the chain running.
+
+**What 78.2 means for the server, stated here and not acted on:**
+
+- The world already on the server was built before this change. Its demo mode is still ON, so nothing on it can be
+  staked.
+- The next fresh deploy through `devchain-setup.sh` gets demo mode OFF by default, because `demo_switch` runs inside
+  `deploy` and `FAKE_RF=1` puts the script in `fake` mode.
+- Turning off demo mode on the existing server world is a write, signed by the server's deployer key on Server 1.
+  **It was not done here.** It needs the deployer's go-ahead, and it is the bridge engineer's to carry out.
+
+### 78.4 State of the row
+
+**Delivered for localhost**: the token, both locks, the one-command world, the fund, and a money flow proved to add
+up, now on a world that can stake. **Not delivered: the server half was not verified here** (78.3), and the
+`IS_FAKE_RF` refusal on a real deploy has never run.
+
+## 79. M20 item 2 - the fight behind an address `RareRules` can re-point (2026-10-01)
+
+Added by the **chain engineer**. DESIGN *No diamond* says the fight and the dice roll each get *"their own deployed
+address behind a re-pointable registry"*. The dice half was already done: `RareDice`, re-pointed by
+`RareDuel.setDice` and sealed into each duel. This section is the fight half.
+
+### 79.1 What was built
+
+- **`RareFight.sol`** holds `IRareFight` and `contract RareFight`. It has two functions,
+  `fight(R, S, word, game, fightId)` and `trap(R, victimGen, word, game, trapId)`. Both are `view`, and both run the
+  library's code unchanged. The deployed code is 11,835 bytes.
+- **The library is still a library.** `RareCombat` stays `library RareCombat`, because gencheck part 1 requires it
+  and `RareCombatLab` still stands on it. `RareFight` wraps the library the way `RareDice` wraps `RareChance`.
+- **The pointer lives in `RareRules`.** `IRareFight public fight` is born in the constructor as a fresh
+  `RareFight`, so there is never a window with no fight and the deploy order does not change (the same shape
+  `RareDuel` gives its dice). `setFight(address)` re-points it and emits `FightSet(fight, by)`; the constructor
+  emits `FightSet` too.
+- **Why `RareRules` and not `RareRoles`:** the fight is a rule, `RareRules` is the rules contract, and its power,
+  `SET_RULES`, is already root-only.
+- **Sizes:** `RareRules` is 10,333 bytes deployed. Its creation code is 22,724 bytes, because it carries
+  `RareFight`'s.
+- **`setFight` has four guards, checked in this order:**
+  1. `roles.requirePower(msg.sender, SET_RULES)`
+  2. `roles.requireNoGameRunning()`
+  3. `ZeroAddress`
+  4. `NotAContract`
+
+  The power is checked first, so a stranger learns nothing about the game. Every frozen setter here uses the same
+  order.
+- **Who may re-point it: root only.** `SET_RULES` is root-only, and it is registered as root-only before `RareRules`
+  can deploy. So no gamemaster can re-point the fight. Letting one do so later would need a new power and a
+  redeploy. The dice has the same holder: `RareDuel.setDice` uses `manageRoles`, which is also root-only. **This is
+  the chain engineer's choice of the "right role", made to match the dice. The deployer has not been asked.**
+- **Frozen while a game runs.** This applies ruling 74's rule, written for switches, to this pointer. A game that
+  has been created and joined but not started does NOT freeze it, exactly as with part 23's switches.
+
+### 79.2 The salt moved out of the library - the one change to the fight itself
+
+`RareCombat._shoot` and `trap` rolled with `RareChance.roll(word, address(this), ...)`. Inlined into `RareFight`,
+`address(this)` would be the fight contract's own address. That had two consequences:
+
+- **Re-pointing at a fresh deployment of the same rules would have changed every roll.**
+- An old fight could not be replayed at the new address.
+
+Now `fight` and `trap` take a `game` argument, and `Field` carries it. This is the same move `RareChance` made for
+the dice. `RareCombatLab` passes `address(this)`, so **the lab rolls exactly as before**. `RareFight` passes
+whatever it is told. **combat.js is not touched**, because it has always taken the salt as `ctx.contract`.
+
+### 79.3 What is NOT built, and why
+
+- **DESIGN's (e), a game recording the fight's address when the game is made, is PROPOSED, not decided.** Until it
+  is decided:
+  - The fight a game was fought under is the one `FightSet` names at that game's blocks.
+  - The freeze keeps that fight in place for a started game's whole life.
+  - The remaining gap: a re-point between a game's `create` and its `start` reaches that game. Every ruling-74 switch
+    has the same gap.
+- **Nothing in the game calls the fight on chain**, because v1 resolves fights on our server. `RareFight` is the
+  reference a fight is checked against. No contract reads `RareRules.fight()` yet.
+- **The duel's dice is not touched.** DESIGN calls re-pointing it *a reading, not a ruling*.
+
+### 79.4 Deploy
+
+- `deploy/local-chain.sh` is unchanged, because `RareRules`' constructor deploys the fight.
+- `deploy.mjs --game` now reads `RareRules.fight()` and records it as `rareFight` in the config.
+- `DEPLOY.md` row 6 now says so.
+- Run on a local anvil (`PORT=8611 deploy/local-chain.sh fake`): `RareRules.fight()` equals the config's
+  `rareFight`, and that address holds 11,835 bytes of code.
+
+### 79.5 The proof
+
+- **`paritycheck`**
+  - The 516 line-up fights are now fought through **`RareFight` at the address `RareRules.fight()` names**. The
+    address is read off the registry, not taken from a handle the check made itself.
+  - Each fight is salted with the lab's address, so these are word for word the same fights the lab used to fight.
+    Result: **516 of 516 match field for field.**
+  - `RareFight.trap` matches 240 of 240.
+  - A new line asserts that the registry is born pointing at a `RareFight` that has code.
+  - `RareRules` is deployed from an account of its own, so every address and figure after it is the same as before.
+- **`gas.json`, re-measured by that run**
+  - `fightAvg` went from 10,185,933 to 10,187,287, and `fightMax` from 527,289,476 to 527,311,821 (+0.004%). The
+    cause is one more calldata word and one more struct field.
+  - **The fight figures are now `RareFight`'s**, measured on the contract that deploys rather than on the lab.
+  - They are still execution gas, measured in memory under Ethereum rules, so they are floors.
+- **`fixcheck` part 26, five lines:**
+  - The rules contract is born with a fight and emits `FightSet`.
+  - `RULE fight-repoint-guarded`: a stranger and a gamemaster get `PowerNotHeld`, granting `SET_RULES` is refused
+    with `PowerNotGrantable`, and when root moves the fight, `FightSet` records who did it.
+  - `RULE fight-repoint-code`: zero is refused with `ZeroAddress`, and an address with no code with `NotAContract`.
+  - `RULE fight-repoint-frozen`: under a started game, root gets `GameRunning` and a stranger still gets
+    `PowerNotHeld`. Root can re-point before the start and after the declare.
+  - `RULE fight-salt-is-game`: 6 of 6 fights come out identical through the born fight and through a second
+    deployment told the same game. Told a different game, 6 of 6 come out different.
+
+  Part 19's audit now lists `RareRules.setFight` among the setters.
+- **`test/partnermutants.js`: five new mutants**, one per guard plus one for the salt:
+  1. the power check removed
+  2. the freeze removed
+  3. the zero check removed
+  4. the code check removed
+  5. the salt set back to `address(this)`
+
+  Each of the five turns its own line red. The harness in full: **45 mutants over 40 labelled rules, every one
+  red, 0 FAIL**, starting from an unmutated copy that is green at 381 ok. `fixcheck` itself: **381 ok, 0 failing.**
+
+**Measured, not assumed: `npm run check` takes about five minutes on this machine, not 48 seconds.** The 40-a-side
+rungs added by the side-cap ruling dominate its run time.
+
+## 80. Ruling 74, the last half of M20 item 22 - the trading switch is frozen while any game runs (2026-10-01)
+
+The deployer, ruling 74 in their own words: *"NO switch changes once a game has started. This includes demo mode,
+collections and the trading switches. All of them are frozen at the start."* This answers what §73.3 left open
+(DESIGN's *Still open*, *Switches frozen: the marketplace's switches*) with the first reading: one marketplace
+serves every game, so **`RareMarket.setTradeable` cannot change while ANY game is running** - not a per-game copy.
+
+### 80.1 What changed, and what did not
+
+| Setter | Contract | Now |
+| --- | --- | --- |
+| `setTradeable(address, bool)` | `RareMarket` | **refused while a game runs** (`GameRunning`) |
+| `setFeeBps`, `setFeeTo` | `RareMarket` | **not frozen**, on purpose: DESIGN says the marketplace fee "does not get the cut's freeze" - part 27 proves `setFeeBps` still lands under a running game |
+| `setTerminalShareBps`, `setGate` | `RareMarket` | not touched - neither is a switch |
+
+`RareMarket` is permanent, so the change is two lines: `roles.requireNoGameRunning();` directly after
+`roles.requirePower(msg.sender, SET_TRADEABLE);`, reached through the market's existing immutable `roles`
+(`IRareRoles` already carries `requireNoGameRunning`, §75), and `error GameRunning(uint256 running)` declared in
+`RareMarket`'s ABI so an explorer decodes the revert against the contract that was called, as `ShadowFriends`
+does. The power is asked FIRST, so a stranger gets `PowerNotHeld` and learns nothing about the game. **14,222
+bytes** deployed. `RareMarket` does not itself declare `PowerNotHeld` (it never did; that revert decodes against
+`RareRoles`' ABI) - left as it was, to keep the permanent contract's change minimal.
+
+### 80.2 The price, stated so it is not discovered in an emergency
+
+- **With games back to back or overlapping, a collection's trading switch may never get a window to change.**
+  The only thaw is every running game being declared - `RareGame.declare`, which root can always reach (§73.2).
+- **Trading cannot be thrown OFF as a brake mid-game**, and a collection cannot be switched ON mid-game either.
+  Both were possible before.
+- The exits are unaffected: `cancel` and `withdrawOffer` never read the switch.
+- `deploy.mjs` was not edited: any `setTradeable` it calls must run before the first `start`.
+
+### 80.3 The proof - `test/fixcheck.js` part 27, six assertions, each guard broken once
+
+A fresh `RareRoles`, `RareGame` and `RareMarket` (no partnership layer), with `setGame` called by the test itself.
+Before any game, root switches a collection on and off and each reads back. With a game created and joined but not
+started, it still flips. Once it starts, from root, a flip and a call setting the value it then holds each answer
+`GameRunning` and `tradeable` reads back unchanged, while `setFeeBps` still lands (`RULE trading-switch-frozen`); a
+stranger gets `PowerNotHeld` (`RULE trading-switch-power-first`). Declared, `runningGames` is 0, the switch flips
+again, and a stranger is still `PowerNotHeld`. The sixth asserts `GameRunning` is in `RareMarket`'s ABI.
+`fixcheck`: **382 ok, 0 failing**.
+
+Two mutants, added to `test/partnermutants.js` (now **42 mutants over 38 labelled rules, every one red**), each
+turning exactly its own line red and nothing else - run one at a time against the whole of `fixcheck`:
+
+- the freeze line removed - `RULE trading-switch-frozen` red with `under: {flip: MOVED, same: MOVED}`, 1 failure;
+- the freeze asked BEFORE the power - `RULE trading-switch-power-first` red with the stranger answered
+  `GameRunning`, 1 failure.
+
+**DESIGN.md is not edited here** (the design steward's): its *Still open* row *Switches frozen: the marketplace's
+switches* and M20 item 22's status still describe `setTradeable` as unfrozen; both are answered by this section.
+
+## 81. `RareRules.Kind` gains `rebuild`, the price of a lost keep (ruling 77, M3 item 9, 2026-10-01)
+
+**What was red.** `fixcheck` part 16 holds every chain-home field of `schema.json` `buildingType` against the
+compiled `setKind` tuple. The materials table (277376e, M8 items 15 and 17) added `buildingType.rebuild` to the
+schema, `uint32[]` in hundredths and decided by ruling 77. It also added `rebuild: { wood: 7500, crystals: 7500 }` to
+the keep's row in `values.js`. Nothing added the field to the struct, so the check read *"RareRules.Kind lacks
+[rebuild]"*. This red came in with 0756eb3 and was not caused by the merge.
+
+**The shape is the schema's: `uint32[] rebuild`, ONE AMOUNT PER MATERIAL, not per level.** It is indexed in
+`record.js` `MATERIALS` order, so index 0 is wood and index 1 is crystals. The schema says *"one amount per
+material keyed by the purse's own field names (record.js MATERIALS)"*, and `MATERIALS` is the one ordered list of
+those names; `materials()`, `refund` and `pay` already walk it in that order. A third material adds a third
+entry and changes no struct. The keep's row is written `[7500, 7500]`.
+
+What it does **not** do: hold the names. Each slot means what `MATERIALS[i]` names, so reordering `MATERIALS` would
+change the meaning of a row that is already written. That is a reason not to reorder it. A self-describing row would
+need a second array (`bytes32[]` of names), which is a field the schema does not have, and it is not this role's
+field to invent. Under a frozen `rulesId` the order is part of what was frozen, the same as the ladder's two arrays.
+
+**One guard, taken straight from the schema.** *"Only a row whose placement isKeep carries it."* `setKind` refuses
+a non-empty `rebuild` on any other row (`KindShape("rebuild")`). **No length is enforced.** The chain does not
+know how many materials there are, and pinning the count at 2 would put `MATERIALS` into bytecode. A keep row may
+also leave the field empty. Whether a keep must carry a rebuild price is a game rule, and ruling 77 prices one
+keep; it does not require that every future keep row have one.
+
+**Stored, never charged.** No verb on chain reads this field yet. The rebuild move is M13 item 14. Ruling 78's other
+use, the crystal cap of a base that has no keep, no depot and no silo, is `record.js` `storeCap` on the server.
+Neither has a chain home (base state is M6). `kindOf` returns the field and it freezes with the row. The
+setter's power guard is unchanged: `SET_RULES`, root only, and refused once the id is frozen. `RareRules` is
+10,644 bytes (§79 recorded 10,333).
+
+**Every writer of a row was updated.** Only `test/fixcheck.js` calls `setKind`; `deploy.mjs`, `paritycheck.js`,
+`gasfresh.js` and `partnermutants.js` write no rows. Part 16's `row()` builder now maps `values.js`'s
+`rebuild` object through `record.js` `MATERIALS` (it reads both and types neither), and part 15's `K1`
+fixture carries `rebuild: []`.
+
+**The proof.** In part 16 the slot row is green: 16 of 16 fields and 10 of 10 placement rules. A new row reads
+every kind back. The keep reads `{"wood":7500,"crystals":7500}`, the eight others read `[]`, and a `[1, 1]` bill on
+the hut is refused `KindShape`. **Broken three times, and restored each time.** Each break turned exactly that one
+row red, leaving only the three pre-existing check-writer lines (part 8 ×2 and RULING 28):
+- the row writer drops the field (`const rb = []`): the keep read back `{}`;
+- `s.rebuild = k.rebuild;` deleted from `setKind`: the keep read back `{}`;
+- the `isKeep` guard commented out: the stray bill on the hut answered `MOVED`.
+
+`fixcheck`: **385 ok**. The only lines still red are the three that belong to the check writer.
+
+## 82. The server's clock - M16 item 7, M20 item 10, M6 item 7 - and `RareOrders.reveal` behind `RECORD_FIGHT` (2026-10-01)
+
+**Who opens the box, built.** Ruling 59 decided the orders are revealed AT THE FIGHT, and DESIGN M20 item 10 recorded
+the chain engineer's reading: only the server opens them, in the step that settles the fight. `RareOrders.reveal` is
+now behind **`RECORD_FIGHT`** - the key that publishes the fight's hash is the key that opens the orders it was fought
+under. No new power: `grant.mjs` already gives the server role `RECORD_FIGHT`, so nothing in the grant changes.
+**This closes the gap §67 left open**: with `reveal` open to all comers, anyone holding a base's public preimage could
+pre-open a future fight id under that base, and a defender who then sealed new orders had the fight's real opening
+refused `AlreadyOpened`. With one opener who opens only as a fight settles, there is no early opening to make.
+**It reverses §26.3's row** *"reveal the standing orders: OPEN - must be"*; that row's reason - the right to settle
+must not belong to a party with an interest - is answered in v1 by the ruling that fights resolve on our server and we
+are the authority, so the server opening what it already decided is not a new interest. **The row in §26.3 is left as
+written and this section supersedes it.** `RareOrders` is 3,130 bytes (2,925 before). `fixcheck` part 18 is rewritten:
+a stranger holding the RIGHT preimage is `PowerNotHeld` and nothing opens; the cross-base replay still lands harmlessly
+under its own base; and §67's pre-opening is proved closed (a stranger cannot pre-open fight 22 with base 8's public
+preimage; base 8 reseals; the server opens fight 22 with the new word). `RULE orders-opened-by-server` has a mutant in
+`test/partnermutants.js` (the `requirePower` line removed) and it goes red. **Demo mode still gates neither verb.**
+
+**The sync head's fold, specified (the write-up §56 and the schema said was owed).** One head per closed HOUR of the
+game's clock, counted from `RareGame.game(gameId).startsAt` (or, with no game on chain, from the first tick that world
+saw). A fight belongs to the hour its `commitFight` was mined in, by the chain's own block timestamp, so the fold can be
+redone by anyone from `FightCommitted` logs alone:
+
+    w0   = keccak256(abi.encode(address(RareFightLog), chainId, gameId, period, syncHead(gameId, period - 1)))   // zero for period 0
+    w    = keccak256(abi.encode(w, fightId, fightHash))      for each fight committed in the hour, in commit order
+    head = w                                                  never zero, so an hour with no fight is written too
+
+`estate/clockwork-anvil-proof.mjs` redoes it from the logs, independently of the server, and it matches. **The fold
+covers fights only.** A session's moves join it when the session write reaches the chain, which is M6 item 1's and not
+built.
+
+**The clock itself is not a contract.** `estate/clockwork.py` (inside `serve.py`, three fenced hooks, no key) journals
+each base's sealed orders and each fight; `estate/clockwork.mjs` (a timer, `deploy/rf-clockwork.timer`, holding the
+server key) settles every partnership `stateOf` reads Ended and that is unpaid, commits seals, opens each fight's orders
+and commits its hash in one step, closes each game-clock hour with `commitSync`, and checks the server's record against
+the chain's. On a mismatch it applies ruling 3 as the schema states it: the server's record stands, that game's fight
+and sync writes pause, the deployer is alerted (`alert.json`, exit 4). **It refuses any RPC that is not a loopback,
+unforked anvil without ArbSys, and any config without `fakeWorld`, before reading the key - it never writes to chain
+4663.** `RarePartners` is deployed to the fake world only (`partners-local.mjs`, called by `local-chain.sh fake` and
+by `devchain-setup.sh` for a world that predates it); the M20 deploy still passes `RareMarket` partners = 0.
+
+**Proof.** `estate/clockwork-anvil-proof.mjs` on a fake world at port 8931: 30 of 30, including a partnership paused
+and run out over 24 h of chain time and settled by the timer (40 $RF to the partner), one SOLD and settled (paid to the
+holder recorded at forming, not the buyer), one running and left alone; a fight's orders opened by the server key and
+its hash committed after the opening, against a word committed a tick before the fight; the hour closed with the fold
+above; a mismatch alerted and paused, then resumed. `estate/clockwork-mutants.mjs`: 17 guards, each removed once,
+each turning its own `CLOCK` line red. `estate/clockwork.test.js`: the hooks alone, 8 of 8.

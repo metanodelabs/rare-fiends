@@ -20,7 +20,7 @@ async function open(url, port){
     send=(me,pa={})=>new Promise((ok,no)=>{const n=++id;m.set(n,o=>o.error?no(new Error(o.error.message)):ok(o.result));ws.send(JSON.stringify({id:n,method:me,params:pa}));});
     sock=ws;
   }catch(_){send=null;}}
-  await sleep(2000);
+  await sleep(2000); await require('./pagewatch.js').waitForGame(send);
   const ev=async e=>{const r=await send('Runtime.evaluate',{expression:e,returnByValue:true});
     if(r.exceptionDetails) return 'THREW: '+r.exceptionDetails.exception.description.split('\n')[0]; return r.result.value;};
   // The island slides left to clear an open panel, and viewX eases there about 0.12 of the way a

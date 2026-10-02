@@ -69,7 +69,10 @@ export function compileAll() {
     RareRoles: pick('RareRoles.sol', 'RareRoles'), RareFightLog: pick('RareFightLog.sol', 'RareFightLog'), ShadowFriends: pick('ShadowFriends.sol', 'ShadowFriends'),
     RareDuel: pick('RareDuel.sol', 'RareDuel'), RareMarket: pick('RareMarket.sol', 'RareMarket'), RareCombatLab: pick('RareCombat.sol', 'RareCombatLab'),
     RareRules: pick('RareRules.sol', 'RareRules'), RareGame: pick('RareGame.sol', 'RareGame'),
+    RareFight: pick('RareFight.sol', 'RareFight'),   // M20 item 2: born inside RareRules' constructor, re-pointed by setFight
+
     RareOrders: pick('RareOrders.sol', 'RareOrders'), RareDoopieGate: pick('RareDoopieGate.sol', 'RareDoopieGate'),
+    RarePartners: pick('RarePartners.sol', 'RarePartners'),   // deployed only to the fake world, by partners-local.mjs (the server's clock, M16 item 7)
     // LOCAL ONLY (deploy.mjs --fake-rf): each refuses a real chain in its own constructor as well
     FakeRF: pick('test/FakeRF.sol', 'FakeRF'), LocalEntropy: pick('test/FakeRF.sol', 'LocalEntropy'), MockGenesis: pick('test/Mocks.sol', 'MockGenesis') };
 }

@@ -483,6 +483,27 @@ button { font: inherit; color: inherit; }
   .tally { width: auto; grid-template-columns: minmax(0, 1fr); }
 }
 
+/* ---------- REAL: a challenge against another signed-in player (M17 items 4 and 5) ----------
+   The lobby and the table are their own two cards, so nothing of the practice table's sample players leaks
+   into a real game. Every class they draw with is the practice table's own. */
+.card.lobby, .card.table { max-width: 720px; }
+.lsec { display: grid; gap: 8px; }
+.lrow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; border: 1px solid var(--faint); padding: 8px 10px; }
+.lrow.mine { border-color: var(--signal); }
+.lrow .t { font-size: 19px; color: var(--dim); min-width: 0; overflow-wrap: anywhere; }
+.lrow .t b { color: #fff; font-weight: 500; }
+.lrow .b { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.lrow .b .go { width: auto; font-size: 15px; padding: 8px 10px; }
+.lform { display: grid; gap: 8px; border: 1px solid var(--faint); padding: 10px; }
+.lform input { background: #000; color: #fff; border: 1px solid var(--faint); font: 19px var(--mono, monospace); padding: 6px; min-width: 0; width: 100%; }
+.cd { font-variant-numeric: tabular-nums; color: var(--signal); }
+.verify { font-size: 15px; color: var(--dim); text-align: center; overflow-wrap: anywhere; }
+.verify b { color: var(--signal); font-weight: 400; }
+.tseats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.tseats > div { border: 1px solid var(--faint); padding: 7px 9px; font-size: 18px; color: var(--dim); min-width: 0; overflow-wrap: anywhere; }
+.tseats > div b { color: #fff; font-weight: 500; }
+.tseats > div.turn { border-color: var(--signal); }
+
 </style>
 </head>
 <body>
@@ -498,6 +519,8 @@ button { font: inherit; color: inherit; }
   <div class="card" id="prompt" role="dialog" aria-modal="true" aria-labelledby="ptitle" hidden></div>
   <div class="card cold" id="nope" role="dialog" aria-modal="true" aria-labelledby="ntitle" hidden></div>
   <div class="card algocard" id="algo" role="dialog" aria-modal="true" aria-labelledby="atitle" hidden></div>
+  <div class="card lobby" id="lobby" role="dialog" aria-modal="true" aria-labelledby="ltitle" hidden></div>
+  <div class="card table" id="table" role="dialog" aria-modal="true" aria-labelledby="ttitle" hidden></div>
   <div class="modal" id="main" role="dialog" aria-modal="true" aria-labelledby="phase">
     <div class="mtop">
       <i class="dot"></i><span>CHALLENGE</span><span>·</span><span id="phase">SET THE TERMS</span>
@@ -527,7 +550,8 @@ button { font: inherit; color: inherit; }
   'use strict';
   const EMBED = new URLSearchParams(location.search).get('embed') === '1';
   if (EMBED) { document.body.style.background = 'transparent'; document.documentElement.style.background = 'transparent'; $scrimHide(); }
-  else document.getElementById('scrim').innerHTML = '<iframe src="base.html" tabindex="-1" title=""></iframe>';
+  // a real challenge opened on its own (?real=1, ?vs=, ?duel=, ?terminal=) is a lobby, not a popup over the map: no base behind it
+  else if (!/[?&](vs|duel|real|terminal)=/.test(location.search)) document.getElementById('scrim').innerHTML = '<iframe src="base.html" tabindex="-1" title=""></iframe>';
   function $scrimHide() { document.getElementById('scrim').hidden = true; }
   const leave = () => { if (EMBED && window.parent !== window) window.parent.postMessage({ type: 'challenge:close' }, location.origin); };
   /* ---------- pixel art ---------- */
@@ -656,17 +680,18 @@ button { font: inherit; color: inherit; }
   // the hole cards and the flop and two on the turn and the river, a raise is one more bet, and a street
   // is capped at `raises`. It lives in this one object and changes in one line, like Friend or Fiend's
   // board: askable, and nothing reads it twice.
-  const HOLDEM = { bets: [1, 1, 2, 2], raises: 3 };
+  // The object itself lives in duel.js now (the server's real table reads the same one): Duel.HOLDEM.
+  const HOLDEM = Duel.HOLDEM;
   // WHO ACTS FIRST, ruling 79: in a two-player game it alternates, hand to hand, between the two SEATS -
   // the challenger (p1) opens hand 1, the challenged (p2) hand 2, and so on - and the side that opens a hand
   // opens every street of it. `S.hands` counts the hold'em hands dealt on this table; a seat, not "you",
   // because which seat is yours depends on the side of the challenge you are on.
-  const holdemFirst = (n) => n % 2 ? 'p1' : 'p2';
+  const holdemFirst = Duel.holdemFirst;
   // THE WORST CASE, ruling 79: the most one hand can cost one side, in stakes, read off HOLDEM and nothing
   // else. The ante is one stake; on a street the most a side puts in is the bet and every raise the cap
   // allows - (1 + raises) bets - and the streets add. 1 + (1+1+2+2) x (1+3) = 25 today; change the ladder or
   // the cap and this, and every screen that shows it, follows.
-  const holdemMostX = () => 1 + HOLDEM.bets.reduce((a, b) => a + b, 0) * (1 + HOLDEM.raises);
+  const holdemMostX = Duel.holdemMostX;
   // shown before a player accepts a hold'em game: on the terms screen, the incoming challenge and the sprung
   // one. Empty for every other game, and in demo mode, where the stake is 0 and nothing can be lost.
   const mostHTML = (g) => g.id !== 'holdem' || !S.stake ? '' :
@@ -679,6 +704,10 @@ button { font: inherit; color: inherit; }
   const freshPaid = () => Object.fromEntries(BET_UNITS.map(u => [u.id, { p1: 0, p2: 0 }]));
   const S = { view: 'challenger', screen: 'main', answer: 'accept', phase: 'terms', stake: 50, game: 'rps', pot: 0, potRF: 0, paid: freshPaid(),
     winner: null, duels: 0, hands: 0, last: null, det: false, sprung: false };
+  // REAL: a challenge against another signed-in player, played on our server (M17 items 4 and 5). Declared here,
+  // before anything renders, because the practice table's render() stands down while it is on.
+  const REAL = { on: false, who: null, list: null, open: null, timer: 0, ticker: 0, form: { game: 'rps', stake: 10, ttl: 300, vs: '' },
+    seen: {}, msg: '', pending: false, term: null };
   const me = () => S.view === 'challenger' ? 'p1' : 'p2';           // whose seat you are in
   const them = () => me() === 'p1' ? 'p2' : 'p1';
   const $ = (id) => document.getElementById(id);
@@ -893,6 +922,7 @@ button { font: inherit; color: inherit; }
     $('nagain').onclick = () => { S.view = 'challenger'; restart(); };
   }
   function render() {
+    if (REAL.on) return;                                // a real challenge owns the screen; the practice table stands down
     $('prompt').hidden = S.screen !== 'prompt'; $('nope').hidden = S.screen !== 'nope'; $('main').hidden = S.screen !== 'main';
     $('main').classList.toggle('short', !S.det);       // players stacked down the left until MORE opens them
     if (S.screen === 'prompt') S.sprung ? renderSprung() : renderPrompt();
@@ -1045,26 +1075,17 @@ button { font: inherit; color: inherit; }
      a deck. Same reason `abi.encode` is not optional. */
   const SUITS = ['♠', '♥', '♦', '♣'];           // spade, heart, diamond, club
   const RANKS = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
-  const rankIx = (c) => c % 13, suitIx = (c) => (c / 13) | 0;
+  // The rules below - the roll, the shuffle, the totals and the ranking - live in duel.js since M17 items 4 and 5:
+  // our server plays a real table with the same ones, so the page reads them back rather than keeping a copy.
+  const { rankIx, suitIx, rolls, shuffled, deckFor, STAND_ON, bjTotal, HAND_NAMES, score5, cmpScore, bestOf, FOF, fofGround } = Duel;
   const cardHTML = (c, cls) => c == null ? '<span class="card2 down">?<i>·</i></span>'
     : '<span class="card2' + (cls ? ' ' + cls : '') + '">' + RANKS[rankIx(c)] + '<i>' + SUITS[suitIx(c)] + '</i></span>';
   const handHTML = (cs, hi) => cs.map(c => cardHTML(c, hi && c != null && hi.indexOf(c) >= 0 ? 'best' : '')).join('');
-  function rolls(word, duelId) {                                    // a uniform 0..n-1 off this duel's word
-    const s = Chance.stream(word, Chance.PREVIEW_CONTRACT, Chance.CHAIN_ID, duelId);
-    return (n) => { const lim = Math.floor(10000 / n) * n; let r; do { r = s(); } while (r >= lim); return r % n; };
-  }
-  const shuffled = (n, below) => { const a = Array.from({ length: n }, (_, i) => i);
-    for (let i = n - 1; i > 0; i--) { const j = below(i + 1), t = a[i]; a[i] = a[j]; a[j] = t; } return a; };
-  const deckFor = (word, duelId) => { const d = shuffled(52, rolls(word, duelId)); return () => d.pop(); };
 
   /* ---------- blackjack: closest to 21 without going over ----------
      Aces are 11 until the hand would bust and then 1 — counted, not chosen. STAND_ON is the ordinary
      rule, and it is the PAGE's rule: it is what stands in for a person until M7 makes the other side
      real, so it is one constant here rather than a number spread through the play. */
-  const STAND_ON = 17;
-  function bjTotal(cs) { let t = 0, a = 0;
-    cs.forEach(c => { const r = rankIx(c); if (r === 0) { a++; t += 11; } else t += Math.min(10, r + 1); });
-    while (t > 21 && a) { t -= 10; a--; } return t; }
   function playBJ(arena, done) {
     const word = Chance.randomWord(), duelId = ++S.duels, draw = deckFor(word, duelId);
     const mine = [draw(), draw()], theirs = [draw(), draw()];
@@ -1127,39 +1148,6 @@ button { font: inherit; color: inherit; }
      cover, because the other side has to be able to call it. FOLD is what you do against a bet you will
      not match: it hands the pot across without a hand being shown, which is the ordinary rule now that
      there is a bet to fold to. */
-  const HAND_NAMES = ['HIGH CARD', 'A PAIR', 'TWO PAIR', 'THREE OF A KIND', 'A STRAIGHT', 'A FLUSH',
-    'A FULL HOUSE', 'FOUR OF A KIND', 'A STRAIGHT FLUSH'];
-  function score5(cs) {
-    const rs = cs.map(c => { const r = rankIx(c); return r === 0 ? 14 : r + 1; }).sort((a, b) => b - a);
-    const ss = cs.map(suitIx), flush = ss.every(s => s === ss[0]), uniq = [...new Set(rs)];
-    let str = 0;
-    if (uniq.length === 5) { if (uniq[0] - uniq[4] === 4) str = uniq[0];
-      else if (uniq[0] === 14 && uniq[1] === 5) str = 5; }          // the wheel, A2345, where the ace is low
-    const cnt = new Map(); rs.forEach(r => cnt.set(r, (cnt.get(r) || 0) + 1));
-    const g = [...cnt.keys()].sort((a, b) => cnt.get(b) - cnt.get(a) || b - a), shape = g.map(r => cnt.get(r)).join('');
-    if (flush && str) return [8, str];
-    if (shape === '41') return [7, g[0], g[1]];
-    if (shape === '32') return [6, g[0], g[1]];
-    if (flush) return [5].concat(rs);
-    if (str) return [4, str];
-    if (shape === '311') return [3, g[0], g[1], g[2]];
-    if (shape === '221') return [2, g[0], g[1], g[2]];
-    if (shape === '2111') return [1, g[0], g[1], g[2], g[3]];
-    return [0].concat(rs);
-  }
-  const cmpScore = (a, b) => { const n = Math.max(a.length, b.length);
-    for (let i = 0; i < n; i++) { const d = (a[i] || 0) - (b[i] || 0); if (d) return d; } return 0; };
-  // the best five of however many are showing — five, six or seven
-  function bestOf(cards) {
-    if (cards.length < 5) return null;
-    let best = null, which = null;
-    const pick = (start, acc) => {
-      if (acc.length === 5) { const s = score5(acc); if (!best || cmpScore(s, best) > 0) { best = s; which = acc.slice(); } return; }
-      for (let i = start; i < cards.length; i++) { acc.push(cards[i]); pick(i + 1, acc); acc.pop(); }
-    };
-    pick(0, []);
-    return { score: best, cards: which, name: HAND_NAMES[best[0]] };
-  }
   function playHoldem(arena, done) {
     // one stream off the word: the deck comes off it first, then every decision the page makes
     const word = Chance.randomWord(), duelId = ++S.duels, below = rolls(word, duelId);
@@ -1339,13 +1327,6 @@ button { font: inherit; color: inherit; }
      so they live in this one object and change in one line — nothing reads them twice. No odds, no
      stake and no payout is invented here: this game pays through the same pot every other game pays
      through, and `settle` is untouched. */
-  const FOF = { w: 5, h: 5, friends: 3, fiends: 3 };
-  function fofGround(below) {
-    const n = FOF.w * FOF.h, order = shuffled(n, below), kind = new Array(n).fill('empty');
-    order.slice(0, FOF.friends).forEach(i => kind[i] = 'friend');
-    order.slice(FOF.friends, FOF.friends + FOF.fiends).forEach(i => kind[i] = 'fiend');
-    return kind;
-  }
   function playFoF(arena, done) {
     const word = Chance.randomWord(), duelId = ++S.duels, below = rolls(word, duelId);
     S.last = { duelId, word };
@@ -1526,6 +1507,292 @@ button { font: inherit; color: inherit; }
   if (demoQ != null) applyDemo(demoQ === '1', 'url', '?demo=' + demoQ + ' on the address bar; no contract to ask');
   restart();
   readDemoChain();                                       // the chain's answer, when there is one, wins over the query
+
+  /* ---------- REAL: a challenge against another signed-in player (M17 items 4 and 5) ----------
+     Everything above is the PRACTICE table: the page plays the other side, with sample purses. This is the real
+     one. Our server holds it (estate/duels.py): the lobby, both seats, every roll, and both stakes, which leave
+     the real base purses at accept and come back at the end through the record (stakeHeld, stakeSettled). The
+     page draws what the server says this seat may see, sends a move and nothing else, and polls - at the two-
+     player layer's own pace, which the server reads off record.js and sends. It decides nothing.
+     WHO GETS WHICH. A signed-in player always gets the real table and never sees the test bar; the deployer gets
+     the practice table and its bar, and the real one with ?real=1 (or ?vs= / ?duel=). On a developer's machine
+     nothing is asked unless one of those is on the address bar, so every check runs the practice table as before.
+     ?vs=<base or wallet> fills in who to challenge - what the base's CHALLENGE action opens; ?duel=<n> opens a game. */
+  const LOCALHOST = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
+  const REALQ = q.has('vs') || q.has('duel') || q.get('real') === '1' || q.has('terminal');
+  const short = (a) => a ? a.slice(0, 6) + '…' + a.slice(-4) : '?';
+  const GAME_NAME = Object.fromEntries(GAMES.map(g => [g.id, g.name]));
+  async function duelApi(method, path, body) {
+    try {
+      const r = await fetch('/api/duel' + path, { method, cache: 'no-store', credentials: 'same-origin',
+        headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined });
+      const j = await r.json().catch(() => null);
+      return j || { ok: false, why: 'the server said ' + r.status };
+    } catch (e) { return { ok: false, why: 'our server could not be reached' }; }
+  }
+  async function detectReal() {
+    if (!REALQ && LOCALHOST) return;
+    let who = null;
+    try { const r = await fetch('/api/auth/me', { cache: 'no-store', credentials: 'same-origin' }); who = r.ok ? await r.json() : null; } catch (e) { who = null; }
+    if (who && who.address && (who.role === 'player' || (who.role === 'deployer' && REALQ))) return enterReal(who);
+    if (REALQ) { REAL.on = true; ['main', 'prompt', 'nope'].forEach(k => { $(k).hidden = true; });
+      $('lobby').hidden = false;
+      $('lobby').innerHTML = '<div class="mtop cold"><i class="dot"></i><span id="ltitle">CHALLENGE · A REAL PLAYER</span></div>' +
+        '<div class="body"><div class="note2">Sign in with your wallet on the <a href="/" style="color:var(--signal)">start page</a> to challenge another player.</div></div>'; }
+  }
+  function enterReal(who) {
+    REAL.on = true; REAL.who = who;
+    if (who.role !== 'deployer') { const bar = document.querySelector('.demo'); if (bar) bar.remove(); }   // the test bar is the deployer's
+    ['main', 'prompt', 'nope', 'algo'].forEach(k => { $(k).hidden = true; });
+    if (q.get('vs')) REAL.form.vs = q.get('vs');
+    if (q.get('duel')) REAL.open = String(parseInt(q.get('duel'), 10) || '');
+    if (q.get('terminal')) REAL.term = { id: String(q.get('terminal')).slice(0, 16), state: 'idle', duel: null };
+    clearInterval(REAL.ticker); REAL.ticker = setInterval(tickClocks, 1000);
+    poll();
+  }
+  async function poll() {
+    clearTimeout(REAL.timer);
+    const j = await duelApi('GET', '');
+    if (j.ok) {
+      REAL.list = j;
+      // a game this seat is in that has just gone live opens itself, once - the challenger learns of the accept here
+      j.duels.forEach(d => { if (d.status === 'live' && !REAL.seen[d.n]) { REAL.seen[d.n] = 1; if (!REAL.open) REAL.open = String(d.n); } });
+    } else REAL.msg = j.why || j.error || 'the lobby did not answer';
+    paintReal();
+    REAL.timer = setTimeout(poll, (j.ok && j.pollMs) || 2000);
+  }
+  const duelOf = (n) => REAL.list && REAL.list.duels.find(d => String(d.n) === String(n));
+  function paintReal() { if (REAL.term && REAL.term.state !== 'real' && !REAL.open) return paintTerminal();
+    const d = REAL.open && duelOf(REAL.open);
+    $('lobby').hidden = !!d; $('table').hidden = !d;
+    if (d) paintTable(d); else { $('table').innerHTML = ''; paintLobby(); } }   // a table left behind keeps nothing on the page
+  function tickClocks() {
+    document.querySelectorAll('[data-until]').forEach(el => { const s = Math.max(0, Math.round(+el.dataset.until - Date.now() / 1000));
+      el.textContent = Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); });
+  }
+  const until = (t) => '<span class="cd" data-until="' + t + '">' + (() => { const s = Math.max(0, Math.round(t - Date.now() / 1000)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); })() + '</span>';
+  const mostLine = (g, stake) => g !== 'holdem' || !stake ? '' : '<div class="most" data-most="' + holdemMostX() * stake + '">AT MOST <b>' + holdemMostX() * stake +
+    '</b> A HAND · ' + holdemMostX() + '× THE STAKE · HELD AT ACCEPT, AS FAR AS BOTH PURSES GO; WHAT IS NOT BET COMES BACK</div>';
+  const recLine2 = (r) => r ? '<b>' + r.wins + '</b> W · <b>' + r.losses + '</b> L · <b>' + r.draws + '</b> D' : '';
+
+  function paintLobby() {
+    const L = REAL.list, el = $('lobby');
+    if (!L) { el.hidden = false; el.innerHTML = '<div class="mtop"><i class="dot"></i><span id="ltitle">CHALLENGE · A REAL PLAYER</span></div><div class="body"><div class="msg">' + (REAL.msg || 'Asking our server…') + '</div></div>'; return; }
+    const base = L.me.bases[0], F = REAL.form, demo = L.demo || {};
+    const atTerm = !!(REAL.term && REAL.term.state === 'real');     // M17 item 16: opened at a real terminal
+    if (atTerm) F.game = 'fof';
+    // a form being typed into is not repainted from under the cursor: the lists are, the form keeps its own state
+    const keepFocus = document.activeElement && document.activeElement.id === 'lvs';
+    const rows = (pred, fn) => L.duels.filter(pred).map(fn).join('');
+    const incoming = rows(d => d.status === 'offered' && d.you === 'p2', d =>
+      '<div class="lrow mine" data-offer="' + d.n + '"><div class="t"><b>' + short(d.from.address) + '</b> · base ' + d.from.base + ' · ' + recLine2((L.stats || {})[d.from.address]) +
+        '<br><b>' + GAME_NAME[d.game] + '</b> · ' + (d.stake ? 'you stake <b>' + d.stake + '</b> of your <b>' + (base ? base.purse : 0) + '</b> · the pot is <b>' + d.stake * 2 + '</b>' : '<b>free</b> · nothing is staked') +
+        ' · answer in ' + until(d.expires) + mostLine(d.game, d.stake) + '</div>' +
+        '<div class="b"><button class="go alt" type="button" data-refuse="' + d.n + '">NOT WORTH MY TIME</button>' +
+        '<button class="go" type="button" data-accept="' + d.n + '">LET\'S GET IT ON · ' + (d.stake || 'FREE') + '</button></div></div>');
+    const sent = rows(d => d.status === 'offered' && d.you === 'p1', d =>
+      '<div class="lrow" data-sent="' + d.n + '"><div class="t">to <b>' + short(d.to.address) + '</b> · base ' + d.to.base + ' · <b>' + GAME_NAME[d.game] + '</b> · ' +
+        (d.stake ? 'stake <b>' + d.stake + '</b> each' : '<b>free</b>') + ' · waiting ' + until(d.expires) + '</div>' +
+        '<div class="b"><button class="go alt" type="button" data-cancel="' + d.n + '">WITHDRAW</button></div></div>');
+    const live = rows(d => d.status === 'live', d =>
+      '<div class="lrow mine"><div class="t"><b>' + GAME_NAME[d.game] + '</b> v <b>' + short(d.you === 'p1' ? d.to.address : d.from.address) + '</b> · pot <b>' + ((d.view || {}).pot || 0) + '</b>' +
+        ((d.view || {}).yourMove ? ' · <b>YOUR MOVE</b>' : '') + '</div><div class="b"><button class="go" type="button" data-open="' + d.n + '">OPEN</button></div></div>');
+    const past = rows(d => d.status !== 'offered' && d.status !== 'live', d => { const w = d.view && d.view.result && d.view.result.winner;
+      return '<div class="lrow" data-past="' + d.n + '"><div class="t"><b>' + GAME_NAME[d.game] + '</b> · ' + (d.you === 'p1' ? 'to ' + short(d.to.address) : 'from ' + short(d.from.address)) + ' · <b>' +
+        (d.status === 'settled' ? (w === d.you ? 'WON' : w === 'draw' || w === 'void' ? 'EVEN' : 'LOST') + '</b> · ' + ((d.credits || {})[d.you] - ((d.hold || {})[d.you] || 0) >= 0 ? '+' : '') + (((d.credits || {})[d.you] || 0) - ((d.hold || {})[d.you] || 0))
+          : d.status.toUpperCase() + '</b> · nothing moved') + '</div>' +
+        (d.status === 'settled' ? '<div class="b"><button class="go alt" type="button" data-open="' + d.n + '">SEE IT</button></div>' : '') + '</div>'; });
+    const cap = base ? base.purse : 0;
+    el.innerHTML =
+      '<div class="mtop"><i class="dot"></i><span id="ltitle">' + (atTerm ? 'FRIEND OR FIEND · AT TERMINAL ' + REAL.term.id : 'CHALLENGE · A REAL PLAYER') + '</span><span class="sp"></span>' +
+        '<span class="sample">' + short(L.me.address) + (base ? ' · BASE ' + base.base : '') + '</span><button class="ghost" type="button" id="lclose">CLOSE</button></div>' +
+      '<div class="body">' +
+        (demo.on ? '<div class="sample" id="ldemo">DEMO MODE · ' + (demo.free ? 'FREE ON CHAIN 4663 · NOTHING IS STAKED' : 'TEST CHAIN · STAKES ARE PRACTICE') + ' · ' + String(demo.src).toUpperCase() + '</div>' : '') +
+        '<div class="lab"><span>YOUR PURSE</span><span><b id="lpurse" data-purse="' + cap + '">' + cap + '</b> CRYSTALS' + (base && base.held ? ' · <b id="lheld">' + base.held + '</b> HELD IN PLAY' : '') + '</span></div>' +
+        (base ? '' : '<div class="note2">You have no base on our server yet. <b>START GAME</b> first, then come back.</div>') +
+        (incoming ? '<div class="lsec"><div class="lab"><span>INCOMING</span></div>' + incoming + '</div>' : '') +
+        (live ? '<div class="lsec"><div class="lab"><span>IN PLAY</span></div>' + live + '</div>' : '') +
+        (sent ? '<div class="lsec"><div class="lab"><span>SENT</span></div>' + sent + '</div>' : '') +
+        '<div class="lform"><div class="lab"><span>CHALLENGE SOMEBODY</span><span>ANSWER WITHIN ' + Math.round((L.acceptWindow || 300) / 60) + ' MIN AT MOST</span></div>' +
+          '<input id="lvs" placeholder="their base number, or their wallet 0x…" spellcheck="false" autocomplete="off" value="' + String(F.vs).replace(/"/g, '') + '">' +
+          '<div class="games slim">' + GAMES.filter(g => !atTerm || g.id === 'fof').map(g => '<button class="game" type="button" data-lgame="' + g.id + '" aria-pressed="' + (F.game === g.id) + '"><b>' + g.name + '</b></button>').join('') + '</div>' +
+          '<div class="lab"><span>STAKE EACH</span><span>' + (demo.free ? 'DEMO MODE · FREE' : 'NO MORE THAN THE SMALLER PURSE') + '</span></div>' +
+          '<div class="stake">' + [0].concat(STAKES).map(v => '<button class="ghost" type="button" data-lstake="' + v + '" aria-pressed="' + (F.stake === v) + '"' +
+            ((v > cap || (demo.free && v)) ? ' disabled' : '') + '>' + (v || 'FREE') + '</button>').join('') + '</div>' +
+          mostLine(F.game, F.stake) +
+          '<div class="lab"><span>THE OFFER STANDS</span><span class="seg">' + [60, 120, 300].map(t => '<button class="ghost" type="button" data-lttl="' + t + '" aria-pressed="' + (F.ttl === t) + '">' + t / 60 + ' MIN</button>').join('') + '</span></div>' +
+          '<div class="acts"><button class="go" type="button" id="lsend"' + (base ? '' : ' disabled') + '>CHALLENGE · ' + (F.stake || 'FREE') + '</button></div>' +
+        '</div>' +
+        (past ? '<div class="lsec"><div class="lab"><span>LATELY</span></div>' + past + '</div>' : '') +
+        '<div class="msg" id="lmsg">' + (REAL.msg || '') + '</div>' +
+      '</div>';
+    const vs = $('lvs'); vs.oninput = () => { F.vs = vs.value; };
+    if (keepFocus) { vs.focus(); vs.setSelectionRange(vs.value.length, vs.value.length); }
+    el.querySelectorAll('[data-lgame]').forEach(b => b.onclick = () => { F.game = b.dataset.lgame; paintLobby(); });
+    el.querySelectorAll('[data-lstake]').forEach(b => b.onclick = () => { if (!b.disabled) { F.stake = +b.dataset.lstake; paintLobby(); } });
+    el.querySelectorAll('[data-lttl]').forEach(b => b.onclick = () => { F.ttl = +b.dataset.lttl; paintLobby(); });
+    el.querySelectorAll('[data-accept]').forEach(b => b.onclick = () => answer(b.dataset.accept, 'accept'));
+    el.querySelectorAll('[data-refuse]').forEach(b => b.onclick = () => answer(b.dataset.refuse, 'refuse'));
+    el.querySelectorAll('[data-cancel]').forEach(b => b.onclick = () => answer(b.dataset.cancel, 'cancel'));
+    el.querySelectorAll('[data-open]').forEach(b => b.onclick = () => { REAL.open = b.dataset.open; REAL.seen[b.dataset.open] = 1; paintReal(); });
+    $('lsend').onclick = sendReal;
+    $('lclose').onclick = () => { if (EMBED) leave(); else location.href = 'base.html'; };
+  }
+  /* ---------- M17 ITEM 16 (ruling 101): a terminal, used ----------
+     challenge.html?embed=1&terminal=<x.y> is what the map opens when a player taps a terminal. The page cannot tell a
+     real one from a planted one - the id is a tile either way - and neither can the player until they USE it: our server
+     answers. A REAL terminal opens Friend or Fiend's challenge, an ordinary offer to somebody that they may turn down.
+     A PLANTED one - a 1/1 Doopie standing as a terminal - SPRINGS: the game is already live and both stakes already
+     held when the answer arrives, so the card that says so carries ONE button and nothing to decline with (DESIGN,
+     *What springs - still to decide*: "A duel sprung by a terminal cannot be declined"). */
+  function paintTerminal() {
+    const T = REAL.term, el = $('lobby');
+    el.hidden = false; $('table').hidden = true;
+    if (T.state === 'sprung') return paintSprungReal();
+    if (el.dataset.term === T.id) { const m = $('lmsg'); if (m) m.innerHTML = REAL.msg || ''; return; }   // the glitch keeps running
+    el.dataset.term = T.id;
+    el.innerHTML = '<div class="mtop"><i class="dot"></i><span id="ltitle">A TERMINAL · ' + T.id + '</span><span class="sp"></span>' +
+        '<button class="ghost" type="button" id="lclose">CLOSE</button></div>' +
+      '<div class="body"><div class="term"><canvas id="fofterm" aria-label="a terminal, glitching"></canvas>' +
+        '<span class="cap">A <b>TERMINAL</b>, GLITCHING HARD.<br>THIS IS WHERE FRIEND OR FIEND IS PLAYED.</span>' +
+        '<div class="acts2"><button class="go" type="button" id="tuse">USE THE TERMINAL</button></div></div>' +
+        '<div class="msg" id="lmsg">' + (REAL.msg || '') + '</div></div>';
+    terminalGlitch($('fofterm'));
+    $('tuse').onclick = useTerminal;
+    $('lclose').onclick = () => { if (EMBED) leave(); else location.href = 'base.html'; };
+  }
+  async function useTerminal() {
+    const T = REAL.term; $('tuse').disabled = true;
+    const j = await duelApi('POST', '/terminal/' + encodeURIComponent(T.id) + '/use');
+    delete $('lobby').dataset.term; stopTerminal();
+    if (j.ok && j.sprung) { T.state = 'sprung'; T.duel = j.duel; REAL.seen[j.duel.n] = 1; REAL.msg = ''; }
+    else if (j.ok) { T.state = 'real'; REAL.form.game = 'fof'; REAL.msg = 'The terminal opens <b>Friend or Fiend</b>. Name who to play.'; }
+    else { REAL.msg = j.why || j.error; $('tuse').disabled = false; return paintTerminal(); }
+    poll();
+  }
+  function paintSprungReal() {
+    const d = REAL.term.duel, el = $('lobby'), base = REAL.list && REAL.list.me.bases[0];
+    el.innerHTML = '<div class="mtop cold"><i class="dot"></i><span id="ltitle">SPRUNG · A DUEL YOU CANNOT DECLINE</span></div>' +
+      '<div class="pc" id="sprungreal" data-duel="' + d.n + '">' +
+        '<div class="sprungart"><img id="sprungclip" alt="a Doopie taking the shape of a terminal" src="burrow/terminal-6289.gif"></div>' +
+        '<div class="pcmain"><div class="pcwho"><b>IT WAS NOT A MACHINE</b></div>' +
+          '<div class="pcline">A <b>1/1 DOOPIE</b>' + (d.doopie != null ? ' · <b>#' + d.doopie + '</b>' : '') + ' · was standing as terminal ' + d.terminal + '. You used it; it has you.</div>' +
+          '<div class="pcline">ITS OWNER · <b>' + short(d.from.address) + '</b> · base ' + d.from.base + '</div>' +
+          '<div class="pcbig"><span class="n" id="sprungpot">' + d.stake * 2 + '</span><span class="u">CRYSTALS<br>IN THE POT</span></div>' +
+          '<div class="pcline">friend or fiend · ' + (d.stake ? 'you stake <b id="sprungstake">' + d.stake + '</b>' + (base ? ' · <b>' + base.purse + '</b> left in your purse' : '') + ' · a tenth of the smaller purse, held already'
+            : '<b>free</b> · nothing is staked') + ' · the Doopie probes first</div></div>' +
+        '<div class="acts"><button class="go" type="button" id="sprungplay">THE MACHINE HAS YOU · PLAY IT OUT</button></div>' +
+      '</div>';
+    el.classList.add('sprung');
+    $('sprungplay').onclick = () => { REAL.open = String(d.n); REAL.term = null; el.classList.remove('sprung'); paintReal(); };
+  }
+  async function sendReal() {
+    const F = REAL.form, to = String(F.vs || '').trim();
+    if (!to) { REAL.msg = 'Name who to challenge: their base number or their wallet.'; return paintLobby(); }
+    $('lsend').disabled = true;
+    const atTerm = !!(REAL.term && REAL.term.state === 'real');
+    const j = await duelApi('POST', '', Object.assign({ to, game: atTerm ? 'fof' : F.game, stake: F.stake, expiresIn: F.ttl }, atTerm ? { terminal: REAL.term.id } : {}));
+    REAL.msg = j.ok ? 'Challenge sent to <b>' + short(j.duel.to.address) + '</b>. It stands ' + Math.round(F.ttl / 60) + ' min.' : (j.why || j.error);
+    poll();
+  }
+  async function answer(n, verb) {
+    REAL.pending = true;
+    const j = await duelApi('POST', '/' + n + '/' + verb);
+    REAL.msg = j.ok ? (verb === 'accept' ? 'Accepted: both stakes are held. Your move.' : verb === 'refuse' ? 'Turned down. Nothing was staked.' : 'Withdrawn. Nothing was staked.') : (j.why || j.error);
+    if (j.ok && verb === 'accept') { REAL.seen[n] = 1; REAL.open = String(n); }
+    REAL.pending = false;
+    poll();
+  }
+  async function realAct(action) {
+    const d = duelOf(REAL.open); if (!d || REAL.pending) return;
+    REAL.pending = true;
+    document.querySelectorAll('#table [data-act]').forEach(b => { b.disabled = true; });
+    const j = await duelApi('POST', '/' + d.n + '/act', { action });
+    REAL.pending = false;
+    if (j.ok) { const i = REAL.list.duels.findIndex(x => x.n === j.duel.n); if (i >= 0) REAL.list.duels[i] = j.duel; REAL.msg = ''; }
+    else REAL.msg = j.why || j.error;
+    poll();
+  }
+  // the end of a real game: the word the server drew is shown, checked here against the commitment both seats
+  // were shown from the start, and the roll replayed - so nobody has to take the result on trust
+  function verifyHTML(v) {
+    if (!v.word) return '';
+    const okC = Duel.commitOf(v.word) === v.commit;
+    let okR = true;
+    if (v.game === 'rps' && v.picks && v.picks.p1 && v.picks.p2)
+      okR = Duel.settle({ word: v.word, contract: Chance.PREVIEW_CONTRACT, chainId: Chance.CHAIN_ID }, v.duelId, v.picks.p1, v.picks.p2, v.stake).roll === v.roll;
+    // the cards: the deck off the word deals p1 two, p2 two (and hold'em's five in the middle), in that order
+    if (v.game === 'blackjack' || v.game === 'holdem') { const d = deckFor(v.word, v.duelId), hands = { p1: [d(), d()], p2: [d(), d()] };
+      okR = JSON.stringify(hands[v.seat]) === JSON.stringify(v.mine.slice(0, 2)) &&
+        (v.game !== 'holdem' || v.board.length < 5 || JSON.stringify([d(), d(), d(), d(), d()]) === JSON.stringify(v.board)); }
+    // friend or fiend: both grounds come off the word, p1's first - this seat's must be the one it was given
+    if (v.game === 'fof') { const below = rolls(v.word, v.duelId), g = { p1: fofGround(below), p2: fofGround(below) };
+      okR = JSON.stringify(g[v.seat]) === JSON.stringify(v.mine); }
+    return '<div class="verify" id="tverify" data-ok="' + (okC && okR ? 1 : 0) + '">THE WORD <b>' + v.word.slice(0, 12) + '…</b> ' +
+      (okC ? 'MATCHES THE COMMITMENT' : 'DOES NOT MATCH THE COMMITMENT') + ' · ' + (okR ? 'THE DEAL REPLAYS' : 'THE DEAL DOES NOT REPLAY') + '</div>';
+  }
+  function paintTable(d) {
+    const v = d.view || {}, el = $('table'), over = !!v.result, mine = d.you, them2 = mine === 'p1' ? 'p2' : 'p1';
+    const themAddr = mine === 'p1' ? d.to.address : d.from.address;
+    const res = v.result && v.result.winner, verdict = !over ? '' : res === mine ? 'YOU WIN' : res === 'draw' ? 'A DRAW' : res === 'void' ? 'NOBODY MOVED · BOTH STAKES BACK' : 'YOU LOSE';
+    const btn = (a, label, alt) => '<button class="go' + (alt ? ' alt' : '') + '" type="button" data-act=\'' + JSON.stringify(a) + '\'' + (REAL.pending ? ' disabled' : '') + '>' + label + '</button>';
+    let arena = '';
+    if (d.status === 'live' || over) {
+      if (v.game === 'rps') {
+        arena = '<div class="hands"><div class="hand mine"><canvas id="rhm"></canvas><span class="cap' + (v.picks[mine] ? ' locked' : '') + '">YOU · ' + (v.picks[mine] ? v.picks[mine].toUpperCase() : 'PICK ONE') + '</span></div>' +
+          '<span class="vs">VS</span><div class="hand theirs"><canvas id="rht"></canvas><span class="cap' + (v.picks[them2] ? ' locked' : '') + '" id="rtheirs">' + short(themAddr) + ' · ' +
+          (over ? v.picks[them2].toUpperCase() : v.picks[them2] ? 'SEALED' : 'THINKING') + '</span></div></div>' +
+          (v.legal.length ? '<div class="picks">' + v.legal.map(p => '<button class="pick" type="button" data-act=\'' + JSON.stringify({ type: 'pick', pick: p }) + '\'><canvas data-hand="' + p + '"></canvas><span>' + p.toUpperCase() + '</span></button>').join('') + '</div>' : '') +
+          (over ? '<div class="result' + (res === mine ? ' win' : '') + '" id="tres">' + verdict + ' <span class="need">· ROLL ' + String(v.roll).padStart(4, '0') + ' · ' + (mine === 'p1' ? 'YOUR' : 'THEIR') + ' ODDS ' + v.odds / 100 + '%</span></div>' : '');
+      } else if (v.game === 'blackjack') {
+        arena = '<div class="seats"><div class="pair"><div class="seat"><span class="cap">' + short(themAddr) + (v.theyStood ? ' · STOOD' : '') + '</span><div class="cards">' + handHTML(v.theirs) + '</div>' +
+          '<span class="tot">' + (v.theirTotal == null ? '?' : v.theirTotal) + '</span></div>' +
+          '<div class="seat"><span class="cap locked">YOU' + (v.stood ? ' · STOOD' : '') + '</span><div class="cards">' + handHTML(v.mine) + '</div><span class="tot' + (v.total > 21 ? ' bust' : '') + '" id="bjt">' + v.total + '</span></div></div></div>' +
+          (v.legal.length ? '<div class="acts2">' + btn({ type: 'hit' }, 'HIT') + btn({ type: 'stand' }, 'STAND', 1) + '</div>' : '') +
+          (over ? '<div class="result' + (res === mine ? ' win' : '') + '" id="tres">' + verdict + '</div>' : '');
+      } else if (v.game === 'holdem') {
+        const L = { check: 'CHECK', bet: 'BET ' + v.bet, call: 'CALL ' + v.due, raise: 'RAISE ' + (v.due + v.bet), fold: 'FOLD' };
+        arena = '<div class="seats"><div class="street"><span class="cap">' + ['HOLE CARDS', 'THE FLOP', 'THE TURN', 'THE RIVER'][v.street] + (over ? ' · SHOWDOWN' : '') + '</span><div class="cards" id="hboard">' +
+            (v.board.length ? handHTML(v.board, v.best && v.best.cards) : handHTML([null, null, null])) + '</div></div>' +
+          '<div class="pair"><div class="seat"><span class="cap">' + short(themAddr) + (v.toAct === them2 ? ' · TO ACT' : '') + '</span><div class="cards">' + handHTML(v.theirs) + '</div>' +
+            '<span class="cap" id="htbest">' + (v.theirBest ? v.theirBest.name : '') + '</span></div>' +
+          '<div class="seat"><span class="cap locked">YOU' + (v.toAct === mine ? ' · TO ACT' : '') + '</span><div class="cards">' + handHTML(v.mine) + '</div>' +
+            '<span class="cap" id="hmbest">' + (v.best ? v.best.name : '') + '</span></div></div></div>' +
+          '<div class="unit"><span class="k">BETS IN CRYSTALS · HAND OPENED BY ' + (v.first === mine ? 'YOU' : 'THEM') + '</span><span class="k">PAID ' + v.paid[mine] + ' OF ' + v.hold + ' HELD</span></div>' +
+          (v.legal.length ? '<div class="acts2">' + v.legal.map(a => btn({ type: a }, L[a], a === 'fold' || a === 'raise' || a === 'bet')).join('') + '</div>' : '') +
+          (over ? '<div class="result' + (res === mine ? ' win' : '') + '" id="tres">' + verdict + ' <span class="need">· ' + (v.folded ? (v.folded === mine ? 'YOU FOLDED' : 'THEY FOLDED') : (v.best ? v.best.name : '') + ' V ' + (v.theirBest ? v.theirBest.name : '')) + '</span></div>' : '');
+      } else if (v.game === 'fof') {
+        const grid = (cells, click, hits) => '<div class="gridn" style="grid-template-columns:repeat(' + v.w + ',minmax(0,1fr))">' + cells.map((k, i) =>
+          '<button class="cell' + (k ? ' ' + k : '') + (hits && hits.includes(i) ? ' fiend' : '') + '" type="button"' + (click && !k && v.legal.length ? ' data-act=\'' + JSON.stringify({ type: 'probe', cell: i }) + '\'' : ' disabled') + '>' +
+            (k === 'friend' ? 'F' : k === 'fiend' ? 'X' : k === 'empty' ? '·' : '') + '</button>').join('') + '</div>';
+        arena = '<div class="fof"><span class="lbl">THEIR GROUND · ' + (v.turn === mine ? 'YOUR TURN' : over ? 'OVER' : 'THEIR TURN') + '</span>' + grid(v.theirs, true) +
+          '<div class="tally"><div><span class="k">THEIR FRIENDS</span><span class="v"><b>' + v.found + '</b> / ' + v.friends + '</span></div><div><span class="k">YOURS FOUND</span><span class="v"><b>' + v.lost + '</b> / ' + v.friends + '</span></div></div></div>' +
+          (over ? '<div class="result' + (res === mine ? ' win' : '') + '" id="tres">' + verdict + '</div>' : '');
+      }
+    }
+    const credit = d.credits ? d.credits[mine] - (d.hold ? d.hold[mine] : 0) : null;
+    el.innerHTML =
+      '<div class="mtop"><i class="dot"></i><span id="ttitle">' + GAME_NAME[d.game] + ' · #' + d.n + '</span><span class="sp"></span>' +
+        '<span class="sample">' + (d.stake ? 'STAKE ' + d.stake + ' EACH' : 'FREE') + '</span><button class="ghost" type="button" id="tback">LOBBY</button></div>' +
+      '<div class="body">' +
+        '<div class="pot slim"><div class="k">POT</div><div class="n' + (v.pot ? ' live' : '') + '" id="tpot">' + (v.pot || 0) + '</div></div>' +
+        '<div class="tseats"><div class="' + (v.yourMove && !over ? 'turn' : '') + '">YOU · <b>' + short(REAL.list.me.address) + '</b> · base ' + (mine === 'p1' ? d.from.base : d.to.base) + '</div>' +
+          '<div class="' + (!v.yourMove && !over ? 'turn' : '') + '">THEM · <b>' + short(themAddr) + '</b> · base ' + (mine === 'p1' ? d.to.base : d.from.base) + '</div></div>' +
+        (d.kind === 'sprung' ? '<div class="note2" id="tkind" data-kind="sprung">SPRUNG AT TERMINAL <b>' + d.terminal + '</b> BY A 1/1 DOOPIE' + (d.doopie != null ? ' <b>#' + d.doopie + '</b>' : '') + ' · ' +
+          (mine === 'p1' ? 'YOUR DOOPIE · IT PROBES FIRST' : 'HELD BY <b>' + short(d.from.address) + '</b> · BASE ' + d.from.base + ' · IT PROBES FIRST') + '</div>'
+          : d.kind === 'terminal' ? '<div class="note2" id="tkind" data-kind="terminal">PLAYED AT TERMINAL <b>' + d.terminal + '</b></div>' : '') +
+        '<div class="arena" id="tarena">' + arena + '</div>' +
+        (d.status === 'settled' ? '<div class="note2" id="tsettled">' + (credit >= 0 ? 'Settled into your base: <b>+' + credit + '</b> over what you put up.' : 'Settled: <b>' + credit + '</b> crystals.') +
+          ((d.spilled || {})[mine] ? ' <b>' + d.spilled[mine] + '</b> did not fit your store and spilled next to your silo (next to your keep, if no silo stands).' : '') + '</div>' : '') +
+        (over ? verifyHTML(v) : '<div class="verify">THE SERVER DREW THE WORD · COMMITMENT <b>' + String(v.commit || '').slice(0, 12) + '…</b> · SHOWN WHEN IT ENDS · MOVE WITHIN ' + until(d.deadline || 0) + '</div>') +
+        '<div class="msg" id="tmsg">' + (REAL.msg || '') + '</div>' +
+      '</div>';
+    el.querySelectorAll('canvas[data-hand]').forEach(cv => paint(cv, HANDS[cv.dataset.hand]));
+    if ($('rhm')) { paint($('rhm'), HANDS[(v.picks && v.picks[mine]) || 'rock']); paint($('rht'), HANDS[over ? v.picks[them2] : 'hidden']); }
+    el.querySelectorAll('[data-act]').forEach(b => b.onclick = () => realAct(JSON.parse(b.dataset.act)));
+    $('tback').onclick = () => { REAL.open = null; REAL.msg = ''; paintReal(); };
+  }
+  detectReal();
   window.challenge = { S, P, H2H, GAMES, POTS, STAKES, settle, restart, potStats, rankOf, PLAYERS, TERMS: Duel.TERMS,
     bjTotal, score5, bestOf, cmpScore, rolls, deckFor, shuffled, FOF, STAND_ON,
     DEMO, applyDemo, readDemoChain, BET_UNITS, HOLDEM, betUnit, holdemMostX, holdemFirst };                                      // a handle for the checks

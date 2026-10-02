@@ -1,0 +1,124 @@
+/* THE PAGE TEMPLATE. The first stylesheet in estate/.
+ *
+ * Read off economy.html and mapgen.html, the two pages the deployer named as the proper format
+ * (2026-10-01): a black header with a hairline of signal under it, the brand (a signal dot, RARE FIENDS,
+ * and the page's name dimmed), the page buttons pushed to the right as bordered Silkscreen labels; then
+ * a 1040px column with a big Silkscreen h1, a lede, and sections divided by a faint rule, each headed by
+ * a numbered h2. Those two pages still carry their own inline copy of this; the player's pages
+ * (player.html, standings.html) link this file instead, so the copies stop multiplying here.
+ *
+ * The four tokens are the house's (ink, paper, signal, two fonts), plus dim and faint, which economy.html
+ * and mapgen.html already used, and --ground: the body colour every page wrote as the literal #090B09 and
+ * which was never one of the four.
+ */
+:root {
+  --ink: #FFFFFF; --paper: #000000; --signal: #CCFF00;
+  --dim: rgba(255,255,255,.62); --faint: rgba(255,255,255,.28);
+  --ground: #090B09;
+  --rule: rgba(255,255,255,.12);     /* a divider inside a card */
+  --line: rgba(204,255,0,.4);        /* the signal hairline under the header and over the footer */
+  --veil: rgba(0,0,0,.72);           /* what a modal lays over the page behind it */
+  --display: Silkscreen, monospace; --mono: "Sometype Mono", ui-monospace, monospace;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; background: var(--ground); color: var(--ink); overflow-x: hidden; }
+body { font-family: var(--mono); font-size: 19px; line-height: 1.5; }
+a { color: var(--signal); }
+
+/* ---------- the header: brand left, the page buttons right ---------- */
+header.top { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--paper);
+  position: sticky; top: 0; z-index: 5; padding-top: max(10px, env(safe-area-inset-top)); flex-wrap: wrap; }
+.brand { display: flex; align-items: center; gap: 9px; font-family: var(--display); font-size: 19px; letter-spacing: .12em; white-space: nowrap; min-width: 0; }
+.brand i { width: 8px; height: 8px; background: var(--signal); border-radius: 50%; flex: none; }
+.brand span { color: var(--dim); overflow: hidden; text-overflow: ellipsis; }
+header.top nav { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+/* a page button is a link, or - on the game page, for what opens IN the game (BUILD, MARKET, STUDIO) - a button; they look the same */
+header.top nav :is(a, button) { font-family: var(--display); font-size: 14px; letter-spacing: .1em; color: var(--ink); text-decoration: none; border: 1px solid var(--faint); padding: 5px 7px; white-space: nowrap;
+  background: none; line-height: 1.5; cursor: pointer; }
+header.top nav :is(a, button):hover { border-color: var(--signal); color: var(--signal); }
+header.top nav a[aria-current="page"] { border-color: var(--signal); color: var(--signal); }
+header.top nav button[aria-pressed="true"] { background: var(--signal); color: var(--paper); border-color: var(--signal); }
+/* the deployer's own pages, shown only to the deployer's wallet (session.js): dashed, so they never read as the game's */
+header.top nav .dev { border-style: dashed; color: var(--dim); }
+/* SIGN OUT (session.js): last, and dim, so it never reads as a page */
+header.top nav .signout { color: var(--dim); }
+/* the signed-in wallet, short: a label, not a button - signal, unboxed */
+header.top nav .who { font-family: var(--display); font-size: 14px; letter-spacing: .1em; color: var(--signal); align-self: center; padding: 5px 2px; white-space: nowrap; }
+/* the chosen name and the short address beside it (session.js; M5 item 2): the address is never left out. A long name is
+   cut on a wide header, so the row of page buttons keeps its one line; its title, and MY PROFILE, carry it whole */
+header.top nav .who .nm { font-weight: 400; color: var(--ink); max-width: 14ch; overflow: hidden; text-overflow: ellipsis; display: inline-block; vertical-align: bottom; margin-right: .6em; }
+/* 721 to 1365: the row of buttons has no room for the two side by side, so the name sits above the address, both a size
+   down, and the header keeps its one row */
+@media (min-width: 721px) and (max-width: 1365px) {
+  header.top nav .who:has(.nm) { display: inline-flex; flex-direction: column; align-items: flex-end; justify-content: center; font-size: 11px; line-height: 1.25; padding: 0 2px; }
+  header.top nav .who .nm { max-width: 12ch; margin-right: 0; } }
+@media (max-width: 720px) { header.top.open nav .who { padding: 7px 8px; min-height: 40px; display: flex; align-items: center; flex-wrap: wrap; white-space: normal; gap: 2px .6em; }
+  header.top.open nav .who .nm { max-width: 100%; margin-right: 0; overflow-wrap: anywhere; white-space: normal; } }
+header.top nav .sep { width: 1px; background: var(--faint); margin: 0 2px; }
+.pagesbtn { display: none; margin-left: auto; font-family: var(--display); font-size: 14px; letter-spacing: .1em; color: var(--ink); background: none;
+  border: 1px solid var(--faint); padding: 5px 9px; cursor: pointer; }
+.pagesbtn[aria-expanded="true"] { background: var(--signal); color: var(--paper); border-color: var(--signal); }
+
+/* ---------- the column ---------- */
+main.page { max-width: 1040px; margin: 0 auto; padding: 24px 16px 60px; }
+h1 { font-family: var(--display); font-weight: 400; font-size: clamp(34px, 5vw, 65px); line-height: 1; margin: 6px 0 12px; letter-spacing: .02em; overflow-wrap: anywhere; }
+.lede { color: rgba(255,255,255,.78); max-width: 720px; margin: 0 0 14px; }
+section.part { border-top: 1px solid var(--faint); padding: 22px 0 6px; scroll-margin-top: 60px; }
+h2 { font-family: var(--display); font-weight: 400; font-size: 22px; letter-spacing: .08em; margin: 0 0 4px; display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+h2 .n { color: var(--signal); }
+.q { color: var(--dim); font-size: 17px; margin: 0 0 14px; }
+p { margin: 0 0 10px; max-width: 760px; }
+p b, li b, td b { color: var(--ink); font-weight: 500; }
+.tag { display: inline-block; font-family: var(--display); font-size: 13px; letter-spacing: .1em; padding: 2px 5px; vertical-align: middle; white-space: nowrap; }
+.tag.game { background: var(--signal); color: var(--paper); }
+.tag.open { border: 1px dashed var(--faint); color: var(--dim); }
+
+/* fact cards: a label, a number, a line of where it came from */
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 8px; margin: 0 0 12px; }
+.fact { border: 1px solid var(--faint); background: var(--paper); padding: 10px 12px; display: grid; gap: 4px; align-content: start; min-width: 0; }
+.fact .k { font-family: var(--display); font-size: 14px; letter-spacing: .1em; color: var(--dim); display: flex; justify-content: space-between; gap: 6px; align-items: center; flex-wrap: wrap; }
+.fact .v, .fact .s { overflow-wrap: anywhere; }
+.fact .v { font-family: var(--display); font-size: 28px; letter-spacing: .02em; font-variant-numeric: tabular-nums; color: var(--dim); }
+.fact .v.read { color: var(--signal); }
+.fact .s { font-size: 15px; line-height: 1.4; color: var(--dim); }
+.fact .s b { color: var(--ink); font-weight: 500; }
+.note { border: 1px dashed var(--faint); padding: 10px 12px; margin: 0 0 12px; font-size: 16px; color: rgba(255,255,255,.8); overflow-wrap: anywhere; }
+.note b { color: var(--ink); }
+.btn { font-family: var(--display); font-size: 15px; letter-spacing: .08em; background: var(--signal); color: var(--paper); border: 0; padding: 9px 12px; cursor: pointer; text-decoration: none; display: inline-block; }
+.btn.ghost { background: none; color: var(--signal); border: 1px solid var(--signal); }
+.btn[disabled] { opacity: .6; cursor: default; }
+
+/* ---------- the footer: the landing page's credits line ---------- */
+footer.credits { display: flex; justify-content: center; align-items: center; gap: 8px; font-family: var(--display); font-size: 13px; letter-spacing: .12em;
+  color: var(--ink); background: var(--paper); border-top: 1px solid var(--line); padding: 8px 16px calc(8px + env(safe-area-inset-bottom, 0px)); }
+.credits .mark { display: inline-flex; align-items: center; }
+.credits .mark img, .credits img { image-rendering: pixelated; display: block; }
+.credits .mark:hover img { filter: brightness(1.25); }
+.credits .by { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: center; text-align: center; }
+.credits .by a { color: var(--signal); text-decoration: none; display: inline-flex; align-items: center; gap: 6px; }
+.credits .by a:hover { text-decoration: underline; }
+
+/* ---------- phones: the page buttons fold behind one PAGES button ---------- */
+@media (max-width: 720px) {
+  body { font-size: 16px; }
+  header.top { padding: 8px 12px; padding-top: max(8px, env(safe-area-inset-top)); flex-wrap: nowrap; position: sticky; }
+  .brand { font-size: 15px; letter-spacing: .08em; gap: 7px; }
+  .pagesbtn { display: block; flex: none; min-height: 40px; }   /* a thumb's target: 40px at the least */
+  header.top nav { display: none; }
+  header.top.open nav { display: grid; position: absolute; right: 12px; top: 100%; margin-top: 4px; grid-template-columns: 1fr; gap: 4px;
+    background: var(--paper); border: 1px solid var(--faint); padding: 6px; min-width: 190px; max-width: calc(100vw - 24px);
+    max-height: calc(100dvh - 70px); overflow-y: auto; overscroll-behavior: contain; z-index: 50; }
+  header.top.open nav :is(a, button) { text-align: left; font-size: 14px; padding: 7px 8px; min-height: 40px; display: flex; align-items: center; }
+  header.top nav .sep { width: auto; height: 1px; margin: 2px 0; }
+  main.page { padding: 14px 12px 40px; }
+  h2 { font-size: 18px; }
+  .q { font-size: 14px; }
+  .facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .fact { padding: 8px; }
+  .fact .v { font-size: 20px; }
+  .fact .s { font-size: 12px; }
+  .note { font-size: 13px; }
+  footer.credits { font-size: 10px; letter-spacing: .06em; gap: 6px; padding: 6px 8px calc(6px + env(safe-area-inset-bottom, 0px)); }
+  .credits .by { gap: 5px; }
+}

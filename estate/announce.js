@@ -22,16 +22,15 @@
 //   off        - events are still kept, but none is shown or counted; the pill reads EVENTS OFF, and the
 //                card (if open) says it is off. Turning it on shows what was kept.
 //
-// WHERE IT SITS - it must never cover the HUD, the build panel or the button row, at any size:
-//   - If the band above the game frame is tall enough (phones, and the taller laptop screens), it sits in
-//     that band, outside the frame, where it can cover nothing.
-//   - Otherwise (the frame fills the height: 1280x720, 1366x768, 1024x640) it sits inside the frame at the
-//     top left, under whatever the HUD measures on this screen, and stops above the hint line. The page
-//     buttons stack on the right and the BUILD / STANDINGS / MARKET row along the bottom right, so the left
-//     edge under the HUD is the one place that holds no control.
-//   - Its z-index (7) is above the map and its page buttons (6) and below every modal: the market (8), the
-//     reel frame (9), the build panel (25, and 40 as the phone's sheet) and the challenge (60). A modal
-//     covers it; it never covers a modal.
+// WHERE IT SITS (the template, 2026-10-01) - never over the resources card, the foot or the build panel:
+//   - a solid card in the map's TOP RIGHT (the resources card holds the top left), UNDER THE MINI MAP (minimap.js,
+//     2026-10-01: the mini map holds the corner), stopping above the foot (#dock: the selected Friend's card and the roster);
+//   - ON A PHONE (720px and under) it is CLOSED by default: a pill of a dot and a count in the same corner. Opened,
+//     it is a sheet across the foot of the window, closed again by its minimise button. A choice the player has
+//     made (open or minimised) is remembered and wins.
+//   - Its z-index (7) is above the map, the resources card (5) and the foot (6), and below every modal: the market
+//     (8), the reel frame (9), the build panel (25, and 40 as the phone's sheet) and the challenge (60). Its own
+//     phone sheet is 41, over the foot it opens across. A modal covers it; it never covers a modal.
 (function (root) {
   'use strict';
   if (root.Announce) return;
@@ -42,36 +41,51 @@
     get(k) { try { return root.localStorage.getItem(k); } catch (_) { return null; } },
     set(k, v) { try { root.localStorage.setItem(k, v); } catch (_) { /* forgotten, never thrown */ } },
   };
-  const S = { min: store.get(KEY.min) === '1', off: store.get(KEY.off) === '1', unread: 0, items: [] };
+  const PHONE = () => !!(root.matchMedia && root.matchMedia('(max-width: 720px)').matches);
+  const minSaved = store.get(KEY.min);
+  const S = { min: minSaved === '1' || (minSaved == null && PHONE()), off: store.get(KEY.off) === '1', unread: 0, items: [] };
 
+  // The template's card (page.css's tokens; the fallbacks are only for a page without page.css): solid paper, a faint
+  // border, square, no blur, no shadow. Silkscreen for the labels, Sometype Mono for the lines themselves.
   const CSS = `
-.announce { position: fixed; z-index: 7; left: 8px; top: 8px; width: 300px; max-width: calc(100vw - 16px);
+.announce { position: fixed; z-index: 7; right: 12px; top: 12px; width: 300px; max-width: calc(100vw - 16px);
   display: flex; flex-direction: column; font-family: var(--mono, ui-monospace, monospace); color: var(--ink, #fff);
-  background: rgba(0,0,0,.55); border: 1px solid rgba(204,255,0,.45); -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px);
-  pointer-events: auto; user-select: none; }
-.announce.min { width: auto; background: rgba(0,0,0,.6); }
+  background: var(--paper, #000); border: 1px solid var(--faint, rgba(255,255,255,.28)); pointer-events: auto; user-select: none; }
+.announce.min { width: auto; }
 body.hero .announce { display: none !important; }   /* the landing page's reel is a picture of the game, not the game */
-.announce .ahead { display: flex; align-items: center; gap: 6px; padding: 3px 4px 3px 8px; }
-.announce .atitle { font-family: var(--display, monospace); font-size: 13px; letter-spacing: .1em; color: var(--signal, #CCFF00);
-  display: inline-flex; align-items: center; gap: 6px; background: none; border: 0; padding: 4px 0; cursor: pointer; white-space: nowrap; }
+.announce .ahead { display: flex; align-items: center; gap: 6px; padding: 3px 4px 3px 10px; }
+.announce:not(.min) .ahead { border-bottom: 1px solid var(--rule, rgba(255,255,255,.12)); }
+.announce .atitle { font-family: var(--display, monospace); font-size: 12px; letter-spacing: .1em; color: var(--ink, #fff);
+  display: inline-flex; align-items: center; gap: 8px; background: none; border: 0; padding: 4px 0; cursor: pointer; white-space: nowrap; }
 .announce .adot { width: 7px; height: 7px; border-radius: 50%; background: var(--signal, #CCFF00); flex: none; }
-.announce.off .adot { background: rgba(255,255,255,.35); }
-.announce.off .atitle { color: rgba(255,255,255,.6); }
-.announce .acount { font-family: var(--mono, monospace); font-size: 12px; color: #000; background: var(--signal, #CCFF00); padding: 0 5px; letter-spacing: 0; }
+.announce.off .adot { background: var(--faint, rgba(255,255,255,.28)); }
+.announce.off .atitle { color: var(--dim, rgba(255,255,255,.62)); }
+.announce .acount { font-family: var(--display, monospace); font-weight: 400; font-size: 12px; color: var(--paper, #000); background: var(--signal, #CCFF00); padding: 1px 5px; letter-spacing: 0; }
 .announce .asp { flex: 1; }
 .announce .abtn { font-family: var(--display, monospace); font-size: 12px; letter-spacing: .08em; color: var(--ink, #fff);
-  background: rgba(0,0,0,.5); border: 1px solid rgba(255,255,255,.45); padding: 4px 7px; min-height: 26px; cursor: pointer; }
-.announce .abtn[aria-pressed="true"] { background: var(--signal, #CCFF00); color: #000; border-color: var(--signal, #CCFF00); }
-.announce .alist { list-style: none; margin: 0; padding: 0 8px 6px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
-.announce .alist li { display: grid; grid-template-columns: 74px 1fr; gap: 0 7px; padding: 4px 0; border-top: 1px solid rgba(255,255,255,.14);
-  font-size: 13px; line-height: 1.35; }
+  background: none; border: 1px solid var(--faint, rgba(255,255,255,.28)); padding: 4px 7px; min-height: 26px; cursor: pointer; }
+.announce .abtn[aria-pressed="true"] { background: var(--signal, #CCFF00); color: var(--paper, #000); border-color: var(--signal, #CCFF00); }
+.announce .alist { list-style: none; margin: 0; padding: 4px 10px 8px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.announce .alist li { display: grid; grid-template-columns: 74px 1fr; gap: 0 7px; padding: 4px 0; border-top: 1px solid var(--rule, rgba(255,255,255,.12));
+  font-size: 13px; line-height: 1.35; color: var(--dim, rgba(255,255,255,.62)); }
+.announce .alist li:first-child { border-top: 0; }
 .announce .alist li.fresh { animation: announceIn .9s ease-out; }
-@keyframes announceIn { from { background: rgba(204,255,0,.28); } to { background: transparent; } }
+@keyframes announceIn { from { color: var(--signal, #CCFF00); } to { color: var(--dim, rgba(255,255,255,.62)); } }
 .announce .akind { font-family: var(--display, monospace); font-size: 11px; letter-spacing: .08em; color: var(--signal, #CCFF00); }
-.announce .aat { grid-column: 1; font-size: 11px; color: rgba(255,255,255,.45); }
-.announce .atext { grid-column: 2; grid-row: 1 / span 2; overflow-wrap: anywhere; }
-.announce .aempty { padding: 2px 8px 8px; font-size: 13px; color: rgba(255,255,255,.55); }
+.announce .aat { grid-column: 1; font-size: 11px; color: var(--dim, rgba(255,255,255,.62)); }
+.announce .atext { grid-column: 2; grid-row: 1 / span 2; overflow-wrap: anywhere; color: var(--ink, #fff); }
+.announce .aempty { margin: 0; padding: 6px 10px 8px; font-size: 13px; color: var(--dim, rgba(255,255,255,.62)); }
 .announce.min .alist, .announce.min .aempty, .announce.min .aon, .announce.min .amin { display: none; }
+/* A PHONE: closed, a pill of a dot and a count in the map's top right; open, a sheet across the foot of the window */
+@media (max-width: 720px) {
+  .announce .atitle { min-height: 40px; padding: 0 4px; }
+  .announce .abtn { min-height: 40px; min-width: 40px; }
+  .announce.min .aname { display: none; }
+  .announce.min .ahead { padding: 0 6px; }
+  .announce.sheet { left: 0 !important; right: 0 !important; top: auto !important; bottom: 0 !important; width: auto !important; max-width: none !important;
+    max-height: 55dvh !important; border-left: 0; border-right: 0; border-bottom: 0; border-top: 1px solid var(--line, rgba(204,255,0,.4));
+    z-index: 41; padding-bottom: env(safe-area-inset-bottom, 0px); }
+}
 `;
 
   let el, list, title, count, onBtn, minBtn, empty;
@@ -111,21 +125,23 @@ body.hero .announce { display: none !important; }   /* the landing page's reel i
     if (!el) return;
     const vw = root.innerWidth, vh = root.innerHeight, frame = doc.getElementById('frame');
     const s = el.style;
-    if (!frame) { s.left = '8px'; s.top = '8px'; s.maxHeight = Math.max(80, vh * 0.4) + 'px'; s.width = Math.min(300, vw - 16) + 'px'; return; }
-    const f = frame.getBoundingClientRect();
-    const band = f.top - 16;                         // the empty band above the frame, less a gutter each side
-    let top, left, width, maxH;
-    if (band >= 96) {                                // outside the frame: covers nothing
-      top = 8; left = Math.max(8, f.left); width = Math.min(360, vw - 16, f.width); maxH = band;
-    } else {                                         // inside the frame, top left, under the HUD
-      const r = (sel) => { const n = doc.querySelector(sel); if (!n) return null; const b = n.getBoundingClientRect(); return b.height > 0 ? b : null; };
-      const hud = r('.hud'), rtop = r('#reelframe:not([hidden]) .rtop'), note = r('#note');
-      top = Math.max(f.top + 8, hud ? hud.bottom + 4 : 0, rtop ? rtop.bottom + 4 : 0);
-      left = f.left + 10; width = Math.min(300, Math.floor(f.width * 0.34));
-      const floor = Math.min(f.bottom - 60, note ? note.top - 8 : Infinity);
-      maxH = Math.max(40, Math.min(f.height * 0.42, floor - top));
-    }
-    s.top = Math.round(top) + 'px'; s.left = Math.round(left) + 'px';
+    const sheet = PHONE() && !S.min;
+    el.classList.toggle('sheet', sheet);
+    if (sheet) return;                               // a phone's open card is a sheet; the stylesheet seats it
+    const f = frame ? frame.getBoundingClientRect() : null;
+    if (!f || f.width < 2) { s.right = '8px'; s.left = 'auto'; s.top = '8px'; s.maxHeight = Math.max(80, vh * 0.4) + 'px'; s.width = Math.min(300, vw - 16) + 'px'; return; }
+    // the map's top right, under the reel's top bar when the studio films; it stops above the foot (#dock)
+    const r = (sel) => { const n = doc.querySelector(sel); if (!n) return null; const b = n.getBoundingClientRect(); return b.height > 0 ? b : null; };
+    const rtop = r('#reelframe:not([hidden]) .rtop'), dock = r('#dock');
+    const gap = PHONE() ? 8 : 12;
+    // the mini map (minimap.js) holds the corner on anything wider than a phone: EVENTS sits under it. On a phone the
+    // pill keeps the corner and the mini map's MAP and HOME sit under the pill (minimap.js reads this element).
+    const mm = PHONE() ? null : r('#minimap:not([hidden])');
+    const top = Math.max(f.top + gap, rtop ? rtop.bottom + 4 : 0, mm ? mm.bottom + 8 : 0);
+    const width = Math.max(160, Math.min(300, f.width - 2 * gap));
+    const floor = Math.min(f.bottom - gap, dock ? dock.top - gap : Infinity);
+    const maxH = Math.max(40, Math.min(f.height * 0.5, floor - top));
+    s.top = Math.round(top) + 'px'; s.left = 'auto'; s.right = Math.round(Math.max(gap, vw - f.right + gap)) + 'px';
     s.width = S.min ? 'auto' : Math.round(width) + 'px'; s.maxWidth = Math.round(width) + 'px'; s.maxHeight = Math.round(maxH) + 'px';
   }
 
@@ -139,7 +155,7 @@ body.hero .announce { display: none !important; }   /* the landing page's reel i
     el.classList.toggle('min', S.min); el.classList.toggle('off', S.off);
     title.setAttribute('aria-expanded', String(!S.min));
     title.querySelector('.aname').textContent = S.off ? 'EVENTS OFF' : 'EVENTS';
-    count.hidden = !(S.min && !S.off && S.unread > 0); count.textContent = String(S.unread);
+    count.hidden = !(S.min && !S.off); count.textContent = String(S.unread);   // closed: a dot and a count, 0 included
     onBtn.setAttribute('aria-pressed', String(!S.off)); onBtn.textContent = S.off ? 'OFF' : 'ON';
     minBtn.setAttribute('aria-label', 'Minimise');
     list.hidden = S.off;
@@ -191,19 +207,41 @@ body.hero .announce { display: none !important; }   /* the landing page's reel i
     // NOT WIRED - no code exists yet for these. They are named here so the code that makes them happen
     // adds one line, and so nobody announces an event the game does not have.
     //   captureExpired: the five-minute window running out (ownership reverts, the taker takes a hit).
-    //   attackStarted / attackEnded: an attack by one base on another - M13 items 1 and 2.
     //   ordersRevealed: sealed standing orders revealed at a fight - "orders are announced when revealed".
     //   trapSprung: a hidden 1/1 Doopie engaging whoever crossed it - rulings 34, 51, 55.
     //   memeAttack: a meme attack card spent. The armoury's throw is a rehearsal stage, not a game event,
     //               so it is deliberately not announced.
     captureExpired: safe((w) => on.returned(w, 'expired')),
-    attackStarted: safe((a) => post({ kind: 'attack', text: 'Base ' + a.attacker + ' is attacking base ' + a.defender + (a.sent ? ' with ' + a.sent + (a.sent === 1 ? ' Friend.' : ' Friends.') : '.') })),
-    attackEnded: safe((a) => post({ kind: 'attack', text: 'Attack on base ' + a.defender + ' over: ' + (a.winner === a.attacker ? 'base ' + a.attacker + ' won.' : 'base ' + a.defender + ' held.') })),
+    // WIRED - every attack on this server, from minimap.js's fight poll ('rf:fights', below). The deployer, 2026-10-01:
+    // "yes show attacks but not their location .. just the player names that are set in the profile between fighters".
+    // So a line names the two PLAYERS (by, on: names, or a short address for a player with none) and NOTHING ELSE:
+    // no base, no Genesis, no plot, no side, no count - nothing that says where.
+    attackStarted: safe((a) => post({ kind: 'attack', text: a.by + ' attacked ' + a.on })),
+    attackEnded: safe((a) => post({ kind: 'attack', text: a.won ? a.by + ' broke through' : a.on + ' held' })),
     ordersRevealed: safe((o) => post({ kind: 'orders', text: 'Base ' + o.base + "'s standing orders revealed" + (o.orders && o.orders.length ? ': ' + o.orders.map(x => String(x).toUpperCase()).join(', ') : '') + '.' })),
     trapSprung: safe((t) => post({ kind: 'trap', text: 'A hidden Doopie sprang from a ' + (t.disguise || 'disguise') + (t.victim ? ' on ' + t.victim : '') + (t.outcome ? ': ' + t.outcome : '') + '.' })),
     memeAttack: safe((m) => post({ kind: 'meme', text: (m.by || 'Someone') + ' threw ' + (m.name || 'a meme attack') + (m.target ? ' at ' + m.target : '') + (m.outcome ? ': ' + m.outcome : '') + '.' })),
   };
-  const WIRED = ['captured', 'won', 'returned', 'fightStarted', 'fightEnded'];
+  const WIRED = ['captured', 'won', 'returned', 'fightStarted', 'fightEnded', 'attackStarted', 'attackEnded'];
+
+  // ATTACKS, fed by the one fight poll there is (minimap.js): each fight our server settled since this page opened,
+  // with the heads polled beside it. A fight settles on our server the moment it is ordered (serve.py fight_post), so
+  // its attack line and its outcome arrive together, in that order. A player is their profile name (names.py, on the
+  // heads as ownerName), else their short address; a base with no owner at all (a developer's own unsigned machine)
+  // is "a player". The base ids the fight carries are used to find the owner and are never written into the line.
+  const shortAddr = (a) => (typeof a === 'string' && /^0x[0-9a-f]{40}$/i.test(a) ? a.slice(0, 6) + '…' + a.slice(-4) : null);
+  const playerOf = (heads, id) => { const h = (heads || []).find(x => x && x.id === id) || {};
+    return (typeof h.ownerName === 'string' && h.ownerName) || shortAddr(h.owner) || 'a player'; };
+  root.addEventListener('rf:fights', (e) => {
+    try {
+      const d = (e && e.detail) || {};
+      (d.fights || []).forEach((f) => {
+        const att = playerOf(d.heads, f.attacker), def = playerOf(d.heads, f.defender);
+        on.attackStarted({ by: att, on: def });
+        on.attackEnded({ by: att, on: def, won: !!f.won });
+      });
+    } catch (_) { /* an announcement never breaks the page that hears it */ }
+  });
 
   root.Announce = { post, on, set, state, place, WIRED, get el() { return el; }, get items() { return S.items.slice(); } };
   if (doc.readyState === 'loading') doc.addEventListener('DOMContentLoaded', build); else build();

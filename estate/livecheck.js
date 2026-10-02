@@ -6,8 +6,12 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
   require("./pagewatch.js").claimPort(PORT);   // never attach to a browser this check did not start
   const prof=fs.mkdtempSync(path.join(os.tmpdir(),'lv-'));
   require("./pagewatch.js").guard(prof);            // close it even if this check throws, or is killed
+  // No ?purse=2000 any more: 2000.00 sat far over the base's 540.00 store, so the studio harvester was only "live"
+  // because it cut seams and dropped every haul - the loss the deployer reported. With the store full it now waits in
+  // its bay (Record.haulFits), so this opens on values.js's own purse, which has room. (The raises below are short
+  // of WOOD since ruling 76, which 2000 crystals never paid: those failures are this check's before and after.)
   const ch=spawn(CHROME,['--headless=new','--enable-unsafe-swiftshader','--hide-scrollbars','--remote-debugging-port='+PORT,
-    '--user-data-dir='+prof,'--window-size=1000,700','http://localhost:8765/base.html?seams=1&purse=2000&pace=demo'],{stdio:'ignore'});
+    '--user-data-dir='+prof,'--window-size=1000,700','http://localhost:8765/base.html?seams=1&pace=demo&record=0'],{stdio:'ignore'});
   let send, sock;
   for(let i=0;i<160&&!send;i++){await sleep(250);try{
     const t=(await(await fetch(`http://127.0.0.1:${PORT}/json`)).json()).find(x=>x.type==='page');
@@ -21,14 +25,22 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
   const shot=async f=>{const s=await send('Page.captureScreenshot',{format:'png'}); fs.writeFileSync(path.join(os.tmpdir(), f),Buffer.from(s.data,'base64'));};
   const watch = await require('./pagewatch.js').attach(sock, send);
   let bad=0; const ok=(n,c,v)=>{console.log((c?'  ok  ':'FAIL  ')+n+(c?'':'   -> '+v)); if(!c) bad++;};
-  await sleep(2000);
+  await sleep(2000); await require('./pagewatch.js').waitForGame(send);
   const F='base.buildings.find(b=>b.type==="collectionDepot")', T='base.buildings.find(b=>b.type==="tower")';
   // 1. change the map the way a player does
   const K='base.buildings.find(b=>b.type==="keep")';
+  // Ruling 76: a level is paid in wood as well as crystals - both, for the two raises,
+  // are poured in from the rows (saving off, ?record=0, so the record does not refuse a fixture). The keep's lock (M9
+  // items 8-10) holds the depot until HALL STANDS, and a depot's second harvester waits for DEPOT II to stand: both
+  // are waited for on the game's clock (demo pace), with a wall cap that only says the machine is starved.
+  const stands = async (B, cap = 30000) => { const t0 = Date.now(); while (Date.now() - t0 < cap) { if (await ev(`!${B}.build`)) return true; await sleep(100); } return false; };
+  await ev(`(()=>{const P=base.purse(), K=base.ECON.kinds; P.wood += K.keep.wood[1] + K.collectionDepot.wood[1]; P.crystals += K.keep.cost[1] + K.collectionDepot.cost[1]; return 1;})()`);
   await ev(`base.openPanel(${K})`); await sleep(150);
   await ev('document.getElementById("pgo").click()'); await sleep(150);        // the keep caps the depot: KEEP -> HALL first
+  ok('map: HALL stands (on the game\'s clock)', await stands(K) && await ev(`${K}.tier`) === 2, await ev(`JSON.stringify([${K}.tier, ${K}.build, base.simT])`));
   await ev(`base.openPanel(${F})`); await sleep(150);
   await ev('document.getElementById("pgo").click()'); await sleep(150);        // DEPOT I -> DEPOT II
+  ok('map: DEPOT II stands (on the game\'s clock)', await stands(F), await ev(`JSON.stringify([${F}.tier, ${F}.build, base.simT])`));
   await ev(`base.openPanel(${F})`); await sleep(150);
   await ev('document.getElementById("pharv").click()'); await sleep(150);      // a second harvester
   await ev('document.getElementById("pclose").click()'); await sleep(150);
@@ -40,7 +52,8 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
   ok('studio opened without a reload', await ev('!!document.getElementById("stexport") && base.buildings.length>0'), 'no menu');
   await ev('document.querySelector("[data-sub=collectionDepot]").click()'); await sleep(900);
   ok('studio collection depot caption shows the live level', /COLLECTION DEPOT · DEPOT II/.test(await ev('document.getElementById("cap").textContent')), await ev('document.getElementById("cap").textContent'));
-  ok('studio file name carries it too', /collectionDepot-depot-ii/.test(await ev('document.querySelector("#pbody .lede[style]").textContent')), await ev('document.querySelector("#pbody .lede[style]").textContent'));
+  // the RECORD file name is the panel's `.lede.addr` line since the template (it was an inline-styled .lede)
+  ok('studio file name carries it too', /collectionDepot-depot-ii/.test(await ev('(document.querySelector("#pbody .lede.addr")||{}).textContent')), await ev('(document.querySelector("#pbody .lede.addr")||{textContent:"no .lede.addr in the panel"}).textContent'));
   await shot('live_foundry.png');
   await ev('document.querySelector("[data-sub=tower]").click()'); await sleep(700);
   await shot('live_tower.png');

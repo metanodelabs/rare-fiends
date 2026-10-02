@@ -81,6 +81,12 @@ ok('and the duel asks LocalEntropy for its word', (await duel.entropy()) === cfg
 ok('the duel, the market and the game pay the same feeTo (' + FEE_TO + '), so one ledger row holds every fee',
   (await duel.feeTo()) === FEE_TO && (await game.feeTo()) === FEE_TO, [await duel.feeTo(), await game.feeTo()].join(' / '));
 
+// The world ARRIVES with demo mode off (M20 item 21, ruling 103): the practice money is staked on our own test chains,
+// and the contracts refuse every stake in demo mode, so a fake world born with it on holds money nothing can stake.
+// deploy/local-chain.sh's demo_switch turns it off in fake mode; LOCAL_DEMO_OFF=0 is the deliberate way to keep it on,
+// and this line then goes red on purpose. Asked BEFORE the setup below, which would otherwise hide it by flipping it.
+ok('the fake world arrives with demo mode OFF, so the practice money can be staked (ruling 103; local-chain.sh demo_switch)',
+  (await roles.demoMode()) === false, 'demoMode() is true - this world was built before the default, or with LOCAL_DEMO_OFF=0');
 // ---- setup: demo mode off (paid flows are refused in it), the stand-in Genesis tradeable. Root only, both. ----
 if (await roles.demoMode()) { await send((await as(roles, 0)).setDemoMode(false)); console.log('        setup: setDemoMode(false) from root - a paid duel and a paid game are refused in demo mode'); }
 if (!(await market.tradeable(cfg.mockGenesis))) { await send((await as(market, 0)).setTradeable(cfg.mockGenesis, true)); console.log('        setup: MockGenesis made tradeable from root'); }

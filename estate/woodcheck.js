@@ -143,6 +143,26 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
   // ECON.crystalUnit hundredths), never typed here - a literal went red the day the unit changed
   const WALL = await ev('base.ECON.woodCost.wall'), UNIT = await ev('base.ECON.crystalUnit');
   const wallShown = (WALL / UNIT).toFixed(2);   // the same two places the game's fmtC prints
+  // Ruling 76 put a level-1 wall at 35 wood, more than the stretches above chop. The Friends still at the trees keep
+  // chopping, so wait - on what the purse holds, not on a stopwatch - until the wall can be paid out of CHOPPED wood:
+  // a fixture poured in here would prove nothing about the forest. The cap only says the machine is starved.
+  // The Friend just moved to open ground is still selected: send it back to the standing tree furthest from every
+  // Friend, by a real tap, so a felled grove does not leave the purse short. Chosen as at2 was, for the same reasons.
+  const at3=await ev(`(()=>{
+    const cv=document.getElementById('c'), r=cv.getBoundingClientRect(), k=base.fit;
+    const screen=t=>{const p=base.project(t.x,t.y);
+      return [(p[0]*k+base.CAM.x*(1-k)+base.viewX)/cv.width*r.width+r.left,((p[1]-18)*k+base.CAM.y*(1-k))/cv.height*r.height+r.top];};
+    const onCanvas=t=>{const s=screen(t);return document.elementFromPoint(s[0],s[1])===cv;};
+    const far=t=>Math.min(...base.actors.map(a=>Math.hypot(a.x-t.x,a.y-t.y)));
+    const t=base.trees.filter(t=>t.wood>0&&onCanvas(t)).sort((p,q)=>far(q)-far(p))[0];
+    return t?[t.x,t.y]:null;})()`);
+  if (Array.isArray(at3) && await ev('base.wood') < WALL) {
+    // the Gen 6 - the first chopper, idle since its grove fell and no longer the selection - picked from the tray
+    await ev('[...document.querySelectorAll("#tray .chip")].find(b=>/^G6/.test(b.innerText)&&!/RENTED/.test(b.innerText)).click()');
+    await tapWorld(at3[0], at3[1], 18);
+  }
+  ok('the Friends left at the trees chop enough for a wall (' + wallShown + ' wood)', await until('base.wood >= ' + WALL + ' || !base.actors.some(a=>a.job)', 240000) && await ev('base.wood') >= WALL,
+    'holds ' + await ev('base.wood') + ' of ' + WALL + ', Friends with a job ' + await ev('base.actors.filter(a=>a.job).length') + ', simT ' + await ev('base.simT'));
   await ev('document.getElementById("buildBtn").click()'); await sleep(200);
   const cellText = await ev('document.querySelector("#pbody .cell[data-k=wall]").innerText');
   ok('the catalogue prices level 1 in wood, at the game\'s own cost (' + wallShown + ')',

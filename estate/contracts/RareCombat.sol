@@ -12,13 +12,19 @@ import { RareChance } from "./RareChance.sol";
 library RareCombat {
     /// Friends a side: 40, by the deployer's ruling of 2026-10-01 (it was 12). combat.js MAX_SIDE holds the same.
     uint256 internal constant MAX_SIDE = 40;
+    /// Fight slots 0 to 10: 1 to 6 the Friends' generations, 0 a 1/1 Doopie, 7 to 10 an ordinary Doopie of Evolution 1 to
+    /// 4 (rulings 55, 81, 85). combat.js SLOTS holds the same.
+    uint256 internal constant SLOTS = 11;
+    /// A Strength power adds at most +10%, in basis points (ruling 116). combat.js POWER_CAP_BPS holds the same.
+    uint256 internal constant POWER_CAP_BPS = 1000;
     uint256 private constant NONE = type(uint256).max;
 
     uint8 internal constant WIPED = 0;      // every defender down: the attack wins
     uint8 internal constant REPELLED = 1;   // every attacker down: the defence holds
     // 2 was HELD, the clock running out. THERE IS NO FIGHT CLOCK (ruling 47, 2026-10-01): a fight runs until one
     // side wins. combat.js keeps 2 for a spared capture fight that cannot move, which this library never runs -
-    // here every living attacker shoots or steps on every turn, so the loop below always ends in 0 or 1.
+    // here every living attacker with a target shoots or steps on every turn, so the loop below always ends in 0, 1 or 4.
+    uint8 internal constant STANDOFF = 4;   // only Doopies stand on both sides, so nobody can shoot (ruling 87): the defence holds
 
     uint8 internal constant HOLD = 0;       // a defender's standing orders
     uint8 internal constant ENGAGE = 1;     // after the nearest attacker, however far off
@@ -31,20 +37,29 @@ library RareCombat {
     error InvalidGenesis();
     /// @notice the trap needs slot 0 of `hp`, a 1/1 Doopie's strength (ruling 55)
     error NoDoopieStrength();
+    /// @notice a trap's victim is a Friend, generation 1 to 6: Doopies do not attack Doopies (ruling 87)
+    error InvalidVictim();
+    /// @notice a side's powers are empty or one entry per Friend on it
+    error InvalidPowers();
+    /// @notice only one Strength power a side (ruling 116)
+    error OnePowerASide();
+    /// @notice a Strength power adds at most POWER_CAP_BPS (ruling 116)
+    error PowerOverCap();
 
-    /// @dev Indexed by generation, 1 to 6. Index 0 of `hp` is a 1/1 Doopie's strength, 1140 (ruling 55), read only by
-    /// `trap`: a 1/1 has no weapon (still open), so `_gen` keeps generation 0 out of a full fight, and index 0 of
-    /// every other table is unused. Reaches and areas are in spots; times in ms.
+    /// @dev Indexed by fight slot, 0 to 10 (combat.js rulesFrom builds it from values.js): 1 to 6 the Friends'
+    /// generations; 0 a 1/1 Doopie, 1140 (ruling 55); 7 to 10 an ordinary Doopie of Evolution 1 to 4, 225 / 337 / 506 /
+    /// 759 from its own table (rulings 81, 86). A Doopie's weapon columns are those of the Friend generation it carries
+    /// the weapon of (ruling 85). Reaches and areas are in spots; times in ms.
     struct Rules {
-        uint32[7] hp;
-        uint32[7] dmg;
-        uint32[7] reach;
-        uint32[7] period;
-        bool[7] melee;
-        bool[7] siege;
-        bool[7] pierce;
-        uint32[7] area;
-        uint32[7] vsBuilding;
+        uint32[11] hp;
+        uint32[11] dmg;
+        uint32[11] reach;
+        uint32[11] period;
+        bool[11] melee;
+        bool[11] siege;
+        bool[11] pierce;
+        uint32[11] area;
+        uint32[11] vsBuilding;
         uint32 wallHp;       // a section that carries no hp of its own (Wall.hp 0): the level-1 figure
         uint32 landVsBuildingBps;
         uint32 towerReach;
@@ -92,12 +107,16 @@ library RareCombat {
         uint32 hp;
     }
 
+    /// @dev attackerPower and defenderPower: a Strength power per Friend, in bps of its strength (ruling 116) - each list
+    /// empty (no powers) or one entry per Friend on that side, at most one non-zero, none above POWER_CAP_BPS
     struct Setup {
         uint8[] attackers;
         Entry entry;
         Defender[] defenders;
         Wall[] walls;
         Genesis genesis;
+        uint16[] attackerPower;
+        uint16[] defenderPower;
     }
 
     struct Result {
@@ -120,6 +139,8 @@ library RareCombat {
         int256 x;
         int256 y;
         uint32 hp;
+        uint32 base;         // its strength as it entered: it leaves with at most this (ruling 116: a power never heals)
+        uint32 full;         // base plus its Strength power: what a shot at it, or by it, is weighed with
         uint32 ready;
         uint256 wall;        // the wall section it is breaking, or NONE
         uint8 order;
@@ -128,6 +149,7 @@ library RareCombat {
         int256 fx;           // where it falls back to
         int256 fy;
         bool genesis;        // the Genesis: never acts, shielded while a defending Friend lives
+        bool doopie;         // a 1/1 or an ordinary Doopie (slot 0 or 7 to 10), set once at the line-up
     }
 
     /// @dev the state of one fight, kept in memory so each turn can be its own function
@@ -144,9 +166,18 @@ library RareCombat {
         bytes32 word;
         uint256 fightId;
         uint32 genesisHp;    // the Genesis's full strength, what a shot at it is weighed against
+        address game;        // what every roll is salted with - the caller's, never `address(this)` (M20 item 2)
+        bool dvd;            // a Doopie on both sides: the only fight that can reach the standoff
     }
 
-    function fight(Rules memory R, Setup memory S, bytes32 word, uint256 fightId)
+    /// @param game the address every roll of this fight is salted with. It USED to be `address(this)` inside
+    /// `_shoot`, which bound the fight to whichever contract inlined the library: a fight reached through
+    /// `RareRules.fight()` would roll differently from the same fight in the lab, and re-pointing the fight at a
+    /// new deployment of the SAME rules would change every roll. The caller now says it, as `RareChance.roll`
+    /// already makes every dice caller say it. `RareCombatLab` passes `address(this)`, so the lab rolls exactly as
+    /// it always did; `RareFight` passes what it is told - the game's stable address - so a re-point changes a
+    /// fight only where the new code changes a rule. combat.js has always taken it as `ctx.contract`.
+    function fight(Rules memory R, Setup memory S, bytes32 word, address game, uint256 fightId)
         internal
         view
         returns (Result memory res)
@@ -157,9 +188,11 @@ library RareCombat {
         if (na == 0 || (nd == 0 && !S.genesis.present) || na > MAX_SIDE || nd > MAX_SIDE) revert InvalidSide();
         // no limit on wall sections (deployer, 2026-10-01): every finished section is fought; gas grows with them
         Field memory F = _field(R, S, word, fightId);
+        F.game = game;
         for (;;) {
             if (!_alive(F.u, false)) { res.reason = WIPED; break; }
             if (!_alive(F.u, true)) { res.reason = REPELLED; break; }
+            if (F.dvd && _standoff(F.u)) { res.reason = STANDOFF; break; }
             uint32 next = type(uint32).max;
             for (uint256 k; k < F.u.length; ++k) if (F.u[k].hp > 0 && F.u[k].ready < next) next = F.u[k].ready;
             F.t = next;
@@ -172,8 +205,9 @@ library RareCombat {
         res.rolls = F.rolls;
         res.attackers = new uint32[](na);
         res.defenders = new uint32[](nd);
-        for (uint256 i; i < na; ++i) res.attackers[i] = F.u[i].hp;
-        for (uint256 i; i < nd; ++i) res.defenders[i] = F.u[na + i].hp;
+        // a power ends with the fight and never heals (ruling 116): at most the strength it came in with
+        for (uint256 i; i < na; ++i) res.attackers[i] = _left(F.u[i]);
+        for (uint256 i; i < nd; ++i) res.defenders[i] = _left(F.u[na + i]);
         if (S.genesis.present) res.genesis = F.u[na + nd].hp;
         res.walls = F.whp;
     }
@@ -190,8 +224,7 @@ library RareCombat {
         F.whp = new uint32[](nw);
         F.word = word;
         F.fightId = fightId;
-        for (uint256 i; i < na; ++i) F.u[i] = _attacker(R, S, i);
-        for (uint256 i; i < nd; ++i) F.u[na + i] = _defender(R, S.defenders[i]);
+        F.dvd = _lineUp(R, S, F.u);
         if (S.genesis.present) {   // last in the line-up, never ready: it never fights
             int256 gx = int256(S.genesis.x);
             int256 gy = int256(S.genesis.y);
@@ -199,7 +232,6 @@ library RareCombat {
             gu.ready = type(uint32).max;
             gu.genesis = true;
             F.u[na + nd] = gu;
-            F.genesisHp = S.genesis.hp;
         }
         for (uint256 k; k < nw; ++k) {
             F.wx[k] = int256(S.walls[k].x);
@@ -207,6 +239,30 @@ library RareCombat {
             F.wv[k] = S.walls[k].vert;
             F.whp[k] = S.walls[k].hp != 0 ? S.walls[k].hp : R.wallHp;
         }
+    }
+
+    /// @dev both sides on the field, each Friend with its Strength power (ruling 116, checked first); returns whether a
+    /// Doopie stands on both sides - the only line-up that can reach the standoff
+    function _lineUp(Rules memory R, Setup memory S, Unit[] memory u) private pure returns (bool) {
+        uint256 na = S.attackers.length;
+        uint256 nd = S.defenders.length;
+        _powers(S.attackerPower, na);
+        _powers(S.defenderPower, nd);
+        bool da;
+        bool dd;
+        for (uint256 i; i < na; ++i) {
+            u[i] = _attacker(R, S, i);
+            _boost(u[i], S.attackerPower.length == 0 ? 0 : S.attackerPower[i]);
+            u[i].doopie = _doopie(u[i]);
+            if (u[i].doopie) da = true;
+        }
+        for (uint256 i; i < nd; ++i) {
+            u[na + i] = _defender(R, S.defenders[i]);
+            _boost(u[na + i], S.defenderPower.length == 0 ? 0 : S.defenderPower[i]);
+            u[na + i].doopie = _doopie(u[na + i]);
+            if (u[na + i].doopie) dd = true;
+        }
+        return da && dd;
     }
 
     /// @dev attacker i at entry + along x off(i), off = 0, 1, -1, 2, -2 ...
@@ -236,12 +292,53 @@ library RareCombat {
         v.x = x;
         v.y = y;
         v.hp = hp;
+        v.base = hp;
+        v.full = hp;
         v.wall = NONE;
         v.order = order;
         v.hx = x;
         v.hy = y;
         v.fx = fx;
         v.fy = fy;
+    }
+
+    /// @dev a side's Strength powers (ruling 116): empty, or one per Friend; at most one non-zero; none above the cap.
+    /// The same checks in the same order as combat.js powersOf.
+    function _powers(uint16[] memory p, uint256 n) private pure {
+        if (p.length == 0) return;
+        if (p.length != n) revert InvalidPowers();
+        uint256 used;
+        for (uint256 i; i < n; ++i) if (p[i] != 0) ++used;
+        if (used > 1) revert OnePowerASide();
+        for (uint256 i; i < n; ++i) if (p[i] > POWER_CAP_BPS) revert PowerOverCap();
+    }
+
+    /// @dev a Strength power of `bps`, worked out on the strength it enters with and added to it
+    function _boost(Unit memory v, uint16 bps) private pure {
+        if (bps == 0) return;
+        v.full = v.base + uint32(uint256(v.base) * bps / 10_000);
+        v.hp = v.full;
+    }
+
+    /// @dev what a Friend leaves the fight with: what it has left, never more than it came in with
+    function _left(Unit memory v) private pure returns (uint32) {
+        return v.hp < v.base ? v.hp : v.base;
+    }
+
+    /// @dev a Doopie - a 1/1 (slot 0) or an ordinary one (7 to 10) - and never the Genesis
+    function _doopie(Unit memory v) private pure returns (bool) {
+        return !v.genesis && (v.gen == 0 || v.gen > 6);
+    }
+
+    /// @dev ruling 87: a Doopie never attacks a Doopie. Otherwise any living unit of the other side is a foe.
+    function _foe(Unit memory a, Unit memory b) private pure returns (bool) {
+        return a.att != b.att && b.hp > 0 && !(a.doopie && b.doopie);
+    }
+
+    /// @dev the standoff: no living unit has anyone it may shoot, so nothing can change who wins
+    function _standoff(Unit[] memory u) private pure returns (bool) {
+        for (uint256 k; k < u.length; ++k) if (u[k].hp > 0 && !u[k].genesis && _nearest(u, k) != NONE) return false;
+        return true;
     }
 
     /// @dev one Friend's turn: an attacker breaks a wall in its way, shoots, or steps; a defender shoots or waits
@@ -251,7 +348,7 @@ library RareCombat {
             if (u.wall != NONE && F.whp[u.wall] == 0) u.wall = NONE;
             if (u.wall != NONE) { _shoot(R, F, k, NONE, u.wall); return; }
             uint256 tgt = _nearest(F.u, k);
-            if (tgt == NONE) return;
+            if (tgt == NONE) { u.ready = F.t + R.stepMs; return; }   // nobody it may shoot (ruling 87): it waits
             if (_cheb(u.x, u.y, F.u[tgt].x, F.u[tgt].y) <= _reach(R, u)) { _shoot(R, F, k, tgt, NONE); return; }
             (int256 bx, int256 by) = _step(u.x, u.y, F.u[tgt].x, F.u[tgt].y);
             uint256 wk = _wallAt(F, bx, by);
@@ -267,7 +364,7 @@ library RareCombat {
     /// @dev a defender's turn, by its standing order: hold, engage, or fall back
     function _defend(Rules memory R, Field memory F, uint256 k) private view {
         Unit memory u = F.u[k];
-        bool hurt = u.order == FALLBACK && uint256(u.hp) * 2 <= R.hp[u.gen];
+        bool hurt = u.order == FALLBACK && uint256(u.hp) * 2 <= u.full;
         if (hurt && (u.x != u.fx || u.y != u.fy)) {
             if (!_walk(R, F, u, u.fx, u.fy)) u.ready = F.t + R.stepMs;   // falling back
             return;
@@ -354,12 +451,11 @@ library RareCombat {
         if (atWall) {
             bps = R.landVsBuildingBps;
         } else {
-            uint256 str = F.u[tgt].genesis ? F.genesisHp : R.hp[F.u[tgt].gen];
-            bps = uint256(R.hp[u.gen]) * 10_000 / (uint256(R.hp[u.gen]) + str);
+            bps = uint256(u.full) * 10_000 / (uint256(u.full) + F.u[tgt].full);   // each with its power, if it has one
             if (!F.u[tgt].att && _wallAt(F, F.u[tgt].x, F.u[tgt].y) != NONE) bps = bps / R.coverDiv;   // ON a wall: its crew
         }
         bool sh = _shielded(F.u);   // judged once, before this shot hurts anyone
-        uint256 roll = RareChance.roll(F.word, address(this), block.chainid, F.fightId, F.rolls);
+        uint256 roll = RareChance.roll(F.word, F.game, block.chainid, F.fightId, F.rolls);
         ++F.rolls;
         ++F.shots;
         if (roll >= bps) return;
@@ -388,7 +484,7 @@ library RareCombat {
         best = NONE;
         for (uint256 j; j < F.u.length; ++j) {
             Unit memory v = F.u[j];
-            if (v.att == u.att || v.hp == 0 || j == tgt || (v.genesis && sh)) continue;
+            if (!_foe(u, v) || j == tgt || (v.genesis && sh)) continue;
             uint256 d = _cheb(tg.x, tg.y, v.x, v.y);
             if (d > 1 || _cheb(u.x, u.y, v.x, v.y) <= sd) continue;
             if (d < bd) { bd = d; best = j; }
@@ -397,12 +493,12 @@ library RareCombat {
 
     /// @dev a catapult stone's splash: full on the same spot, halved for every spot away, out to `area`
     function _splash(Rules memory R, Field memory F, uint256 k, uint256 tgt, uint256 through, uint32 dm, bool sh) private pure {
-        bool side = F.u[k].att;
+        Unit memory s = F.u[k];
         int256 gx = F.u[tgt].x;
         int256 gy = F.u[tgt].y;
         for (uint256 j; j < F.u.length; ++j) {
             Unit memory v = F.u[j];
-            if (v.att == side || v.hp == 0 || j == tgt || j == through || (v.genesis && sh)) continue;
+            if (!_foe(s, v) || j == tgt || j == through || (v.genesis && sh)) continue;
             uint256 d = _cheb(gx, gy, v.x, v.y);
             if (d > R.area[F.u[k].gen]) continue;
             uint32 n = dm >> d;
@@ -425,7 +521,7 @@ library RareCombat {
         uint256 bd = type(uint256).max;
         bool sh = u[k].att && _shielded(u);
         for (uint256 j; j < u.length; ++j) {
-            if (u[j].att == u[k].att || u[j].hp == 0 || (u[j].genesis && sh)) continue;
+            if (!_foe(u[k], u[j]) || (u[j].genesis && sh)) continue;
             uint256 d = _cheb(u[k].x, u[k].y, u[j].x, u[j].y);
             if (d < bd) { bd = d; best = j; }
         }
@@ -455,8 +551,9 @@ library RareCombat {
         return dx > dy ? dx : dy;
     }
 
+    /// @dev a fight slot, 0 to 10 (see Rules)
     function _gen(uint8 g) private pure returns (uint8) {
-        if (g == 0 || g > 6) revert InvalidGeneration();
+        if (g > 10) revert InvalidGeneration();
         return g;
     }
 
@@ -469,32 +566,36 @@ library RareCombat {
     /// @notice a 1/1 Doopie's chance of winning a trap on a tile, a tree or a crystal bed, in bps:
     /// hp[0] x 10000 / (hp[0] + hp[victim's generation]) - 6003 / 6925 / 7718 / 8351 / 8837 / 9193 at 1140
     function trapBps(Rules memory R, uint8 victimGen) internal pure returns (uint256) {
-        uint8 g = _gen(victimGen);
+        // its own victim check, not the fight's `_gen`: a fight takes slots 0 to 10, a trap only a Friend (ruling 87)
+        if (victimGen == 0 || victimGen > 6) revert InvalidVictim();
         if (R.hp[0] == 0) revert NoDoopieStrength();
-        return uint256(R.hp[0]) * 10_000 / (uint256(R.hp[0]) + R.hp[g]);
+        return uint256(R.hp[0]) * 10_000 / (uint256(R.hp[0]) + R.hp[victimGen]);
     }
 
     /// @notice ONE chance roll decides a trap: play 0 off the trap's word under its own id, as combat.js trap().
     /// A terminal is not decided here: it is the duel, under RareDuel's terminal terms.
-    function trap(Rules memory R, uint8 victimGen, bytes32 word, uint256 trapId)
+    /// @param game what the roll is salted with, for the same reason as `fight`'s
+    function trap(Rules memory R, uint8 victimGen, bytes32 word, address game, uint256 trapId)
         internal
         view
         returns (bool doopieWins, uint256 roll, uint256 bps)
     {
         bps = trapBps(R, victimGen);
-        roll = RareChance.roll(word, address(this), block.chainid, trapId, 0);
+        roll = RareChance.roll(word, game, block.chainid, trapId, 0);
         doopieWins = roll < bps;
     }
 }
 
-/// @notice A view wrapper, for the parity check and for anyone replaying a fight from its word.
+/// @notice A view wrapper, for the parity check and for anyone replaying a fight from its word. Salted with its
+/// own address, exactly as before the salt became a parameter. The fight the GAME looks up is `RareFight`
+/// (RareFight.sol), behind `RareRules.fight()`; this lab is not deployed.
 contract RareCombatLab {
     function fight(RareCombat.Rules memory R, RareCombat.Setup memory S, bytes32 word, uint256 fightId)
         external
         view
         returns (RareCombat.Result memory)
     {
-        return RareCombat.fight(R, S, word, fightId);
+        return RareCombat.fight(R, S, word, address(this), fightId);
     }
 
     function trap(RareCombat.Rules memory R, uint8 victimGen, bytes32 word, uint256 trapId)
@@ -502,6 +603,6 @@ contract RareCombatLab {
         view
         returns (bool doopieWins, uint256 roll, uint256 bps)
     {
-        return RareCombat.trap(R, victimGen, word, trapId);
+        return RareCombat.trap(R, victimGen, word, address(this), trapId);
     }
 }

@@ -3,7 +3,9 @@
 // Compiles estate/contracts with the FriendSDK's settings (solc 0.8.36, cancun, optimizer 200), runs the
 // bytecode in an EVM set to Robinhood Chain's id (4663), and checks, on the same Entropy words:
 //   1. RareChance.roll        == chance.js roll                 (the SDK's settle() formula)
-//   2. RareCombat.fight       == combat.js fight, field for field, over many line-ups; and its gas
+//   2. RareCombat.fight       == combat.js fight, field for field, over many line-ups; and its gas. Since M20 item 2
+//                                the line-ups are fought through RareFight - the deployed fight - reached the way
+//                                the game reaches it, through RareRules.fight(); the lab keeps the rest of part 2
 //   3. RareDuel, end to end   == duel.js: stake, sealed picks, reveal, Entropy request and callback,
 //                                settle (winner, roll, odds, payout and fee); decline, withdraw, forfeit
 // Run: cd estate/contracts && npm i && node paritycheck.js
@@ -17,6 +19,11 @@ const { createAddressFromString, createAccount, hexToBytes, bytesToHex } = requi
 const Chance = require('../chance.js'), Combat = require('../combat.js'), Duel = require('../duel.js');
 
 const CHAIN_ID = 4663;
+// PARITY_LIGHT=1 skips the named rungs (the 12-, 24- and 40-a-side ladders that are most of the run time) and writes
+// no gas.json. It exists for test/combatmutants.js, which runs this file once per mutant and reads only its RULE lines;
+// a light run proves nothing about the rungs or gas and is never the check.
+const LIGHT = process.env.PARITY_LIGHT === '1';
+if (LIGHT) console.log('  LIGHT RUN (PARITY_LIGHT=1): the named rungs are skipped and gas.json is not written - this is not the check');
 let fails = 0;
 const ok = (name, cond, detail) => { console.log((cond ? '  ok  ' : 'FAIL  ') + name + (cond ? '' : '   -> ' + detail)); if (!cond) fails++; };
 
@@ -89,7 +96,9 @@ function compile() {
   const pick = (file, name) => ({ abi: out.contracts[file][name].abi, bin: '0x' + out.contracts[file][name].evm.bytecode.object, size: out.contracts[file][name].evm.deployedBytecode.object.length / 2 });
   return { lab: pick('RareCombat.sol', 'RareCombatLab'), duel: pick('RareDuel.sol', 'RareDuel'), rf: pick('test/Mocks.sol', 'MockRF'),
     entropy: pick('test/Mocks.sol', 'MockEntropy'), probe: pick('test/Mocks.sol', 'RollProbe'), shadow: pick('ShadowFriends.sol', 'ShadowFriends'),
-    roles: pick('RareRoles.sol', 'RareRoles'), fightLog: pick('RareFightLog.sol', 'RareFightLog') };
+    roles: pick('RareRoles.sol', 'RareRoles'), fightLog: pick('RareFightLog.sol', 'RareFightLog'),
+    // M20 item 2: the fight at an address the game looks up, and the rules contract that holds the pointer
+    fight: pick('RareFight.sol', 'RareFight'), rules: pick('RareRules.sol', 'RareRules') };
 }
 
 // ---------- a tiny chain ----------
@@ -115,13 +124,18 @@ async function chain() {
     nonces[from]++;
     const a = createAddressFromString(from), acc = await evm.stateManager.getAccount(a); acc.nonce = BigInt(nonces[from]); await evm.stateManager.putAccount(a, acc);
     const at = r.created || addr;
+    return attach(at, c, from);
+  }
+  // a handle on a contract already at `at` - one that another contract's constructor deployed (RareRules' RareFight)
+  function attach(at, c, from) {
     const iface = new ethers.Interface(c.abi);
     return {
       address: at, iface,
       call: async (fn, args2, from2, value) => { const r2 = await send(from2 || from, at, iface.encodeFunctionData(fn, args2 || []), value); return { out: iface.decodeFunctionResult(fn, r2.ret), gas: r2.gas }; },
     };
   }
-  return { acct, deploy, travel: (s) => { now += BigInt(s); number++; }, now: () => Number(now) };
+  const code = async (a) => (await evm.stateManager.getCode(createAddressFromString(a))).length;
+  return { acct, deploy, attach, code, travel: (s) => { now += BigInt(s); number++; }, now: () => Number(now) };
 }
 
 (async () => {
@@ -160,7 +174,10 @@ async function chain() {
     weapons: { 6: { n: 'CLUB', k: 'club', dmg: 10, rng: 0.5 }, 5: { n: 'SLING', k: 'sling', dmg: 15, rng: 2 }, 4: { n: 'SPEAR', k: 'spear', dmg: 25, rng: 1 },
       3: { n: 'BOW AND ARROW', k: 'bow', dmg: 35, rng: 3 }, 2: { n: 'CROSSBOW', k: 'xbow', dmg: 50, rng: 4, pierce: true },
       1: { n: 'CATAPULT', k: 'catapult', dmg: 80, rng: 5, siege: true, area: 1, vsBuilding: 2 } },
-    combat: { periodMs: { melee: 1600, ranged: 2200, siege: 3200 }, melee: ['club', 'spear'], towerRange: 1, dropRange: 0.75, landVsBuildingBps: 9000 } };
+    combat: { periodMs: { melee: 1600, ranged: 2200, siege: 3200 }, melee: ['club', 'spear'], towerRange: 1, dropRange: 0.75, landVsBuildingBps: 9000 },
+    // M17 items 14 and 15: an ordinary Doopie's strength by evolution (ruling 81) and the generation whose weapon each
+    // Doopie slot carries (ruling 85) - slot 0 the 1/1, slots 7 to 10 Evolution 1 to 4
+    doopieHp: { 1: 225, 2: 337, 3: 506, 4: 759 }, doopieArms: { 0: 1, 7: 4, 8: 3, 9: 2, 10: 1 } };
   const src = fs.readFileSync(path.join(__dirname, '../values.js'), 'utf8');   // M3 item 1: the tables left index.html for values.js, the one home
   // Reads `const NAME = <expression>;` whole out of the page: from after the `=` to the `;` that ends
   // it, counting brackets and stepping over strings and comments, so a table spanning eight lines with
@@ -186,8 +203,8 @@ async function chain() {
   // Run in one scope and in this order, because the page writes COMBAT in terms of MELEE. The page's
   // own source, evaluated the way the page evaluates it, rather than transcribed by hand.
   const PAGE = (() => {
-    const body = ['MELEE', 'HP_OF', 'WALL_HP', 'WEAPONS', 'COMBAT'].map((n) => 'const ' + n + ' = ' + readConst(n) + ';').join('\n');
-    return new Function(body + '\nreturn { hp: HP_OF, wallHp: WALL_HP, weapons: WEAPONS, combat: COMBAT };')();
+    const body = ['MELEE', 'HP_OF', 'WALL_HP', 'WEAPONS', 'COMBAT', 'DOOPIE_HP', 'DOOPIE_ARMS'].map((n) => 'const ' + n + ' = ' + readConst(n) + ';').join('\n');
+    return new Function(body + '\nreturn { hp: HP_OF, wallHp: WALL_HP, weapons: WEAPONS, combat: COMBAT, doopieHp: DOOPIE_HP, doopieArms: DOOPIE_ARMS };')();
   })();
   // key order is not meaning: sort before comparing, or a harmless reordering on the page reads as a
   // changed rule and the next person learns to distrust this check
@@ -202,8 +219,27 @@ async function chain() {
     + ' ms, ' + E.combat.melee.join(' and ') + ' in melee, +' + E.combat.towerRange + ' tile on a tower, ' + E.combat.dropRange
     + ' reaching down from one, and ' + E.combat.landVsBuildingBps / 100 + '% of shots landing on a building',
     alike(PAGE.combat, E.combat), norm(PAGE.combat));
+  ok('and the estate\'s own Doopie tables: Evolution 1 to 4 at ' + Object.values(E.doopieHp).join(' / ') + ' (ruling 81) and each Doopie slot\'s weapon by Friend generation '
+    + JSON.stringify(E.doopieArms) + ' (ruling 85)', alike(PAGE.doopieHp, E.doopieHp) && alike(PAGE.doopieArms, E.doopieArms), norm({ hp: PAGE.doopieHp, arms: PAGE.doopieArms }));
   const R = Combat.rulesFrom(PAGE);        // the fight runs on what the page said, not on the copy above
   const lab = await net.deploy(TEAM, C.lab);
+  // M20 item 2: THE FIGHT THE GAME LOOKS UP. RareRules is born with a fresh RareFight (its constructor deploys one)
+  // and `fight()` names it; the line-ups below are fought through THAT address, read off the registry, never through
+  // a handle this file made itself. Deployed from an account of its own (RULES_DEP) so TEAM's nonces - and so every
+  // address and every figure further down - are what they were. Every roll is salted with `lab.address`, the salt the
+  // lab uses for itself, so these are the SAME fights, word for word, the lab used to fight: field-for-field equality
+  // with combat.js here proves RareFight salts with what it is TOLD and not with its own address.
+  const RULES_DEP = '0x1000000000000000000000000000000000000f1f';
+  await net.acct(RULES_DEP);
+  const rulesRoles = await net.deploy(RULES_DEP, C.roles, [RULES_DEP]);
+  await rulesRoles.call('registerRootPower', [ethers.id('rarefriends.power.setRules')], RULES_DEP);
+  const rules = await net.deploy(RULES_DEP, C.rules, [rulesRoles.address]);
+  const fightAt = (await rules.call('fight')).out[0];
+  const fightC = net.attach(fightAt, C.fight, TEAM);
+  ok('THE FIGHT HAS AN ADDRESS (M20 item 2): RareRules is born pointing fight() at a RareFight (' + fightAt + ', ' + (await net.code(fightAt)) + ' bytes of code, not the lab), '
+    + 'RareFight is ' + C.fight.size + ' bytes and RareRules ' + C.rules.size + ', both under the 24 KB limit',
+    (await net.code(fightAt)) === C.fight.size && fightAt.toLowerCase() !== lab.address.toLowerCase() && C.fight.size < 24576 && C.rules.size < 24576,
+    JSON.stringify({ fightAt, code: await net.code(fightAt), fight: C.fight.size, rules: C.rules.size }));
   const rng = Chance.stream(wordOf(99, 0), lab.address, CHAIN_ID, 1);
   const rint = (n) => rng() % n;
   let fights = 0, match = 0, gasMax = 0, gasSum = 0, firstBad = null, worst = null, longest = 0;
@@ -335,34 +371,67 @@ async function chain() {
     sideRungs.push([n + ' a side, generation 6, 27 walls (a real base), ' + on, Object.assign(ladder(n, 6, 0, o), { walls: ring(-7, 6).concat(ring(-9, 8)).slice(0, 27) })]);
   for (const [name, S] of sideRungs) cases.push(Object.assign({ name }, S));
   rungs.push(...sideRungs);
+  // ---------- DOOPIES IN A FIGHT (M17 items 14 and 15; rulings 81, 85, 86, 87) ----------
+  // Appended last, so nothing above re-deals. A line-up is by SLOT: 0 a 1/1, 7 to 10 Evolution 1 to 4. Four kinds in
+  // turn: Doopies attacking Friends, Friends attacking Doopies, both sides mixed with a Doopie on each, and Doopies
+  // only on both sides - the last two are where ruling 87 (a Doopie never attacks a Doopie) and the standoff live.
+  const DSLOTS = [0, 7, 8, 9, 10], doopieSlot = () => DSLOTS[rint(DSLOTS.length)], friendGen = () => 1 + rint(6), anySlot = () => rint(Combat.SLOTS);
+  const firstDoopie = cases.length, DOOPIE_CASES = 32;
+  const looseBase = (nd, slot) => ({
+    defenders: Array.from({ length: nd }, () => ({ gen: slot(), x: -6 + rint(12), y: -6 + rint(12), tower: rint(4) === 0, order: rint(4), fx: -6 + rint(12), fy: -6 + rint(12) })),
+    walls: Array.from({ length: rint(5) }, () => ({ x: -6 + 2 * rint(6), y: -6 + rint(12) })) });
+  for (let k = 0; k < DOOPIE_CASES; k++) {
+    const kind = k % 4, na = 1 + rint(6), nd = 1 + rint(6);
+    const aSlot = kind === 0 || kind === 3 ? doopieSlot : kind === 1 ? friendGen : anySlot;
+    const dSlot = kind === 1 || kind === 3 ? doopieSlot : kind === 0 ? friendGen : anySlot;
+    const b = looseBase(nd, dSlot), attackers = Array.from({ length: na }, aSlot);
+    if (kind === 2) { attackers[0] = doopieSlot(); b.defenders[0].gen = doopieSlot(); }   // a Doopie on each side, at least
+    cases.push({ kind, attackers, entry: Combat.entry(base, Combat.SIDES[rint(4)], 2 + rint(6)), defenders: b.defenders, walls: b.walls });
+  }
+  // ---------- STRENGTH POWERS IN A FIGHT (M13 item 19; ruling 116) ----------
+  // Any slot on either side, and at most one power a side, from 1 bp to the cap; some line-ups power one side only.
+  const firstPower = cases.length, POWER_CASES = 24, BPS = [1, 250, 500, 999, Combat.POWER_CAP_BPS];
+  for (let k = 0; k < POWER_CASES; k++) {
+    const na = 1 + rint(6), nd = 1 + rint(6), b = looseBase(nd, anySlot), attackers = Array.from({ length: na }, anySlot);
+    const attackerPower = k % 3 === 2 ? [] : Array(na).fill(0), defenderPower = k % 3 === 1 ? [] : Array(nd).fill(0);
+    if (attackerPower.length) attackerPower[rint(na)] = BPS[rint(BPS.length)];
+    if (defenderPower.length) defenderPower[rint(nd)] = BPS[rint(BPS.length)];
+    cases.push({ attackers, entry: Combat.entry(base, Combat.SIDES[rint(4)], 2 + rint(6)), defenders: b.defenders, walls: b.walls, attackerPower, defenderPower });
+  }
+  const firstAfter = cases.length;
   const wallsOf = (S) => S.walls.map((w) => ({ x: w.x, y: w.y, vert: !!w.vert, hp: w.hp || 0 }));
   // the four fields of RareCombat.Setup plus its Genesis: absent is `present: false`, which fights as before
   const genesisOf = (S) => S.genesis ? { present: true, x: S.genesis.x, y: S.genesis.y, hp: S.genesis.hp } : { present: false, x: 0, y: 0, hp: 0 };
+  // the two lists of Strength powers (ruling 116): empty when the line-up carries none, which fights as before
+  const powersOf = (S) => ({ attackerPower: S.attackerPower || [], defenderPower: S.defenderPower || [] });
+  const seen = new Map();   // ci*2+j -> { js, sol }, for the rules asserted below on what each engine actually did
   // what each named rung cost, so the output says where it crosses rather than only that it did
   const rungGas = new Map(), rungSame = new Map();
   const describe = (S) => S.name || (S.attackers.length + ' v ' + S.defenders.length + ', ' + S.walls.length
     + ' walls, gen ' + [...new Set(S.attackers.concat(S.defenders.map((d) => d.gen)))].sort((a, b) => a - b).join('/'));
   for (const [ci, S] of cases.entries()) for (let j = 0; j < 2; j++) {
+    if (LIGHT && S.name) continue;
     const w = wordOf(ci + 1000, j), fightId = ci * 10 + j + 1;
     const js = Combat.fight(R, S, { word: w, contract: lab.address, chainId: CHAIN_ID, fightId });
     // the four fields of RareCombat.Setup and nothing else: the line-ups now carry a `name` for the
     // output, and what goes to the ABI is spelled out rather than whatever else happens to be on S
     const S2 = { attackers: S.attackers, entry: S.entry, walls: wallsOf(S),
       defenders: S.defenders.map(d => ({ gen: d.gen, x: d.x, y: d.y, tower: !!d.tower, order: d.order || 0,
-        fx: d.fx == null ? d.x : d.fx, fy: d.fy == null ? d.y : d.fy })), genesis: genesisOf(S) };
+        fx: d.fx == null ? d.x : d.fx, fy: d.fy == null ? d.y : d.fy })), genesis: genesisOf(S), ...powersOf(S) };
     // A revert in Solidity (InvalidSide, say, if the two engines' caps ever disagree) is a MISMATCH, counted and
     // shown like any other, not a crash that hides which line-up it was.
     let r;
-    try { r = await lab.call('fight', [R, S2, w, fightId]); }
-    catch (e) { let why = 'revert'; try { why = lab.iface.parseError(e.data).name; } catch (_) {}
+    try { r = await fightC.call('fight', [R, S2, w, lab.address, fightId]); }   // RareFight, salted as the lab salts itself
+    catch (e) { let why = 'revert'; try { why = fightC.iface.parseError(e.data).name; } catch (_) {}
       fights++; if (!firstBad) firstBad = JSON.stringify({ line: describe(S), sol: 'REVERTED ' + why, want: js.reason });
       continue; }
     const o = r.out[0];
-    const sol = { winner: o.attackWins ? 'attack' : 'defence', reason: ['wiped', 'repelled', 'held'][Number(o.reason)], t: Number(o.t), shots: Number(o.shots),
+    const sol = { winner: o.attackWins ? 'attack' : 'defence', reason: Combat.REASONS[Number(o.reason)], t: Number(o.t), shots: Number(o.shots),
       hits: Number(o.hits), rolls: Number(o.rolls), attackers: o.attackers.map(Number), defenders: o.defenders.map(Number), walls: o.walls.map(Number), genesis: Number(o.genesis) };
     const want = { winner: js.winner, reason: js.reason, t: js.t, shots: js.shots, hits: js.hits, rolls: js.rolls, attackers: js.attackers, defenders: js.defenders, walls: js.walls,
       genesis: js.genesis == null ? 0 : js.genesis };
     fights++;
+    if (ci >= firstDoopie) seen.set(ci * 2 + j, { js, sol });
     ends[js.reason] = (ends[js.reason] || 0) + 1; solEnds[sol.reason] = (solEnds[sol.reason] || 0) + 1; if (js.t > longest) longest = js.t;
     if (JSON.stringify(sol) === JSON.stringify(want)) match++; else if (!firstBad) firstBad = JSON.stringify({ S, sol, want });
     if (S.name) rungSame.set(S.name, (rungSame.get(S.name) || 0) + (JSON.stringify(sol) === JSON.stringify(want) ? 1 : 0));
@@ -371,22 +440,23 @@ async function chain() {
     if (g > gasMax) { gasMax = g; worst = { line: describe(S), attackers: S.attackers.length, defenders: S.defenders.length, walls: S.walls.length, ms: js.t }; }
   }
   const orders = [0, 1, 2, 3].map(o => cases.reduce((n, S) => n + S.defenders.filter(d => (d.order || 0) === o).length, 0));
-  ok('a fight: RareCombat.fight matches combat.js field for field on ' + fights + ' fights (' + cases.length + ' line-ups × 2 words, spots, walls, towers, splash; ' +
+  ok('a fight: RareFight.fight, at the address RareRules.fight() names, matches combat.js field for field on ' + fights + ' fights (' + cases.length + ' line-ups × 2 words, spots, walls, towers, splash; ' +
     orders[0] + ' holding, ' + orders[1] + ' engaging, ' + orders[2] + ' defending, ' + orders[3] + ' falling back)', match === fights, firstBad);
   // THE DECIDED RULES, not only the two engines agreeing (rulings 45 and 47, 2026-10-01). Parity alone would
   // stay green if both engines were changed the same wrong way, so each rule is asserted on its own here.
-  ok('NO FIGHT CLOCK (ruling 47): the Rules struct and rulesFrom carry no maxMs, and every one of the ' + fights + ' fights ends with a side down - '
+  // the standoff (ruling 87 read with 47) is not a clock: it is a field on which no one standing may shoot anyone
+  ok('NO FIGHT CLOCK (ruling 47): the Rules struct and rulesFrom carry no maxMs, and every one of the ' + fights + ' fights ends with a side down or in a Doopie standoff - '
     + JSON.stringify(ends) + ' in combat.js and ' + JSON.stringify(solEnds) + ' in Solidity, none "held" - the longest running ' + (longest / 1000).toFixed(1) + ' s',
     !('maxMs' in R) && !C.lab.abi.find((f) => f.name === 'fight').inputs[0].components.some((c) => c.name === 'maxMs')
-    && [ends, solEnds].every((m) => Object.keys(m).every((k) => k === 'wiped' || k === 'repelled')), JSON.stringify({ js: ends, sol: solEnds }));
+    && [ends, solEnds].every((m) => Object.keys(m).every((k) => k === 'wiped' || k === 'repelled' || k === 'standoff')), JSON.stringify({ js: ends, sol: solEnds }));
   // cover, by switching it off: the same fight at coverDiv 1 must differ only where cover applies. On the wall it
   // must change the fight (in BOTH engines); behind a wall it must change nothing (in both).
   const R1 = Object.assign({}, R, { coverDiv: 1 });
   const S2of = (S) => ({ attackers: S.attackers, entry: S.entry, walls: wallsOf(S), defenders: S.defenders.map(d => ({ gen: d.gen, x: d.x, y: d.y, tower: !!d.tower,
-    order: d.order || 0, fx: d.fx == null ? d.x : d.fx, fy: d.fy == null ? d.y : d.fy })), genesis: genesisOf(S) });
+    order: d.order || 0, fx: d.fx == null ? d.x : d.fx, fy: d.fy == null ? d.y : d.fy })), genesis: genesisOf(S), ...powersOf(S) });
   const both = async (RR, S, w) => { const js = Combat.fight(RR, S, { word: w, contract: lab.address, chainId: CHAIN_ID, fightId: 1 }, { log: true });
     const o = (await lab.call('fight', [RR, S2of(S), w, 1])).out[0];
-    return { js, jsKey: [js.t, js.shots, js.hits].concat(js.attackers, js.defenders).join(), solKey: [o.t, o.shots, o.hits].concat(o.attackers, o.defenders).map(Number).join() }; };
+    return { js, sol: o, jsKey: [js.t, js.shots, js.hits].concat(js.attackers, js.defenders).join(), solKey: [o.t, o.shots, o.hits].concat(o.attackers, o.defenders).map(Number).join() }; };
   let onDiff = 0, behindSame = 0, onCover = true, behindCover = false; const NC = 6;
   for (let g = 1; g <= NC; g++) {
     const w = wordOf(4500, g);
@@ -491,15 +561,19 @@ async function chain() {
       + errs.join(', ') + '), and ' + big.map(([n, k]) => n + ' walls ' + k + '/2').join(', ') + ' fought field for field the same in both engines',
       Combat.MAX_WALLS === undefined && !errs.includes('TooManyWalls') && big.every(([, k]) => k === 2) && big.some(([n]) => n >= 60),
       JSON.stringify({ MAX_WALLS: Combat.MAX_WALLS, errs, big })); }
-  // refused in both engines: a 1/1 (slot 0) has no weapon, so it cannot stand in a full fight; a Genesis must be given a strength
+  // A FIGHT SLOT IS 0 TO 10 IN BOTH ENGINES (rulings 55, 81, 85): a 1/1 (slot 0, the catapult since ruling 85) and every
+  // Doopie evolution (7 to 10) stand in a full fight; slot 11 is refused, attacking or defending; a Genesis must be given
+  // a strength. Before ruling 85 slot 0 was refused here: it had no weapon.
   { const errOf = async (S) => { try { await lab.call('fight', [R, S2of(S), wordOf(4800, 0), 1]); return 'landed'; } catch (e) { try { return lab.iface.parseError(e.data).name; } catch (_) { return 'revert'; } } };
-    const jsErr = (S) => { try { Combat.fight(R, S, { word: wordOf(4800, 0), contract: lab.address, chainId: CHAIN_ID, fightId: 1 }); return 'landed'; } catch (e) { return e.name; } };
-    const p = Combat.proving(1, {}), att0 = { attackers: [0], entry: Combat.entry(p, 'N', 6), defenders: p.defenders, walls: p.walls },
-      def0 = { attackers: [1], entry: Combat.entry(p, 'N', 6), defenders: [{ gen: 0, x: 0, y: -1 }], walls: p.walls },
+    const jsErr = (S) => { try { Combat.fight(R, S, { word: wordOf(4800, 0), contract: lab.address, chainId: CHAIN_ID, fightId: 1 }); return 'landed'; } catch (e) { return e.code || e.name; } };
+    const p = Combat.proving(1, {}), lineAt = (a, d) => ({ attackers: [a], entry: Combat.entry(p, 'N', 6), defenders: [{ gen: d, x: 0, y: -1 }], walls: p.walls }),
       gNo = { attackers: [1], entry: Combat.entry(p, 'N', 6), defenders: p.defenders, walls: p.walls, genesis: { x: 0, y: 0, hp: 0 } };
-    const got = { att0: [jsErr(att0), await errOf(att0)], def0: [jsErr(def0), await errOf(def0)], gNo: [jsErr(gNo), await errOf(gNo)] };
-    ok('generation 0 (a 1/1, ruling 55 - no weapon yet) is refused in a full fight by both engines, attacking or defending, and so is a Genesis with no strength: '
-      + JSON.stringify(got), got.att0[0] === 'RangeError' && got.att0[1] === 'InvalidGeneration' && got.def0[0] === 'RangeError' && got.def0[1] === 'InvalidGeneration'
+    const got = { att0: [jsErr(lineAt(0, 1)), await errOf(lineAt(0, 1))], def0: [jsErr(lineAt(1, 0)), await errOf(lineAt(1, 0))],
+      att10: [jsErr(lineAt(10, 1)), await errOf(lineAt(10, 1))], def7: [jsErr(lineAt(1, 7)), await errOf(lineAt(1, 7))],
+      att11: [jsErr(lineAt(11, 1)), await errOf(lineAt(11, 1))], def11: [jsErr(lineAt(1, 11)), await errOf(lineAt(1, 11))], gNo: [jsErr(gNo), await errOf(gNo)] };
+    ok('A FIGHT SLOT IS 0 TO 10 in both engines: a 1/1 (slot 0) and the Doopie evolutions (7 to 10) fight, attacking or defending; slot 11 is refused by both, and so is a Genesis with no strength: '
+      + JSON.stringify(got), ['att0', 'def0', 'att10', 'def7'].every((k) => got[k][0] === 'landed' && got[k][1] === 'landed')
+      && ['att11', 'def11'].every((k) => got[k][0] === 'InvalidGeneration' && got[k][1] === 'InvalidGeneration')
       && got.gNo[0] === 'RangeError' && got.gNo[1] === 'InvalidGenesis', JSON.stringify(got)); }
   // THE SIDE CAP, ONE NUMBER IN EACH ENGINE (deployer, 2026-10-01: "let's cap it at 40 for now"). Read from BOTH:
   // combat.js's export, and RareCombat.sol's own `MAX_SIDE` line (it is internal and inlined, so there is no getter
@@ -523,15 +597,19 @@ async function chain() {
   // six figures; and RareCombat.trap settles the same one roll as combat.js trap() on every word, every victim.
   { const RULED = [6003, 6925, 7718, 8351, 8837, 9193];     // DESIGN.md, *What springs - decided*, worked out with 1140
     const js6 = [1, 2, 3, 4, 5, 6].map((g) => Combat.trapBps(R, g));
-    let tSame = 0, tAll = 0, tWins = 0; const sol6 = [];
+    let tSame = 0, tAll = 0, tWins = 0, fSame = 0; const sol6 = [];
     for (let g = 1; g <= 6; g++) for (let k = 0; k < 40; k++) {
       const w = wordOf(4900 + g, k), trapId = g * 1000 + k;
       const o = (await lab.call('trap', [R, g, w, trapId])).out;
       const js = Combat.trap(R, g, { word: w, contract: lab.address, chainId: CHAIN_ID, trapId });
+      // and the same trap through the deployed fight (M20 item 2), salted as the lab salts itself
+      const f = (await fightC.call('trap', [R, g, w, lab.address, trapId])).out;
       if (k === 0) sol6.push(Number(o.bps));
       tAll++; if (o.doopieWins === js.doopieWins && Number(o.roll) === js.roll && Number(o.bps) === js.bps) tSame++;
+      if (f.doopieWins === js.doopieWins && Number(f.roll) === js.roll && Number(f.bps) === js.bps) fSame++;
       if (js.doopieWins) tWins++;
     }
+    ok('and RareFight.trap, at the address RareRules.fight() names, settles the same one roll on ' + fSame + ' of ' + tAll + ' traps', fSame === tAll, fSame + ' / ' + tAll);
     ok('A 1/1 DOOPIE\'S STRENGTH IS 1140, in slot 0 of values.js HP_OF (ruling 55), and the trap\'s odds are the ruling\'s: ' + js6.join(' / ') + ' bps against Gen 1 to 6 in combat.js, '
       + sol6.join(' / ') + ' in RareCombat.trapBps', R.hp[0] === 1140 && JSON.stringify(js6) === JSON.stringify(RULED) && JSON.stringify(sol6) === JSON.stringify(RULED),
       JSON.stringify({ slot0: R.hp[0], js6, sol6 }));
@@ -539,6 +617,87 @@ async function chain() {
       tSame === tAll && tWins > 0 && tWins < tAll, tSame + ' / ' + tAll);
     const R39 = Object.assign({}, R, { hp: [1139].concat(R.hp.slice(1)) });
     ok('slot 0 hashes: rulesHash moves when a 1/1\'s strength does (1140 -> 1139)', Combat.rulesHash(R39) !== Combat.rulesHash(R), 'same hash'); }
+  // ================= M17 ITEMS 14 AND 15, M13 ITEM 19 - EACH RULE ASSERTED ON ITS OWN =================
+  // Parity alone would stay green if both engines broke a rule the same way. Each line below is labelled `RULE <name>:`
+  // and test/combatmutants.js breaks the code behind each one, in each engine, and requires that line to go red.
+  const jsCode = (f) => { try { f(); return 'landed'; } catch (e) { return e.code || e.name; } };
+  const solCode = async (fn, args) => { try { await lab.call(fn, args); return 'landed'; } catch (e) { try { return lab.iface.parseError(e.data).name; } catch (_) { return 'revert'; } } };
+  const slotOf = (S, tag) => tag[0] === 'A' ? S.attackers[+tag.slice(1)] : tag[0] === 'D' ? S.defenders[+tag.slice(1)].gen : null;   // 'G' is no slot
+  const isD = (g) => g != null && Combat.isDoopie(g);
+  // RULE doopie-strength (ruling 81; ruling 86: not linked to the Friends' table)
+  { const E2 = JSON.parse(JSON.stringify(PAGE)); E2.hp[4] = 999; E2.hp[1] = 1;   // the Friends' two matching numbers moved
+    const E3 = JSON.parse(JSON.stringify(PAGE)); E3.doopieHp[1] = 1; E3.doopieHp[4] = 2;   // the Doopies' moved
+    const R2 = Combat.rulesFrom(E2), R3 = Combat.rulesFrom(E3), slots = [7, 8, 9, 10].map((g) => R.hp[g]);
+    ok('RULE doopie-strength: Evolution 1 to 4 fight at ' + slots.join(' / ') + ' (slots 7 to 10, values.js DOOPIE_HP, ruling 81) beside the 1/1\'s ' + R.hp[0]
+      + '; NOT LINKED (ruling 86) - moving Gen 4 and Gen 1 in HP_OF leaves them at ' + [7, 10].map((g) => R2.hp[g]).join(' and ') + ', moving Evolution 1 and 4 leaves Gen 4 and Gen 1 at '
+      + [4, 1].map((g) => R3.hp[g]).join(' and '), JSON.stringify(slots) === '[225,337,506,759]' && R.hp[0] === 1140 && R2.hp[7] === 225 && R2.hp[10] === 759 && R3.hp[4] === 225 && R3.hp[1] === 759
+      && R3.hp[7] === 1 && R3.hp[10] === 2, JSON.stringify({ slots, R2: R2.hp, R3: R3.hp })); }
+  // RULE doopie-arms (ruling 85): each Doopie slot carries every weapon column of the Friend generation named
+  { const COLS = ['dmg', 'reach', 'period', 'melee', 'siege', 'pierce', 'area', 'vsBuilding'], WANT = { 0: 'catapult', 7: 'spear', 8: 'bow', 9: 'xbow', 10: 'catapult' };
+    const bad = DSLOTS.filter((g) => { const arm = PAGE.doopieArms[g]; return PAGE.weapons[arm].k !== WANT[g] || COLS.some((c) => R[c][g] !== R[c][arm]); });
+    const fought = new Set(); for (const [ci, S] of cases.entries()) if (ci >= firstDoopie) { S.attackers.forEach((g) => fought.add('A' + g)); S.defenders.forEach((d) => fought.add('D' + d.gen)); }
+    const allSlots = DSLOTS.every((g) => fought.has('A' + g) && fought.has('D' + g));
+    ok('RULE doopie-arms: Evolution 1 the spear, 2 the bow, 3 the crossbow, 4 and the 1/1 the catapult (ruling 85) - every weapon column of slots 0 and 7 to 10 is its generation\'s, and each Doopie slot was fought attacking and defending by both engines above',
+      !bad.length && allSlots, JSON.stringify({ bad, fought: [...fought].sort() })); }
+  // RULE doopie-vs-doopie (ruling 87): read off combat.js's shot log and Solidity's results
+  { let dOnD = 0, fOnD = 0, dOnF = 0, standJs = 0, standSol = 0, onlyD = 0, onlyDok = 0;
+    for (let ci = firstDoopie; ci < firstAfter; ci++) for (let j = 0; j < 2; j++) {
+      const S = cases[ci], r = Combat.fight(R, S, { word: wordOf(ci + 1000, j), contract: lab.address, chainId: CHAIN_ID, fightId: ci * 10 + j + 1 }, { log: true });
+      for (const e of r.log) { if (e.at[0] === 'W') continue;
+        const by = slotOf(S, e.who), hit = [e.at].concat(e.also.map((a) => a[0])).filter((t) => t !== 'G').map((t) => slotOf(S, t));
+        if (isD(by) && hit.some(isD)) dOnD++; if (!isD(by) && hit.some(isD)) fOnD++; if (isD(by) && hit.some((g) => !isD(g))) dOnF++; }
+      const sv = seen.get(ci * 2 + j);
+      if (r.reason === 'standoff') standJs++; if (sv && sv.sol.reason === 'standoff') standSol++;
+      if (S.kind === 3) { onlyD++; if (r.shots === 0 && r.reason === 'standoff' && r.winner === 'defence' && sv && sv.sol.shots === 0 && sv.sol.reason === 'standoff' && sv.sol.winner === 'defence') onlyDok++; }
+    }
+    // and by hand: an Evolution 4 catapult two spots from a 1/1, nothing else on the field
+    const one = { attackers: [10], entry: { x: 0, y: -3, ax: 0, ay: 0 }, defenders: [{ gen: 0, x: 0, y: -1 }], walls: [] }, w1 = await both(R, one, wordOf(5300, 0));
+    const handOk = w1.js.reason === 'standoff' && w1.js.shots === 0 && w1.js.t === 0 && Number(w1.sol.reason) === Combat.REASONS.indexOf('standoff') && Number(w1.sol.shots) === 0 && !w1.sol.attackWins;
+    ok('RULE doopie-vs-doopie: a Doopie never shoots, pierces or splashes a Doopie (ruling 87) - ' + dOnD + ' such hits in ' + ((firstAfter - firstDoopie) * 2) + ' Doopie and power fights, while Friends shot Doopies '
+      + fOnD + ' times and Doopies shot Friends ' + dOnF + '; all ' + onlyD + ' Doopies-only fights end at once in a standoff, no shot, the defence holding, in both engines (' + onlyDok + '); standoffs '
+      + standJs + ' in combat.js, ' + standSol + ' in Solidity; an Evolution 4 beside a 1/1 does nothing in either',
+      dOnD === 0 && fOnD > 0 && dOnF > 0 && onlyD > 0 && onlyDok === onlyD && standJs === standSol && standJs > onlyD && handOk,
+      JSON.stringify({ dOnD, fOnD, dOnF, onlyD, onlyDok, standJs, standSol, hand: [w1.js.reason, w1.js.shots, Number(w1.sol.reason), Number(w1.sol.shots)] })); }
+  // RULE power-one-per-side and RULE power-cap (ruling 116)
+  { const p = Combat.proving(3, {}), line = (ap, dp) => ({ attackers: [1, 4], entry: Combat.entry(p, 'N', 6), walls: p.walls,
+      defenders: [{ gen: 3, x: 0, y: -1 }, { gen: 9, x: 1, y: -1 }], attackerPower: ap, defenderPower: dp });
+    const ctx1 = { word: wordOf(5400, 0), contract: lab.address, chainId: CHAIN_ID, fightId: 1 };
+    const both2 = async (S) => [jsCode(() => Combat.fight(R, S, ctx1)), await solCode('fight', [R, S2of(S), ctx1.word, 1])];
+    const cap = Combat.POWER_CAP_BPS, solCap = (fs.readFileSync(path.join(__dirname, 'RareCombat.sol'), 'utf8').match(/uint256\s+internal\s+constant\s+POWER_CAP_BPS\s*=\s*(\d+)\s*;/) || [])[1];
+    const one = { twoAtt: await both2(line([500, 500], [])), twoDef: await both2(line([], [1, 1])), onePerSide: await both2(line([0, cap], [cap, 0])), short: await both2(line([500], [])) };
+    ok('RULE power-one-per-side: only one Strength power a side (ruling 116) - two on the attack and two on the defence are refused by both engines (OnePowerASide), one on each side fights in both, and a list that is not one per Friend is refused (InvalidPowers): '
+      + JSON.stringify(one), one.twoAtt.every((x) => x === 'OnePowerASide') && one.twoDef.every((x) => x === 'OnePowerASide') && one.onePerSide.every((x) => x === 'landed')
+      && one.short.every((x) => x === 'InvalidPowers'), JSON.stringify(one));
+    // the bonus: floor(strength x bps / 10000) on the strength it enters with, read off combat.js's opening trace
+    const pw = Combat.fight(R, line([0, cap], [cap, 0]), ctx1, { trace: true, log: true }), tr = pw.trace[0].U.map((u) => u[2]);
+    const want = [R.hp[1], R.hp[4] + Math.floor(R.hp[4] * cap / 10000), R.hp[3] + Math.floor(R.hp[3] * cap / 10000), R.hp[9]];
+    // and the odds are weighed with it: a shot by the powered Gen 4 at the powered Gen 3 lands at full x 10000 / (full + full)
+    const oddsWant = Math.floor(want[1] * 10000 / (want[1] + want[2])), oddsSeen = pw.log.filter((e) => e.who === 'A1' && e.at === 'D0').map((e) => e.bps);
+    // never heals: across every power line-up, no Friend leaves with more than it came in with, in either engine; and the
+    // power is felt - the same line-up without its powers is a different fight in both engines
+    let over = 0, differs = 0, pf = 0;
+    for (let ci = firstPower; ci < firstAfter; ci++) for (let j = 0; j < 2; j++) {
+      const S = cases[ci], sv = seen.get(ci * 2 + j); if (!sv) { over++; continue; } pf++;
+      const baseA = S.attackers.map((g) => R.hp[g]), baseD = S.defenders.map((d) => R.hp[d.gen]);
+      for (const side of [sv.js, sv.sol]) { side.attackers.forEach((h, i) => { if (h > baseA[i]) over++; }); side.defenders.forEach((h, i) => { if (h > baseD[i]) over++; }); }
+      if (j === 0) { const bare = Object.assign({}, S, { attackerPower: [], defenderPower: [] }), b2 = await both(R, bare, wordOf(ci + 1000, 0)), s2 = await both(R, S, wordOf(ci + 1000, 0));
+        if (b2.jsKey !== s2.jsKey && b2.solKey !== s2.solKey && s2.jsKey === s2.solKey) differs++; }
+    }
+    const over1 = { att: await both2(line([0, cap + 1], [])), def: await both2(line([], [cap + 1, 0])) };
+    ok('RULE power-cap: a Strength power adds at most +' + cap / 100 + '% (ruling 116; POWER_CAP_BPS ' + cap + ' in combat.js, ' + solCap + ' in RareCombat.sol) - ' + (cap + 1) + ' bps is refused by both engines on either side (PowerOverCap): '
+      + JSON.stringify(over1) + '; the bonus is worked out on the strength it enters with (' + tr.join(' / ') + ' at the opening, want ' + want.join(' / ') + ') and the odds are weighed with it ('
+      + oddsSeen.length + ' shots by the powered Gen 4 at the powered Gen 3, all at ' + oddsWant + ' bps); it ends with the fight and never heals: '
+      + over + ' Friends of ' + pf + ' power fights left with more than they came in with, in either engine; and the power changed ' + differs + ' of ' + POWER_CASES + ' fights in both engines',
+      String(cap) === solCap && cap === 1000 && over1.att.every((x) => x === 'PowerOverCap') && over1.def.every((x) => x === 'PowerOverCap') && JSON.stringify(tr) === JSON.stringify(want)
+      && oddsSeen.length > 0 && oddsSeen.every((b) => b === oddsWant)
+      && over === 0 && pf === POWER_CASES * 2 && differs > 0, JSON.stringify({ over1, tr, want, oddsWant, oddsSeen, over, pf, differs })); }
+  // RULE trap-victim (ruling 87): a trap's own victim check - a fight takes slots 0 to 10, a trap only a Friend
+  { const got = {};
+    for (const g of [0, 7, 8, 9, 10, 11]) got[g] = [jsCode(() => Combat.trapBps(R, g)), await solCode('trap', [R, g, wordOf(5500, g), 1])];
+    const friends = await Promise.all([1, 2, 3, 4, 5, 6].map(async (g) => [jsCode(() => Combat.trapBps(R, g)), await solCode('trap', [R, g, wordOf(5500, g), 1])]));
+    ok('RULE trap-victim: a 1/1 never traps a Doopie (ruling 87) - a 1/1 and Evolution 1 to 4 (and slot 11) are refused as a trap\'s victim by both engines (InvalidVictim), Gen 1 to 6 are not: '
+      + JSON.stringify(got), Object.values(got).every(([a, b]) => a === 'InvalidVictim' && b === 'InvalidVictim') && friends.every(([a, b]) => a === 'landed' && b === 'landed'),
+      JSON.stringify({ got, friends })); }
   console.log('        gas per fight: average ' + Math.round(gasSum / fights).toLocaleString('en-US') + ', most ' + gasMax.toLocaleString('en-US') + ' (' + JSON.stringify(worst) + ')');
   // The ceiling, read from the chain the contracts are for. The chain id is asserted with it: a ceiling
   // read from the wrong chain is worse than a typed-in one, because it looks like it was measured.
@@ -780,7 +939,7 @@ async function chain() {
 
   // what each step costs in gas, measured here, for the cost and bridge pages (execution gas on the EVM; a real transaction adds
   // 21,000 base and its calldata, and on an Arbitrum chain a small L1 data fee)
-  if (!fails) {
+  if (!fails && !LIGHT) {
     GAS.measuredAt = new Date().toISOString(); GAS.solc = solc.version().split('+')[0]; GAS.note = 'execution gas, measured by estate/contracts/paritycheck.js';
     GAS.sourcesHash = require('./sources').sourcesHash();   // what it was measured FROM, so `npm run gas:fresh` can say when this file goes stale
     fs.writeFileSync(path.join(__dirname, '../gas.json'), JSON.stringify(GAS, null, 2) + '\n');

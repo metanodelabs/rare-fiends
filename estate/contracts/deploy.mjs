@@ -89,9 +89,10 @@ if (RF && !LOCAL) {
 process.stdout.write('compiling ' + HERE + ' ... ');
 const C = compileAll(); console.log('solc ' + C.solc + ', cancun, optimizer 200');
 
-// RareCombatLab: a real contract (RareCombat.sol:410) but a view wrapper for paritycheck.js only. Nothing in the
-// game calls it and no page reads it, so it is NOT deployed. RareCombat/RareChance are libraries, inlined.
-console.log('RareCombatLab: not deployed (view harness for the parity check; nothing in the game needs it)');
+// RareCombatLab: a real contract but a view wrapper for paritycheck.js only, so it is NOT deployed. The fight the
+// game looks up is RareFight (M20 item 2): RareRules' constructor deploys it and RareRules.fight() names it, so it
+// has no step here - it lands wherever RareRules does. RareChance is a library, inlined (RareDice wraps it).
+console.log('RareCombatLab: not deployed (view harness for the parity check). RareFight: deployed by RareRules\' constructor, named by RareRules.fight()');
 
 let nonce = await provider.getTransactionCount(wallet.address);
 let total = 0n;
@@ -216,7 +217,10 @@ if (GAME) {
     A('length_', N.gameLength[0], N.gameLength[1]), A('joinWindow_', N.joinWindow[0], N.joinWindow[1]), A('startDelay_', N.startDelay[0], N.startDelay[1]),
     A('cutBps_', N.cutBps[0], N.cutBps[1]), A('places_', N.places[0], N.places[1]),
     A('minPlayers_', N.minPlayers[0], N.minPlayers[1]), A('rulesId_', RULES_ID, 'env RULES_ID, frozen on RareRules ' + RULES)]);
-  if (!DRY) { cfg.rareRules = RULES; cfg.rulesId = RULES_ID; writeFileSync(cfgFile, JSON.stringify(cfg, null, 2) + '\n'); }
+  // M20 item 2: the fight the game looks up, READ off RareRules (its constructor deployed it), never typed
+  let fightAddr = null; try { fightAddr = await rules.fight(); } catch { fightAddr = null; }
+  console.log('RareRules.fight() = ' + (fightAddr || 'NO ANSWER - a RareRules from before M20 item 2, or a dry-run stand-in'));
+  if (!DRY) { cfg.rareRules = RULES; cfg.rulesId = RULES_ID; if (fightAddr) cfg.rareFight = fightAddr; writeFileSync(cfgFile, JSON.stringify(cfg, null, 2) + '\n'); }
   await wireGame(rareGame);
   // Powers: RareGame.declare accepts DECLARE_PLACINGS ONLY (deployer ruling 2026-10-01: the deployer or the game
   // master, and no one else) - the server role's RECORD_SYNC does not declare. Root holds it; granting it to the

@@ -83,6 +83,15 @@ const DUEL = '0x00000000000000000000000000000000000000b0';       // where the st
 Object.assign(MARKET_ANSWERS, { [SEL_('terminalShareBps()')]: 3333, [SEL_('maxTerminalPriceBps()')]: 100,
   [SEL_('counterBps()')]: 7000, [SEL_('sameBps()')]: 5000, [SEL_('game()')]: parseInt(GAME, 16) });
 const SEL_RUNNING = SEL_('runningGames()');
+// M4 items 6 and 8's two other contracts (aa0d193), so every number a contract holds has a contract to answer it: the
+// stub RareRules answers ladderOf(rulesId, kindId) with the GAME'S OWN ladders (values.js, in its kind order, kindId N =
+// the Nth row), and the stub RarePartners answers waitingPeriod() with 86400 s. RareGame.currentRulesId() answers 42 - not
+// zero - so a setDefaults that carried a default instead of the chain's table would be seen.
+const RULES = '0x00000000000000000000000000000000000000b1';      // where the stub RareRules answers
+const PARTNERS = '0x00000000000000000000000000000000000000b2';   // where the stub RarePartners answers
+const SEL_LADDER = SEL_('ladderOf(bytes32,uint16)');
+const LADDERS = Object.values(require('./values.js').kinds).map((k) => [k.cost.slice(), (k.wood || []).slice()]);
+Object.assign(MARKET_ANSWERS, { [SEL_('waitingPeriod()')]: 86400, [SEL_('currentRulesId()')]: 42 });
 // Hoisted so the crash path below can clean up too: it used to exit(1) without touching the profile,
 // which is the one path that leaks even when the happy path is perfect.
 let PROF = null, CH = null;
@@ -146,7 +155,7 @@ let PROF = null, CH = null;
     if (!window.__realFetch) window.__realFetch = window.fetch.bind(window);
     // the stub chain's one piece of state, so a transaction has a visible effect to read back
     if (window.__demo === undefined) window.__demo = ${o.demoOn ? 'true' : 'false'};
-    const cfg = ${JSON.stringify(o.registry ? { chainId: 4663, shadowFriends: null, attestor: null, rareRoles: o.registry, rareMarket: MARKET, rareGame: GAME, rareDuel: DUEL }
+    const cfg = ${JSON.stringify(o.registry ? { chainId: 4663, shadowFriends: null, attestor: null, rareRoles: o.registry, rareMarket: MARKET, rareGame: GAME, rareDuel: DUEL, rareRules: RULES, rarePartners: PARTNERS }
                                             : { chainId: 4663, shadowFriends: null, attestor: null })};
     // THE CHAIN, ANSWERED HERE. The page reads contract state with a JSON-RPC eth_call over
     // ChainLive.RPC - not through the wallet - so this is where a chain has to be stood in for.
@@ -168,6 +177,17 @@ let PROF = null, CH = null;
         if (body.method === 'eth_call' && cd === '${SEL_RUNNING}') return Promise.resolve({ ok: true, json: () => Promise.resolve(RN == null
           ? { jsonrpc: '2.0', id: 1, error: { code: -32000, message: 'the stub answers runningGames() only when window.__running is set' } }
           : { jsonrpc: '2.0', id: 1, result: '0x' + Number(RN).toString(16).padStart(64, '0') }) });
+        // M4 item 8: a sent transaction's receipt is asked of the chain; M4 item 10: the setters' events are eth_getLogs.
+        // window.__receipt and window.__logs are what the stub chain says; with none set, no receipt and no events.
+        if (body.method === 'eth_getTransactionReceipt') return Promise.resolve({ ok: true, json: () => Promise.resolve({ jsonrpc: '2.0', id: 1, result: window.__receipt || null }) });
+        if (body.method === 'eth_getLogs') return Promise.resolve({ ok: true, json: () => Promise.resolve({ jsonrpc: '2.0', id: 1, result: window.__logs || [] }) });
+        if (body.method === 'eth_call' && cd === '${SEL_LADDER}' && to === '${RULES}') {   // ladderOf(rulesId, kindId) -> (uint256[] crystal, uint256[] wood)
+          const LD = ${JSON.stringify(LADDERS)}, data = String(body.params[0].data), kid = parseInt(data.slice(10 + 64, 10 + 128), 16), row0 = LD[kid - 1];
+          const row = row0 && window.__ladderBreak === kid ? [row0[0].map((c, i) => (i === 1 ? c + 100 : c)), row0[1]] : row0;   // BROKEN ONCE: one rung moved
+          const W = (n) => Number(n).toString(16).padStart(64, '0');
+          const enc = row ? [W(64), W(64 + 32 * (1 + row[0].length))].concat([W(row[0].length)], row[0].map(W), [W(row[1].length)], row[1].map(W)).join('') : null;
+          return Promise.resolve({ ok: true, json: () => Promise.resolve(enc ? { jsonrpc: '2.0', id: 1, result: '0x' + enc } : { jsonrpc: '2.0', id: 1, error: { code: 3, message: 'execution reverted: NoLadder' } }) });
+        }
         if (body.method === 'eth_call' && MA[cd] !== undefined)           // RareMarket's two getters, RareGame's eight
           return Promise.resolve({ ok: true, json: () => Promise.resolve({ jsonrpc: '2.0', id: 1,
             result: '0x' + MA[cd].toString(16).padStart(64, '0') }) });
@@ -379,9 +399,12 @@ let PROF = null, CH = null;
     (await ev('(window.__rpc||[]).length')) === 0, await ev('JSON.stringify(window.__rpc||[])'));
 
   // ---- M4 item 17 (economist's spec, line 1): the freeze with no RareRoles on record -------------------------
-  // The three switches RareRoles guards (ruling 74), each card's freeze line and its control, read in one go.
-  const FZ3 = ['demo', 'whitelistOpen', 'freezeGame'];
-  const FZFN = { demo: 'setDemoMode(bool)', whitelistOpen: 'setWhitelistOpen(bool)', freezeGame: 'setGame(address)' };
+  // The SEVEN switches frozen while a game runs (ruling 74): the three RareRoles guards and the four trading switches,
+  // which RareMarket.setTradeable guards since BINDING §80 (5050b5a) through the same RareRoles.runningGames(). Each
+  // card's freeze line and its control, read in one go. (The name FZ3 is kept; it held three before the trading four.)
+  const FZ3 = ['demo', 'whitelistOpen', 'freezeGame', 'tradeCrystals', 'tradeItems', 'tradeBuildings', 'tradeBase'];
+  const FZFN = { demo: 'setDemoMode(bool)', whitelistOpen: 'setWhitelistOpen(bool)', freezeGame: 'setGame(address)',
+    tradeCrystals: 'setTradeable(address,bool)', tradeItems: 'setTradeable(address,bool)', tradeBuildings: 'setTradeable(address,bool)', tradeBase: 'setTradeable(address,bool)' };
   const fzRead = async () => JSON.parse(await ev(`JSON.stringify(${JSON.stringify(FZ3)}.map((id)=>{
     const f=document.querySelector('[data-freeze="'+id+'"]'), c=document.querySelector('[data-sw="'+id+'"],[data-in="'+id+'"]');
     return { id, t: f ? f.textContent : null, why: f && f.nextElementSibling ? f.nextElementSibling.textContent : '',
@@ -572,14 +595,32 @@ let PROF = null, CH = null;
     await ev('document.querySelector(\'[data-sw="seams"]\').closest(".p").querySelector(".rb").textContent'));
   // Nothing is applied by that button any more: it shows what will change, and applying is a second,
   // separate press. Two kinds are pending here at once and the screen must not blur them.
+  // M4 item 8 (aa0d193): `places` is a CONTRACT STATE CHANGE now - RareGame.setDefaults - and the places field still
+  // holds the 14-capped-to-10 staged above. So the screen holds both kinds, and each must keep its own words and its own
+  // press: the game change is applied with NOTHING signed, the contract change is one transaction whose untouched
+  // members are carried AS THE CHAIN HOLDS THEM, shown with its calldata.
   await click('#applysw'); await sleep(400);
   const cf2 = await ev("document.getElementById('confirm').textContent.replace(/\\s+/g,' ')");
-  ok('the confirm screen holds a GAME CHANGE and a NO CONTRACT YET side by side and does not blur them',
-    /A GAME CHANGE/.test(cf2) && /Nothing is signed and nothing is spent/.test(cf2) &&
-    /NO CONTRACT YET/.test(cf2) && /nothing on chain holds it/.test(cf2), cf2.slice(0, 400));
-  ok('and with no contract change among them there is nothing to sign, said in those words',
-    (await ev('document.getElementById("dotx").disabled === true')) &&
-    /no change here is a contract state change/.test(cf2), cf2.slice(-260));
+  const cd2 = (cf2.match(/calldata (0x[0-9a-f]+)/) || [])[1] || '';
+  const words2 = cd2 ? cd2.slice(10).match(/.{64}/g).map((w) => Number(BigInt('0x' + w))) : [];
+  ok('the confirm screen holds a GAME CHANGE and a CONTRACT STATE CHANGE side by side and does not blur them',
+    /A GAME CHANGE — It reaches the running game by reloading it with a different web address\. Nothing is signed and nothing is spent, and nothing about it is on chain\./.test(cf2) &&
+    /A CONTRACT STATE CHANGE — A transaction on chain 4663: RareGame\.setDefaults\(cutBps, places, minPlayers, rulesId\)/.test(cf2) && /cannot be taken back/.test(cf2), cf2.slice(0, 600));
+  ok('and the contract change is ONE setDefaults transaction carrying places = 10 CHANGED HERE and every other member UNCHANGED, as the chain holds it - calldata words [cut 500, places 10, minPlayers 2, rulesId 42 - RareGame.currentRulesId() as the chain answers it, not a default]',
+    /How many places pay out = 10 places — CHANGED HERE/.test(cf2) && (cf2.match(/UNCHANGED, as the chain holds it/g) || []).length === 3 &&
+    JSON.stringify(words2) === JSON.stringify([500, 10, 2, 42]), JSON.stringify({ words2, cd: cd2.slice(0, 12) }));
+  ok('two presses, never one: APPLY THE GAME CHANGES — NOTHING IS SIGNED, and SIGN AND SEND THE CONTRACT CHANGES, live',
+    /APPLY THE GAME CHANGES — NOTHING IS SIGNED/.test(await ev('document.getElementById("doapply").textContent')) &&
+    (await ev('document.getElementById("dotx").disabled')) === false && /SIGN AND SEND THE CONTRACT CHANGES/.test(await ev('document.getElementById("dotx").textContent')),
+    await ev('document.getElementById("doapply").textContent + " | " + document.getElementById("dotx").disabled + " " + document.getElementById("dotx").textContent'));
+  // THE GAME-ONLY PATH, still asserted: cancel, put places back where the chain has it (3), and confirm again - now there
+  // is no contract change at all, so there is nothing to sign, said in those words
+  await click('#nocfm'); await sleep(200);
+  await ev(`(()=>{const i=document.querySelector('[data-in="places"]'); i.value=3; i.dispatchEvent(new Event('change')); return 1;})()`); await sleep(200);
+  await click('#applysw'); await sleep(400);
+  const cfG = await ev("document.getElementById('confirm').textContent.replace(/\\s+/g,' ')");
+  ok('with places back at the chain\'s 3, only the GAME CHANGE is left and there is nothing to sign, said in those words',
+    (await ev('document.getElementById("dotx").disabled === true')) && /no change here is a contract state change/.test(cfG) && /A GAME CHANGE/.test(cfG) && !/A CONTRACT STATE CHANGE —/.test(cfG), cfG.slice(-300));
   await click('#doapply');
   for (let i = 0; i < 160; i++) { await sleep(250); if (await ev('(()=>{try{return document.getElementById("pBase").contentWindow.base.ECON.seamsOn===true;}catch(e){return false;}})()')) break; }
   const after = await ev('(()=>{try{return document.getElementById("pBase").contentWindow.base.ECON.seamsOn;}catch(e){return "no game";}})()');
@@ -734,10 +775,11 @@ let PROF = null, CH = null;
   const PROP = JSON.parse(await ev(`JSON.stringify([...document.querySelectorAll('#out [data-sweep]')].map(e=>e.textContent))`));
   const SWROWS = JSON.parse(await ev(`JSON.stringify([...document.querySelectorAll('#out [data-sweep]')].map(e=>+e.dataset.sweep))`));
   const WANT_ROWS = [5, 6, 7, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 34, 35, 36, 37, 38, 43];
+  // row 23 is question 22's table, DECIDED by ruling 76 (bd99132 / aa0d193) - it was the one line still PROPOSED
   const badSweep = PROP.map((t, i) => [SWROWS[i], t]).filter(([n, t]) => n === 23
-    ? !/^PROPOSED, NOT DECIDED \(SWEEP ROW 23, QUESTION 22\): /.test(t)
+    ? !/^DECIDED, RULING 76 \(SWEEP ROW 23\): /.test(t)
     : !new RegExp('^DECIDED, RULING 64 \\(SWEEP ROW ' + n + '\\): ').test(t));
-  ok('ruling 64: every sweep line says DECIDED, RULING 64 and cites its row, and only row 23 (question 22) still says PROPOSED (' + PROP.length + ' lines)',
+  ok('rulings 64 and 76: every sweep line says DECIDED and cites its row - RULING 64, and row 23 (question 22) RULING 76; none says PROPOSED (' + PROP.length + ' lines)',
     PROP.length >= 30 && badSweep.length === 0, JSON.stringify(badSweep.slice(0, 3)));
   ok('and every row ruling 64 decided that has a number or a rule is on the page: ' + WANT_ROWS.join(', '),
     WANT_ROWS.every((n) => SWROWS.includes(n)), 'missing ' + JSON.stringify(WANT_ROWS.filter((n) => !SWROWS.includes(n))));
@@ -914,10 +956,23 @@ let PROF = null, CH = null;
   const tagged = (t) => TAGS.filter(([, ts]) => ts && ts.includes(t)).map(([id]) => id);
   const liars = TAGS.filter(([, ts, w]) => ts && w === 'nothing' && ts.includes('READ FROM THE GAME')).map(([id]) => id);
   ok('no card that reads nothing is tagged READ FROM THE GAME (' + TAGS.filter(([, , w]) => w === 'nothing').length + ' such cards)', liars.length === 0, JSON.stringify(liars));
-  ok('the only cards tagged PROPOSED are question 22\'s costs and the terminal\'s default share - nothing ruling 64 decided',
-    JSON.stringify(tagged('PROPOSED').sort()) === JSON.stringify(['costs', 'terminalShare']), JSON.stringify(tagged('PROPOSED')));
-  ok('the only card tagged NOT DECIDED is the capturing Friend\'s strength hit (sweep rows 8 and 44, no number proposed)',
-    JSON.stringify(tagged('NOT DECIDED')) === JSON.stringify(['captureHit']), JSON.stringify(tagged('NOT DECIDED')));
+  // ruling 76 decided question 22's costs, so the terminal's default share (ruling 57 (c)) is the one PROPOSED card left;
+  // and the capturing Friend's strength hit (sweep rows 8 and 44) was struck from the page (aa0d193), so nothing is NOT DECIDED
+  ok('the only card tagged PROPOSED is the terminal\'s default share - question 22\'s costs are DECIDED by ruling 76, nothing ruling 64 decided is PROPOSED',
+    JSON.stringify(tagged('PROPOSED').sort()) === JSON.stringify(['terminalShare']), JSON.stringify(tagged('PROPOSED')));
+  ok('no card is tagged NOT DECIDED - the capturing Friend\'s strength hit, the last, was struck (aa0d193)',
+    JSON.stringify(tagged('NOT DECIDED')) === JSON.stringify([]), JSON.stringify(tagged('NOT DECIDED')));
+  // ---- M4 items 6 and 8 (aa0d193): the building costs and the partnership wait, read off their own contracts ----------
+  let cs = await cardOf('costs'); const pw = await cardOf('partnerWait');
+  ok('M4 item 6: the costs card asks RareRules.ladderOf under RareGame.currentRulesId() for every kind and THE CONTRACT READS THE GAME\'S TABLE, ALL ' + LADDERS.length + ' KINDS',
+    !!cs && cs.rb.some((t) => t.startsWith('THE CONTRACT READS THE GAME\'S TABLE, ALL ' + LADDERS.length + ' KINDS')) && !cs.dis, JSON.stringify(cs && cs.rb.slice(0, 2)));
+  await ev('window.__ladderBreak = 2'); await rp(); cs = await cardOf('costs');
+  const kind2 = Object.keys(require('./values.js').kinds)[1];
+  ok('BROKEN ONCE: the contract\'s ' + kind2 + ' ladder one crystal off reads DISAGREES and names ' + kind2 + ' and nothing else',
+    !!cs && cs.dis && cs.rb.some((t) => new RegExp('^DISAGREES — THE CONTRACT\'S TABLE DIFFERS FROM THE GAME\'S FOR ' + kind2 + ':').test(t)), JSON.stringify(cs && cs.rb.slice(0, 2)));
+  await ev('window.__ladderBreak = null'); await rp();
+  ok('the partnership waiting period reads RarePartners.waitingPeriod() off its own address: THE CONTRACT READS 24 (h)',
+    !!pw && pw.rb[0] === 'THE CONTRACT READS 24' && new RegExp(PARTNERS).test(pw.all), JSON.stringify(pw && pw.rb.slice(0, 2)));
 
   // ---- a decided sweep line follows the game, both ways (row 13, tree regrowth) -----------------------------
   const regrowWas = await ev(PW + '.base.ECON.regrowMs');
@@ -975,14 +1030,18 @@ let PROF = null, CH = null;
   ok('ruling 62: the keep card is DECIDED 240 and reads the game\'s own Record.storeCap for a bare keep (' + capNow + ')',
     ks.tags.includes('DECIDED') && new RegExp('THE GAME\'S OWN COPY, WHICH IS NOT THE CHAIN: ' + capNow + '$').test(ks.rb.join('|').split('|').find((t) => /OWN COPY/.test(t)) || '') &&
     (capNow === 240 ? /^AGREES/.test(ks.verify) : /^DISAGREES WITH RULING 62/.test(ks.verify)), JSON.stringify({ verify: ks.verify, rb: ks.rb }));
-  // the game engineer's ruling-62 storeCap, stood in for inside the probe: the card must follow it to AGREES
-  await ev(`(()=>{const R=${PW}.Record; R.__orig=R.storeCap; R.storeCap=(L,c,w)=>{const v=R.__orig(L,c,w); if(v!==Infinity) return v;
-    return L.buildings.some(b=>b!==w&&b.kind==='keep') ? 24000 : 0;}; return 1;})()`); await repaint();
+  // RULING 78: the merged game's storeCap holds keep.rebuild's 75 for nothing standing, so the card AGREES on both
+  // rulings as the game stands; it is BROKEN the other way - the old ruling-62 zero for nothing standing, stood in for
+  // inside the probe - and must then name ruling 78, and only ruling 78.
+  ok('rulings 62 and 78 as the game stands: storeCap holds a bare keep at 240, nothing standing at keep.rebuild\'s 75 and keep + depot I at the depot\'s 240 - the card AGREES',
+    /^AGREES — THE GAME'S storeCap: keep I \/ II \/ III alone 240 \/ 240 \/ 240 · nothing standing 75 · keep \+ depot I 240/.test(ks.verify || '') && ks.rb.some((t) => t === 'AGREES — THE GAME READS 240 crystals · DECIDED 240 crystals'), JSON.stringify({ verify: ks.verify, rb: ks.rb }));
+  await ev(`(()=>{const R=${PW}.Record; R.__orig=R.storeCap; R.storeCap=(L,c,w)=>L.buildings.some(b=>b!==w)?R.__orig(L,c,w):0; return 1;})()`); await repaint();
   ks = await cardOf('keepStore');
-  ok('BROKEN ONCE, the other way: with storeCap holding a bare keep at 240, nothing at 0 and keep + depot at the depot\'s 240, the card AGREES — and with it the keep\'s read-back',
-    /^AGREES — THE GAME'S storeCap: keep I \/ II \/ III alone 240 \/ 240 \/ 240 · nothing standing 0 · keep \+ depot I 240/.test(ks.verify) && ks.rb.some((t) => t === 'AGREES — THE GAME READS 240 crystals · DECIDED 240 crystals'), JSON.stringify({ verify: ks.verify, rb: ks.rb }));
+  ok('BROKEN ONCE: a storeCap that holds 0 for nothing standing (the old ruling 62) reads DISAGREES WITH RULING 78 and not 62',
+    /^DISAGREES WITH RULING 78 \(nothing standing should hold 75\) — THE GAME'S storeCap: .* nothing standing 0 /.test(ks.verify || '') && !/RULING 62/.test(ks.verify) && ks.dis, JSON.stringify({ verify: ks.verify, dis: ks.dis }));
+  await ev(`(()=>{const R=${PW}.Record; R.storeCap=R.__orig; delete R.__orig; return 1;})()`); await repaint();;
   // and an ADDITION rather than a floor is caught: keep + depot reads 480
-  await ev(`(()=>{const R=${PW}.Record; R.storeCap=(L,c,w)=>{const v=R.__orig(L,c,w); const k=L.buildings.some(b=>b!==w&&b.kind==='keep')?24000:0; return v===Infinity?k:v+k;}; return 1;})()`); await repaint();
+  await ev(`(()=>{const R=${PW}.Record; R.__orig=R.storeCap; R.storeCap=(L,c,w)=>{const v=R.__orig(L,c,w); const k=L.buildings.some(b=>b!==w&&b.kind==='keep')?24000:0; return v===Infinity?k:v+k;}; return 1;})()`); await repaint();
   ks = await cardOf('keepStore');
   ok('and a keep that ADDS 240 instead of being a floor is caught: DISAGREES WITH RULING 62, keep + depot I 480', /^DISAGREES WITH RULING 62 .* keep \+ depot I 480/.test(ks.verify) && ks.dis, ks.verify);
   await ev(`(()=>{const R=${PW}.Record; R.storeCap=R.__orig; delete R.__orig; return 1;})()`); await repaint();
@@ -1095,7 +1154,7 @@ let PROF = null, CH = null;
   // (2) the registry answers 0: nothing frozen, and the three controls are live
   await ev('window.__runningAt = null; window.__running = 0'); await rr();
   let fz = await fzRead();
-  ok('M4 item 17, runningGames() reads 0: nothing is frozen, all three guarded cards read NOT FROZEN — NO GAME IS RUNNING, and their controls are enabled',
+  ok('M4 item 17, runningGames() reads 0: nothing is frozen, all ' + FZ3.length + ' guarded cards read NOT FROZEN — NO GAME IS RUNNING, and their controls are enabled',
     JSON.stringify(await ev('JSON.stringify(deployerPage.freeze.frozen)')) === JSON.stringify('[]') &&
     fz.every((x) => x.t === 'NOT FROZEN — NO GAME IS RUNNING' && x.dis === false),
     JSON.stringify({ frozen: await ev('JSON.stringify(deployerPage.freeze.frozen)'), fz }));
@@ -1107,8 +1166,8 @@ let PROF = null, CH = null;
   const fzIds = JSON.parse(await ev('JSON.stringify(deployerPage.freeze.frozen)'));
   const db = JSON.parse(await ev(`JSON.stringify((()=>{const b=document.querySelector('[data-sw="demo"]'); return { t: b.textContent,
     u: b.nextElementSibling ? b.nextElementSibling.textContent : null, chain: window.__demo, field: !!deployerPage.val.demo };})())`));
-  ok('M4 item 17, runningGames() reads 2: all three are frozen, each card reads FROZEN — 2 GAMES ARE RUNNING and names GameRunning(2), each control is off with its setter named',
-    sameIds(fzIds) && fz.every((x) => x.t === 'FROZEN — 2 GAMES ARE RUNNING' && /GameRunning\(2\)/.test(x.why) && x.dis === true && x.title.includes(FZFN[x.id])),
+  ok('M4 item 17, runningGames() reads 2: all ' + FZ3.length + ' are frozen, each card reads FROZEN — 2 GAMES ARE RUNNING and names GameRunning(2), each control is off with its setter named, and none says its contract does not refuse',
+    fzIds.length === FZ3.length && sameIds(fzIds) && fz.length === FZ3.length && fz.every((x) => x.t === 'FROZEN — 2 GAMES ARE RUNNING' && /GameRunning\(2\)/.test(x.why) && !/does not refuse/.test(x.why) && x.dis === true && x.title.includes(FZFN[x.id])),
     JSON.stringify({ frozen: fzIds, fz: fz.map((x) => ({ id: x.id, t: x.t, dis: x.dis, title: x.title, g2: /GameRunning\(2\)/.test(x.why) })) }));
   ok('and the frozen demo switch shows what the CONTRACT holds, not the page\'s field: ' + (db.chain ? 'ON' : 'OFF') + ', as the contract holds it',
     db.chain !== db.field && db.t === (db.chain ? 'ON' : 'OFF') && db.u === 'as the contract holds it', JSON.stringify(db));
@@ -1125,7 +1184,7 @@ let PROF = null, CH = null;
   await ev('deployerPage.signSend()'); await sleep(500); await rr();
   fz = await fzRead();
   const lk4 = await ev('document.getElementById("lock").textContent');
-  ok('M4 item 17, the freeze on its own: RareRoles reads 1, RareGame 0 - the page lock is OPEN, yet all three guarded controls stay disabled',
+  ok('M4 item 17, the freeze on its own: RareRoles reads 1, RareGame 0 - the page lock is OPEN, yet all ' + FZ3.length + ' guarded controls stay disabled',
     (await ev('deployerPage.locked')) === false && /OPEN — THE CHAIN READS NO GAME RUNNING/.test(lk4) && (await ev('deployerPage.freeze.n')) === 1 &&
     sameIds(JSON.parse(await ev('JSON.stringify(deployerPage.freeze.frozen)'))) && fz.every((x) => x.dis === true),
     JSON.stringify({ locked: await ev('deployerPage.locked'), lock: lk4.slice(0, 120), frozen: await ev('JSON.stringify(deployerPage.freeze.frozen)'), dis: fz.map((x) => x.dis) }));
@@ -1133,11 +1192,16 @@ let PROF = null, CH = null;
     staged4 === true && (await ev('(window.__sent||[]).length')) === sent4 &&
     await ev('deployerPage.log.some(e=>/REFUSED, FROZEN: RareRoles\\.runningGames\\(\\) reads 1, so setDemoMode\\(bool\\) would answer GameRunning/.test(e.to))'),
     JSON.stringify({ staged4, sent: [sent4, await ev('(window.__sent||[]).length')], log: await ev('JSON.stringify(deployerPage.log.slice(0,2))') }));
-  // (5) the trading switches: not frozen by the contracts, and the page says the question is open rather than deciding it
-  const tr = JSON.parse(await ev(`JSON.stringify(deployerPage.rows.filter((r)=>r.trade).map((r)=>{const f=document.querySelector('[data-freeze="'+r.id+'"]'); return [r.id, f ? f.textContent : null];}))`));
+  // (5) the trading switches: ruling 74 froze them by name and RareMarket.setTradeable now refuses while a game runs
+  // (BINDING §80, 5050b5a), so each trading card reads FROZEN and says the CONTRACT refuses, naming GameRunning(1) - and
+  // THE FREEZE table's setTradeable row reads FROZEN, its note no longer saying the contract does not refuse.
+  const tr = JSON.parse(await ev(`JSON.stringify(deployerPage.rows.filter((r)=>r.trade).map((r)=>{const f=document.querySelector('[data-freeze="'+r.id+'"]'); return [r.id, f ? f.textContent : null, f && f.nextElementSibling ? f.nextElementSibling.textContent : ''];}))`));
   const trRow = await ev(`(()=>{const t=document.getElementById('freeze'); const r=t&&[...t.querySelectorAll('tr')].find((e)=>/RareMarket\\.setTradeable/.test(e.textContent)); return r ? r.textContent : 'no RareMarket.setTradeable row';})()`);
-  ok('M4 item 17, the ' + tr.length + ' trading cards each read NOT FROZEN BY THE CONTRACTS — THE QUESTION IS OPEN, and THE FREEZE lists RareMarket.setTradeable as NO — STILL OPEN',
-    tr.length > 0 && tr.every(([, t]) => t === 'NOT FROZEN BY THE CONTRACTS — THE QUESTION IS OPEN') && /NO — STILL OPEN/.test(trRow), JSON.stringify({ tr, trRow }));
+  const trNote = await ev(`(()=>{const t=document.getElementById('freeze'); return t ? t.textContent.replace(/\\s+/g,' ') : '';})()`);
+  ok('M4 item 17, the ' + tr.length + ' trading cards each read FROZEN — A GAME IS RUNNING and say the contract refuses setTradeable(address,bool) with GameRunning(1), and THE FREEZE lists RareMarket.setTradeable as FROZEN, never as unrefused',
+    tr.length === 4 && tr.every(([, t, w]) => t === 'FROZEN — A GAME IS RUNNING' && /refuses setTradeable\(address,bool\) with GameRunning\(1\)/.test(w) && !/does not refuse/.test(w))
+    && /FROZEN/.test(trRow) && !/NOT FROZEN|STILL OPEN/.test(trRow) && /contract refuses setTradeable too/.test(trNote) && !/does not refuse setTradeable/.test(trNote),
+    JSON.stringify({ tr: tr.map(([i, t, w]) => [i, t, w.slice(0, 160)]), trRow, note: (trNote.match(/The trading switches[^.]*\.[^.]*\.[^.]*\./) || [''])[0] }));
   // (6) the setGame card: a malformed address is refused and not staged; a good one is a setGame(address) transaction
   await ev('window.__runningAt = ' + JSON.stringify(RG)); await rr();
   if (await ev('deployerPage.pending.some((x)=>x.r.id==="demo")')) { await click('[data-sw="demo"]'); await sleep(200); }   // un-stage the refused flip
@@ -1150,7 +1214,7 @@ let PROF = null, CH = null;
   ok('a malformed address in the setGame card is REFUSED and nothing is staged',
     tb === 'ok' && (await ev('deployerPage.pending.some((x)=>x.r.id==="freezeGame")')) === false &&
     await ev('deployerPage.log.some(e=>/^0x1234 — REFUSED, not one 0x address/.test(e.to))'), JSON.stringify({ tb, log: await ev('JSON.stringify(deployerPage.log.slice(0,1))') }));
-  const NEWG = '0x00000000000000000000000000000000000000b2';
+  const NEWG = '0x00000000000000000000000000000000000000c2';
   const tg = await typeG(NEWG); await sleep(200);
   const pk = await ev('(deployerPage.pending.find((x)=>x.r.id==="freezeGame")||{kind:{}}).kind.k');
   await click('#applysw'); await sleep(300);
@@ -1164,6 +1228,63 @@ let PROF = null, CH = null;
     JSON.stringify({ tg, pk, sent: sg, want: wantG }));
   await ev('window.__runningAt = null');
   await ev('window.__running = null'); await ev('deployerPage.readRunning()'); await sleep(300);
+
+  // ---- M4 items 8 and 10 (aa0d193): one setClocks, the plan held to what was shown, a receipt, the trail, the sign-out --
+  const demoK = await ev('window.__demo');
+  // the lock open again: nothing running on either contract, read; the confirmation pressed if the page asks for it
+  await ev('window.__runningAt = null; window.__running = 0'); await ev('deployerPage.readRunning()'); await sleep(300);
+  if (await ev('deployerPage.locked') && await ev('!!document.getElementById("attest")')) { await click('#attest'); await sleep(300); }
+  ok('the lock is OPEN for M4 item 8: no game is running, so the length field takes a value', (await ev('deployerPage.locked')) === false && (await ev('!document.querySelector(\'[data-in="length"]\').disabled')) === true,
+    JSON.stringify({ locked: await ev('deployerPage.locked'), lock: (await ev('document.getElementById("lock").textContent')).slice(0, 120) }));
+  const setIn = (id, v) => ev(`(()=>{const i=document.querySelector('[data-in="${id}"]'); if(!i) return 'no '+${JSON.stringify(id)}; if(i.disabled) return 'disabled'; i.value=${JSON.stringify(v)}; i.dispatchEvent(new Event('change')); return 'ok';})()`);
+  const applyAfter = (id) => ev(`(()=>{const i=document.querySelector('[data-in="${id}"]'); const b=[...document.querySelectorAll('[data-apply]')].find((x)=>i.compareDocumentPosition(x)&Node.DOCUMENT_POSITION_FOLLOWING); if(!b) return 'no apply button'; b.click(); return b.id;})()`);
+  const SEL_CLK = SEL_('setClocks(uint64,uint64,uint64)');
+  const typedLen = await setIn('length', 200); await sleep(200);
+  const apId = await applyAfter('length'); await sleep(400);
+  const cfC = await ev("document.getElementById('confirm').textContent.replace(/\\s+/g,' ')");
+  const cdC = (cfC.match(/calldata (0x[0-9a-f]+)/) || [])[1] || '';
+  const wC = cdC.startsWith(SEL_CLK) ? cdC.slice(10).match(/.{64}/g).map((w) => Number(BigInt('0x' + w))) : [];
+  ok('M4 item 8: the game length set to 200 h is ONE RareGame.setClocks transaction carrying joinWindow and startDelay AS THE CHAIN HOLDS THEM - calldata words [720000, 86400, 3600]',
+    typedLen === 'ok' && /RareGame\.setClocks/.test(cfC) && JSON.stringify(wC) === JSON.stringify([720000, 86400, 3600]) && (cfC.match(/UNCHANGED, as the chain holds it/g) || []).length === 2,
+    JSON.stringify({ typedLen, apId, wC, cd: cdC.slice(0, 12) }));
+  // the chain moves under the screen: joinWindow now reads 7200 - the plan rebuilt at the signature is not the one shown
+  const sentC0 = await ev('(window.__sent||[]).length');
+  await ev(`window.__answers = { '${SEL_('joinWindow()')}': 7200 }`); await ev('deployerPage.readChain()'); await sleep(400);
+  await ev('deployerPage.signSend()'); await sleep(500);
+  ok('M4 item 8: when the chain moves under the confirm screen (joinWindow 86400 -> 7200), signing REFUSES and sends nothing - what would be sent is not what was shown',
+    (await ev('(window.__sent||[]).length')) === sentC0 && await ev('deployerPage.log.some(e=>/REFUSED — what would be sent changed after the confirm screen was drawn/.test(e.to))'),
+    JSON.stringify({ sent: [sentC0, await ev('(window.__sent||[]).length')], log: await ev('JSON.stringify(deployerPage.log.slice(0,2))') }));
+  await ev('window.__answers = {}'); await ev('deployerPage.readChain()'); await sleep(400);
+  // shown again and signed: sent, and the receipt the stub chain gives (status 1, block 0x30) is written onto the line
+  await ev(`window.__receipt = { status: '0x1', blockNumber: '0x30' }`);
+  await applyAfter('length'); await sleep(400);
+  await ev('deployerPage.signSend()'); await sleep(1800);
+  const sentC = JSON.parse(await ev(`JSON.stringify((window.__sent||[]).slice(${sentC0}))`));
+  await ev('window.__demo = ' + JSON.stringify(demoK));                 // the stub wallet flips its demo flag on any send
+  ok('M4 item 8: signed, it is sent once to RareGame as setClocks, and the record line says MINED in block 48 - the receipt asked of the chain, not the wallet',
+    sentC.length === 1 && String(sentC[0].to).toLowerCase() === GAME.toLowerCase() && String(sentC[0].data).startsWith(SEL_CLK)
+    && await ev('deployerPage.log.some(e=>/sent as 0x(ab)+.* — MINED in block 48/.test(e.to))'),
+    JSON.stringify({ sentC, log: await ev('JSON.stringify(deployerPage.log.slice(0,3))') }));
+  await ev('window.__receipt = null');
+  // M4 item 10: THE RECORD, off the chain - one ClocksSet event the stub chain holds, decoded by the page's own declarations
+  const topicClk = CH_.hex(CH_.keccak256(new TextEncoder().encode('ClocksSet(uint64,uint64,uint64,address)')));
+  const W64 = (n) => BigInt(n).toString(16).padStart(64, '0');
+  await ev(`window.__logs = [{ address: '${GAME}', topics: ['${topicClk}'], data: '0x${W64(720000)}${W64(86400)}${W64(3600)}${W64(parseInt('0x' + 'aa'.repeat(20), 16))}', blockNumber: '0x30', logIndex: '0x0', transactionHash: '0x${'ab'.repeat(32)}' }]`);
+  const trl = JSON.parse(await ev('deployerPage.readTrail().then((t)=>JSON.stringify(t))'));
+  const row0 = (trl.rows || [])[0] || {};
+  ok('M4 item 10: the trail reads eth_getLogs over the contracts on record and decodes the stub chain\'s ClocksSet: rareGame, block 48, length 720000, joinWindow 86400, startDelay 3600',
+    trl.state === 'read' && trl.rows.length === 1 && row0.contract === 'rareGame' && row0.name === 'ClocksSet' && row0.block === 48 &&
+    JSON.stringify(row0.args.slice(0, 3)) === JSON.stringify([['length', '720000'], ['joinWindow', '86400'], ['startDelay', '3600']]), JSON.stringify({ state: trl.state, why: trl.why, row0 }));
+  await ev('window.__logs = null');
+  // a field edited and never sent does not survive a sign-out: the next session shows what the chain holds
+  const typed199 = await setIn('length', 199); await sleep(200);
+  const shown199 = await ev(`document.querySelector('[data-in="length"]').value`);
+  await click('#signout'); await sleep(500);
+  await wallet({ key: TEST_VECTOR_KEY_DEPLOYER, registry: REGISTRY });
+  await click('#doconnect'); await sleep(500); await click('#dosign'); await sleep(1500);
+  const lenAfter = await ev(`(()=>{const i=document.querySelector('[data-in="length"]'); return i ? i.value : 'no field';})()`);
+  ok('a field edited and never sent does NOT survive a sign-out: signed back in, the game length shows 168 (the chain), not the 199 typed, and nothing is staged',
+    typed199 === 'ok' && shown199 === '199' && lenAfter === '168' && (await ev('deployerPage.pending.length')) === 0, JSON.stringify({ typed199, shown199, lenAfter, pending: await ev('JSON.stringify(deployerPage.pending)') }));
 
   ok('nothing 404d and nothing was logged as an error, over the page and the three it probes', watch.clean(), watch.why());
   console.log(bad ? '\n' + bad + ' step(s) failed' : '\nthe deployer page refuses, derives and reads back');
